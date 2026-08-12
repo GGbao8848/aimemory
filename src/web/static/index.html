@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>aimemory · 企业 AI 记忆库</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">🧠 aimemory <span class="tag">企业 AI 记忆库</span></div>
+    <div id="user-area" class="user-area"></div>
+  </header>
+
+  <!-- 未登录视图 -->
+  <section id="view-login" class="view hidden">
+    <div class="card login-card">
+      <h1>登录记忆平台</h1>
+      <p class="muted">通过公司统一登录平台（Keycloak）登录后，即可管理你的记忆、生成接入密钥。</p>
+      <a class="btn btn-primary btn-block" href="/auth/login">通过登录平台登录</a>
+    </div>
+  </section>
+
+  <!-- 已登录视图 -->
+  <section id="view-app" class="view hidden">
+    <div class="cols">
+      <div class="col-main">
+        <div class="card">
+          <div class="card-head">
+            <h2>我的记忆</h2>
+            <form id="search-form" class="search-form">
+              <input id="search-input" type="text" placeholder="搜索记忆…（关键词，支持中文子串）" />
+              <button class="btn btn-ghost" type="submit">搜索</button>
+              <button id="search-clear" class="btn btn-ghost" type="button" hidden>清除</button>
+            </form>
+          </div>
+          <form id="add-form" class="add-form">
+            <textarea id="add-text" rows="2" placeholder="添加一条新记忆，例如：生产环境 Keycloak 部署在 18443 端口，管理密码在 mykeycloak/.env 中…"></textarea>
+            <div class="add-row">
+              <input id="add-metadata" type="text" placeholder="元数据（JSON，可选，如 {\"source\":\"manual\"}）" />
+              <button class="btn btn-primary" type="submit">添加记忆</button>
+            </div>
+          </form>
+          <div id="memory-list" class="memory-list"></div>
+          <div id="pagination" class="pagination"></div>
+        </div>
+      </div>
+
+      <div class="col-side">
+        <div class="card">
+          <h2>🔑 接入密钥</h2>
+          <p class="muted">生成密钥后，把它填进 MCP 配置 JSON 供其他 agent 使用。明文只显示一次。</p>
+          <form id="key-form" class="key-form">
+            <input id="key-name" type="text" placeholder="密钥名称（如 claude-code）" />
+            <button class="btn btn-primary" type="submit">生成密钥</button>
+          </form>
+          <div id="new-key" class="new-key hidden">
+            <p>请立即复制保存：</p>
+            <code id="new-key-value" class="key-value"></code>
+            <button id="copy-new-key" class="btn btn-ghost" type="button">复制</button>
+          </div>
+          <ul id="key-list" class="key-list"></ul>
+        </div>
+
+        <div class="card">
+          <h2>🔌 MCP 配置</h2>
+          <p class="muted">复制以下 JSON 到你的 agent 的 MCP 客户端配置中即可接入（url 指向本服务器内网地址）。</p>
+          <pre id="mcp-json" class="mcp-json"></pre>
+          <button id="copy-json" class="btn btn-primary btn-block" type="button">复制 JSON</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/app.js"></script>
+</body>
+</html>
