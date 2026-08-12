@@ -43,6 +43,7 @@
 npm install
 
 # 2. 配置 .env（参考 .env.example；KEYCLOAK_ADMIN_* 会自动读 mykeycloak/.env）
+#    迁移到其他公司/服务器时：只改 KEYCLOAK_URL 即可对接任意 Keycloak，详见下文「对接其他主机的 Keycloak」
 cp .env.example .env
 
 # 3. 初始化 Keycloak（幂等：创建 realm=aimemory、client=aimemory-web、测试用户 alice/bob/charlie）
@@ -142,6 +143,64 @@ pm2 restart aimemory-mcp        # 更新代码后重启
 | `KEYCLOAK_ADMIN_USER` / `KEYCLOAK_ADMIN_PASSWORD` | 初始化脚本用（可读 mykeycloak/.env） |
 | `TEST_USERS` / `TEST_USERS_PASSWORD` | 测试用户 |
 | `SESSION_SECRET` | Web 会话签名密钥（首次启动自动生成） |
+
+## 对接其他主机的 Keycloak（迁移部署）
+
+本项目**不绑定特定的 Keycloak 部署**。当前开发机默认读 `../mykeycloak/.env` 的管理员凭据（仅为开发便利）；**迁移到其他公司/服务器时，只需改 `.env` 配置，即可对接任意主机、任意端口的 Keycloak**——甚至对方用 HTTPS/域名也直接支持。
+
+### 关键认知：服务运行期不需要管理员权限
+
+服务运行（MCP / REST / Web 登录）只依赖下面 3 个配置，通过 Keycloak 的 **OIDC 发现端点**自动获取公钥（JWKS）、登录/换 token 端点，全程无需任何管理员凭据：
+
+| 配置 | 说明 | 迁移示例 |
+|---|---|---|
+| `KEYCLOAK_URL` | 对方 Keycloak 业务地址（含端口/协议） | `http://10.20.30.40:8080` 或 `https://sso.company.com` |
+| `KEYCLOAK_REALM` | 业务 realm | 可沿用 `aimemory`，也可用对方已有 realm |
+| `KEYCLOAK_CLIENT_ID` | 应用 client | 可沿用 `aimemory-web` |
+
+> JWT 验签**自动适配**：服务从 `{KEYCLOAK_URL}/realms/{REALM}/.well-known/openid-configuration` 实时拉取 JWKS，**无需手动配置任何公钥**。
+
+### 迁移步骤（新机器）
+
+```bash
+# 1. 拷贝整个项目（务必包含 data/ 目录——那是全部记忆数据）
+#    示例: rsync -av aimemory/ user@new-server:/opt/aimemory/
+
+# 2. 配置 .env：把 KEYCLOAK_URL 改成对方 Keycloak 地址
+cp .env.example .env
+#    编辑 .env:
+#      KEYCLOAK_URL=http://<对方Keycloak>:<端口>
+#      PUBLIC_BASE_URL=http://<新机器内网IP>:18543   # 可选：固定管理页生成的 MCP JSON 地址
+
+# 3. 安装依赖并初始化 Keycloak（幂等）
+npm install
+npm run setup-keycloak
+```
+
+`setup-keycloak` 按两种对接方式工作（幂等，可重复执行）：
+
+- **方式 A · 给管理员凭据（自动创建）**：把对方 master realm 的管理员账号密码填入 `.env` 的 `KEYCLOAK_ADMIN_USER` / `KEYCLOAK_ADMIN_PASSWORD`，脚本会在对方 Keycloak 上自动创建 realm、client、测试用户，并**自动把新机器的 `IP:端口` 注册进 client 的回调地址**。
+- **方式 B · 对方已备好 realm/client（无管理员权限）**：让对方在管理台手动创建：
+  - realm（或复用已有 realm）+ client（`public` 类型、开启 PKCE / S256）
+  - client 的 **Valid redirect URIs** 必须包含：
+    - `http://<新机器IP>:18543/auth/callback`（授权回调）
+    - `http://<新机器IP>:18543/`（登出回跳）
+  - 脚本检测到 realm/client 已存在会自动跳过创建，仅补齐回调地址
+
+```bash
+# 4. pm2 启动
+npm install -g pm2
+pm2 start ecosystem.config.js && pm2 save
+```
+
+### 常见问题
+
+| 现象 | 原因与解决 |
+|---|---|
+| 登录跳回后报「Invalid redirect uri」 | client 的 Valid redirect URIs 没有新机器的 host:端口 → 按方式 B 手动补上，或重跑 `setup-keycloak` |
+| `setup-keycloak` 提示「正在对接非本机 Keycloak」 | 脚本检测到非 localhost 地址，属正常提示；确认网络连通与凭据来源后继续即可 |
+| 员工复制出来的 JSON url 还是旧机器 IP | `.env` 设 `PUBLIC_BASE_URL=http://<新机器IP>:18543`，或在管理页直接用浏览器地址访问后重新复制 |
+| 对方 Keycloak 是 HTTPS/域名 | `KEYCLOAK_URL` 直接填 `https://...` 即可，OIDC 流程与验签自动走标准协议 |
 
 ## 数据与安全
 

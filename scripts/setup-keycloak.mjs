@@ -171,6 +171,13 @@ async function ensureUser(username) {
 // ---- 执行 ----
 async function main() {
   console.log(`Keycloak: ${KEYCLOAK_URL} | realm: ${REALM} | client: ${CLIENT_ID}`);
+  // 非本机 Keycloak：提示确认网络可达与凭据来源（迁移场景）
+  if (!/localhost|127\.0\.0\.1|0\.0\.0\.0/.test(KEYCLOAK_URL)) {
+    console.log('⚠ 正在对接非本机 Keycloak（迁移场景）。确认：');
+    console.log('  1) 本机能访问 ' + KEYCLOAK_URL + '（防火墙/内网连通）');
+    console.log('  2) 管理员凭据 KEYCLOAK_ADMIN_USER/PASSWORD 已提供（放本项目 .env，或已存在该 Keycloak 部署的 .env）');
+    console.log('  3) 若目标 realm/client 已存在：脚本会直接复用，仅补齐新机器的回调地址');
+  }
   await getAdminToken();
   await ensureRealm();
   await ensureClient();
