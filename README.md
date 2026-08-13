@@ -60,6 +60,9 @@ curl http://localhost:18543/            # Web 平台
 curl http://localhost:18443/health/ready  # Keycloak 健康
 ```
 
+> ⚠ 本机实际部署（复用现有 Keycloak / br-platform realm）：
+> 本机 Keycloak 业务端口为 **6543**（BR-Agent 等 agent 项目同用），`KEYCLOAK_URL=http://localhost:6543`、`KEYCLOAK_REALM=br-platform`（直接复用其现有用户 admin/br0001~br0004…，**不新建测试用户**：`.env` 里 `TEST_USERS=` 留空即跳过）。`setup-keycloak` 只新建 client `aimemory-web`（含本机 IP:18543 回调）。详见 `.env` 注释。
+
 ### pm2 上线
 
 ```bash

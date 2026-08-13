@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
-    "better-sqlite3": "^11.10.0",
+    "better-sqlite3": "^13.0.3",
     "cookie-parser": "^1.4.7",
     "express": "^4.21.2",
     "jose": "^5.9.6"

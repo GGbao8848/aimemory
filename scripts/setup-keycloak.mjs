@@ -35,7 +35,8 @@ const ADMIN_PASSWORD = process.env.KEYCLOAK_ADMIN_PASSWORD || localEnv.KEYCLOAK_
 const REALM = process.env.KEYCLOAK_REALM || localEnv.KEYCLOAK_REALM || 'aimemory';
 const CLIENT_ID = process.env.KEYCLOAK_CLIENT_ID || localEnv.KEYCLOAK_CLIENT_ID || 'aimemory-web';
 const PORT = process.env.PORT || localEnv.PORT || '18543';
-const TEST_USERS = (process.env.TEST_USERS || localEnv.TEST_USERS || 'alice,bob,charlie').split(',').filter(Boolean);
+// 用 ?? 而非 ||：显式留空的 TEST_USERS=（复用现有用户、不创建测试用户）应被尊重，不回退到默认
+const TEST_USERS = (process.env.TEST_USERS ?? localEnv.TEST_USERS ?? 'alice,bob,charlie').split(',').map((s) => s.trim()).filter(Boolean);
 const TEST_PASSWORD = process.env.TEST_USERS_PASSWORD || localEnv.TEST_USERS_PASSWORD || 'aimemory-test-2026';
 
 if (!ADMIN_PASSWORD) {
