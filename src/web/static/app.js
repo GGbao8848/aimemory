@@ -44,6 +44,16 @@ function esc(s) {
 // ===== 登录状态 =====
 
 async function init() {
+  // 单点登录（SSO）：始终先经 Keycloak 校验——同浏览器已在其他应用（如 BR-Agent 9005）登录 → 免密回跳；
+  // 未登录 → 显示 Keycloak 登录页。这保证 aim_session 与当前 Keycloak SSO 用户一致，
+  // 单点登出（SLO：在任意应用登出 → 本应用也退出）才能双向生效。
+  const q = new URLSearchParams(window.location.search);
+  if (q.get('logged') !== '1') {
+    window.location.replace('/auth/login'); // 走 Keycloak；回调会带 /?logged=1 回来
+    return;
+  }
+  // 刚从 Keycloak 回跳：清掉标记，避免刷新后又跳登录
+  history.replaceState({}, '', '/');
   try {
     currentUser = await api('/api/me');
     if (currentUser.userId) showApp();
@@ -52,9 +62,9 @@ async function init() {
 }
 
 function showLogin() {
-  $('#view-app').classList.add('hidden');
-  $('#view-login').classList.remove('hidden');
-  $('#user-area').innerHTML = '';
+  // 单点登录：与 BR-Agent 等应用共用 Keycloak SSO 会话，直接跳登录即可免密直达。
+  // 若浏览器未登录过 Keycloak，会进入 Keycloak 登录页；已登录则自动回跳（SSO）。
+  window.location.href = '/auth/login';
 }
 
 function showApp() {

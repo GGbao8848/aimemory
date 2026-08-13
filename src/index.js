@@ -62,7 +62,8 @@ app.get('/auth/callback', async (req, res) => {
     }
     res.clearCookie('kc_state');
     res.clearCookie('kc_verifier');
-    res.redirect('/');
+    // logged=1 标记：前端据此避免「回跳首页后又跳登录」的死循环（SSO 校验用）
+    res.redirect('/?logged=1');
   } catch (e) {
     res.status(500).send(`登录回调失败: ${e.message}`);
   }
@@ -78,6 +79,22 @@ app.get('/auth/logout', async (req, res) => {
   // 跳到 Keycloak 登出页（携带 id_token），再回首页
   const kcLogout = await keycloak.buildLogoutUrl(web.buildRedirectUri(req, '/'), req.cookies?.kc_id_token);
   res.redirect(kcLogout);
+});
+
+// ===== 单点登出（SLO）：Keycloak front-channel logout iframe 加载本端点 =====
+// Keycloak 在某 client 登出（end_session）后，会以 iframe 加载本 realm 下所有配置了
+// frontChannelLogoutUri 的 client 的对应 URL（浏览器带 cookie 请求）——本端点据此清除
+// 本地会话 cookie，实现「在 BR-Agent 登出 → aimemory 也退出」。必须返回 200（iframe 要求）。
+app.get('/slo-logout', (req, res) => {
+  const sid = req.cookies?.aim_session;
+  if (sid) {
+    repo.deleteSession(sid);
+    res.clearCookie('aim_session');
+  }
+  res.clearCookie('kc_id_token');
+  res.clearCookie('kc_state');
+  res.clearCookie('kc_verifier');
+  res.status(200).type('text/plain').send('ok');
 });
 
 // ===== 启动 =====
