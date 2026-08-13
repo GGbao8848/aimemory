@@ -379,6 +379,10 @@ pm2 save                     # 持久化实例数（重启机器后保持 2 实�
 3. 实现方式：加一层外部 LLM 适配（OpenAI 兼容），存储层保持不变；本机无 ollama，接 DeepSeek/通义等任意 OpenAI 兼容 API 即可
 4. 每一档扩展都建议单独验证（如新增 `search_memories` 语义召回对比用例）后再并入主线
 
+## 开发提示
+
+- **推 GitHub 需走代理**（本机未配置全局 git 代理时）：`git -c http.proxy=http://127.0.0.1:7890 push origin main`（单次生效，不改全局配置）
+
 ## 参考
 
 - 产品构想：本仓库旧版 `README.md` 已归档为本文档前身（多租户设计见 mykeycloak 项目 docs）
