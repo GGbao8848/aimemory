@@ -182,11 +182,11 @@ function revokeApiKey(id, userId) {
 
 // ============ Web 会话 ============
 
-function createSession(id, userId, ttlMs) {
+function createSession(id, userId, ttlMs, username = null) {
   const ts = now();
   db.prepare(
-    'INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)'
-  ).run(id, userId, ts, new Date(Date.now() + ttlMs).toISOString());
+    'INSERT INTO sessions (id, user_id, username, created_at, expires_at) VALUES (?, ?, ?, ?, ?)'
+  ).run(id, userId, username, ts, new Date(Date.now() + ttlMs).toISOString());
 }
 
 function getSession(id) {

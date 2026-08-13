@@ -70,10 +70,17 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
 CREATE TABLE IF NOT EXISTS sessions (
   id         TEXT PRIMARY KEY,
   user_id    TEXT NOT NULL,
+  username   TEXT,
   created_at TEXT NOT NULL,
   expires_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at);
 `);
+
+// 老库兼容：sessions 表早期无 username 列 → 补充（幂等）
+const sessionCols = db.prepare("PRAGMA table_info(sessions)").all().map((c) => c.name);
+if (!sessionCols.includes('username')) {
+  db.exec('ALTER TABLE sessions ADD COLUMN username TEXT');
+}
 
 module.exports = db;

@@ -50,7 +50,7 @@ app.get('/auth/callback', async (req, res) => {
     const { user, tokens: kcTokens } = await keycloak.exchangeCode(redirectUri, code, req.cookies.kc_verifier);
     // 建立本地会话
     const sid = require('crypto').randomBytes(24).toString('hex');
-    repo.createSession(sid, user.id, config.sessionTtlMs);
+    repo.createSession(sid, user.id, config.sessionTtlMs, user.username);
     res.cookie('aim_session', sid, {
       httpOnly: true, sameSite: 'lax', maxAge: config.sessionTtlMs,
     });

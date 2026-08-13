@@ -60,8 +60,10 @@ function showLogin() {
 function showApp() {
   $('#view-login').classList.add('hidden');
   $('#view-app').classList.remove('hidden');
+  // 优先显示 Keycloak 用户名（br0004 等）；老会话无 username 时回退到 UUID 前 8 位
+  const who = currentUser.username || currentUser.userId.slice(0, 8);
   $('#user-area').innerHTML =
-    `<span class="who">${esc(currentUser.userId.slice(0, 8))}</span>` +
+    `<span class="who">${esc(who)}</span>` +
     `<a class="btn btn-ghost" href="/auth/logout">退出</a>`;
   loadKeys().then(() => loadMemories());
 }

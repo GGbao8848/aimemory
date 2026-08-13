@@ -22,12 +22,12 @@ function resolveIdentity(req) {
   const m = h.match(/^Token\s+(.+)$/i);
   if (m) {
     const userId = tokens.verify(m[1].trim());
-    if (userId) return { userId, via: 'token' };
+    if (userId) return { userId, via: 'token', username: null };
   }
   const sid = req.cookies?.aim_session;
   if (sid) {
     const s = repo.getSession(sid);
-    if (s) return { userId: s.user_id, via: 'session' };
+    if (s) return { userId: s.user_id, via: 'session', username: s.username || null };
   }
   return null;
 }
@@ -50,7 +50,7 @@ function buildRedirectUri(req, pathname = '/auth/callback') {
 apiRouter.get('/me', wrap(async (req, res) => {
   const id = resolveIdentity(req);
   if (!id) return res.status(401).json({ error: '未授权' });
-  res.json({ userId: id.userId, via: id.via });
+  res.json({ userId: id.userId, username: id.username, via: id.via });
 }));
 
 // ===== 记忆 CRUD =====
