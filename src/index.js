@@ -162,6 +162,17 @@ app.get('/connect', (req, res) => {
     };
     document.getElementById('copy-code').onclick = () => cp('code');
     document.getElementById('copy-token').onclick = () => cp('token');
+    // 自动回传连接码给来源窗口（如插件市场演示）：同源/内网白名单，并尝试自动关闭本页
+    (function () {
+      const params = new URLSearchParams(location.search);
+      const origin = params.get('origin') || '';
+      const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1|(\d{1,3}\.){3}\d{1,3})(:\d+)?$/.test(origin);
+      if (isLocal && window.opener && window.opener !== window) {
+        const code = document.getElementById('code').textContent.trim();
+        try { window.opener.postMessage({ type: 'aimemory-connect', code }, origin); } catch (e) {}
+        setTimeout(() => { try { window.close(); } catch (e) {} }, 1200);
+      }
+    })();
   </script>
 </body>
 </html>`);
