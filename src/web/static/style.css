@@ -198,3 +198,19 @@ input:focus, textarea:focus { outline: none; border-color: var(--accent); }
   box-shadow: 0 8px 24px rgba(0,0,0,.4);
   z-index: 99;
 }
+
+/* ===== 接入指南 ===== */
+.steps { margin: 10px 0 12px; padding-left: 20px; }
+.steps li { margin-bottom: 8px; line-height: 1.6; }
+.steps code, .tool-list code {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  word-break: break-all;
+}
+.tool-list { margin: 8px 0; padding-left: 18px; }
+.tool-list li { margin-bottom: 6px; font-size: 13px; }
+.small { font-size: 12px; }

@@ -68,6 +68,28 @@
           <pre id="mcp-json" class="mcp-json"></pre>
           <button id="copy-json" class="btn btn-primary btn-block" type="button">复制 JSON</button>
         </div>
+
+        <div class="card">
+          <h2>📦 ZCode 插件安装（推荐）</h2>
+          <p class="muted">批量接入首选：装插件后 MCP 工具自动注册，agent 还会自动学会"何时该写/查记忆"。替代手动复制 JSON。</p>
+          <ol class="steps">
+            <li><b>获取插件目录</b>：公司局域网 Git 拉取 aimemory 仓库，取其中的 <code>plugin/</code> 目录（管理员可分发拷贝）</li>
+            <li><b>添加本地 marketplace</b>：ZCode → Settings → Plugin Management → Discover →「+」→ <b>Add local folder</b> → 指向 <code>plugin/</code></li>
+            <li><b>安装并配密钥</b>：安装 aimemory 插件 → 运行 <b><code>/aimemory-key</code></b> 按引导填个人密钥 → <b><code>/aimemory status</code></b> 验证</li>
+          </ol>
+          <p class="muted small">插件含 skill（记忆使用准则）与命令 <code>/aimemory</code>、<code>/aimemory-key</code>；安装后 agent 自动把部署经验、踩坑、偏好写入记忆，新任务先检索复用。</p>
+        </div>
+
+        <div class="card">
+          <h2>🧰 MCP 工具一览</h2>
+          <ul class="tool-list">
+            <li><code>add_memory</code> — 写入一条记忆</li>
+            <li><code>search_memories</code> — 关键词检索（支持中文子串）</li>
+            <li><code>get_memories</code> / <code>get_memory</code> — 列出 / 单条（含修改历史）</li>
+            <li><code>update_memory</code> / <code>delete_memory</code> — 修正 / 删除</li>
+          </ul>
+          <p class="muted small">与 mem0 官方 MCP 参数同构；<code>infer</code> / <code>rerank</code> / <code>threshold</code> 为兼容保留字段（本实例为关键词检索）。</p>
+        </div>
       </div>
     </div>
   </section>
