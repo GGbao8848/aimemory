@@ -171,8 +171,10 @@ async function ensureClient() {
 async function ensureBrAgentClient() {
   const BR_CLIENT_ID = 'br-agent';
   const { data } = await kc(`/admin/realms/${REALM}/clients?clientId=${BR_CLIENT_ID}`);
+  // CS 模式：BR-Agent 只有桌面客户端（无 web），SLO 走 back-channel（server 广播到桌面 WS）；
+  // front-channel logout（指向 web 的 slo-logout 页）已随 web 移除，显式清除避免 Keycloak 加载失效 URL。
   const attributes = {
-    'frontchannel.logout.url': `http://${IP}:${BR_AGENT_WEB_PORT}/slo-logout`,
+    'frontchannel.logout.url': '',
     'backchannel.logout.url': `http://localhost:${BR_AGENT_SERVER_PORT}/api/auth/kc-logout`,
     'backchannel.logout.session.required': 'true',
   };
@@ -180,7 +182,7 @@ async function ensureBrAgentClient() {
     const existing = data[0];
     const current = existing.attributes || {};
     const needsUpdate =
-      current['frontchannel.logout.url'] !== attributes['frontchannel.logout.url'] ||
+      (current['frontchannel.logout.url'] || '') !== attributes['frontchannel.logout.url'] ||
       current['backchannel.logout.url'] !== attributes['backchannel.logout.url'] ||
       current['backchannel.logout.session.required'] !== attributes['backchannel.logout.session.required'];
     if (needsUpdate) {
@@ -188,7 +190,7 @@ async function ensureBrAgentClient() {
         method: 'PUT',
         body: { ...existing, attributes: { ...current, ...attributes } },
       });
-      console.log(`✓ 已更新 client ${BR_CLIENT_ID}（front/back-channel logout）`);
+      console.log(`✓ 已更新 client ${BR_CLIENT_ID}（back-channel logout，front-channel 已清）`);
     } else {
       console.log(`✓ client ${BR_CLIENT_ID} 已配置单点登出，跳过`);
     }
