@@ -97,31 +97,27 @@ pm2 restart aimemory-mcp        # 更新代码后重启
 4. 之后 agent 就能调用记忆工具：写 `add_memory`、查 `search_memories`、管 `get_memories` 等。
    每个员工的数据**互相隔离**，密钥吊销后立即失效。
 
-## 插件接入（推荐，免手填 JSON）
+## ZCode 插件接入（推荐，免手填 JSON）
 
-> 手动复制 JSON 适合一次性接入；**批量给公司员工使用，推荐直接装插件**：添加 marketplace → 安装 → 填一次密钥，MCP 工具自动注册，agent 还会自动学会"什么时候该写/查记忆"。
-> **双客户端支持**：同一份 `plugin/` 目录同时兼容 **ZCode**（MCP 一键注入）与 **Claude Code**（skill/命令走插件，MCP 走标准配置），详见 [plugin/README.md](plugin/README.md)。
+> 手动复制 JSON 适合一次性接入；**批量给 ZCode 用户（公司员工）使用，推荐直接装插件**：添加 marketplace → 安装 → 填一次密钥，MCP 工具自动注册，agent 还会自动学会"什么时候该写/查记忆"。
 
-插件本体在仓库的 `plugin/` 目录（ZCode 与 Claude Code 双格式）：
+插件本体在仓库的 `plugin/` 目录（标准 ZCode 插件格式），详见 [plugin/README.md](plugin/README.md)。
 
 ```text
 plugin/
-├── .zcode-plugin/plugin.json    # ZCode 清单：userConfig（server_url / api_key）
-├── .claude-plugin/              # Claude Code 清单 + 本地 marketplace 声明
-├── .mcp.json                    # MCP 服务器声明（http 远程）
-├── skills/aimemory/SKILL.md     # 记忆使用准则（两端共享）
-├── commands/                    # /aimemory 与 /aimemory-key（两端共享）
-└── README.md                    # 安装与配置指引（双客户端）
+├── .zcode-plugin/plugin.json   # 清单：userConfig（server_url / api_key）
+├── .mcp.json                   # MCP 服务器声明（http 远程）
+├── skills/aimemory/SKILL.md    # 记忆使用准则
+├── commands/                   # /aimemory 与 /aimemory-key
+└── README.md                   # 安装与配置指引
 ```
 
-**ZCode 员工安装（三步）**：
+**员工安装（三步）**：
 1. 获取 `plugin/` 目录（公司局域网 Git 拉取本仓库，或管理员分发的拷贝）
 2. ZCode → Settings → Plugin Management → Discover →「+」→ Add local folder → 指向 `plugin/`
 3. 安装 aimemory 插件 → 运行 **`/aimemory-key`** 按引导配好个人 API Key → `/aimemory status` 验证
 
-**Claude Code 员工安装**：`claude plugin marketplace add <plugin目录>` + `claude plugin install aimemory` 装 skill/命令，MCP 服务器用 `claude mcp add` 或 `~/.claude/settings.json` 标准配置（详见 plugin/README.md）。
-
-**管理员分发**：本插件随主仓库走局域网 Git（员工 git pull 即更新）；将来要做独立插件市场时，把整个 `plugin/` 目录抽成独立仓库即可（双格式均为标准结构，抽出即用，无需改造）。
+**管理员分发**：本插件随主仓库走局域网 Git（员工 git pull 即更新）；将来要做独立插件市场时，把整个 `plugin/` 目录抽成独立仓库即可（标准格式，抽出即用，无需改造）。
 
 ## MCP 工具一览
 
