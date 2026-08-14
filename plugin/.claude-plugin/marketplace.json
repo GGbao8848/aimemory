@@ -1,0 +1,11 @@
+{
+  "name": "aimemory",
+  "version": "0.1.0",
+  "description": "企业 AI 记忆库插件市场：含 aimemory 插件（skill + /aimemory 命令）。MCP 服务器在 ZCode 由插件注入，Claude Code 请按 README 用标准配置。",
+  "plugins": [
+    {
+      "name": "aimemory",
+      "source": "./"
+    }
+  ]
+}
