@@ -166,6 +166,20 @@ function renderMemories(items, total) {
 
 // ===== 事件绑定 =====
 
+// 明文 / 元数据 切换（一次只显示一个输入框）
+function setAddMode(mode) {
+  document.querySelectorAll('.seg-btn').forEach((b) => {
+    const active = b.dataset.seg === mode;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  $('#add-text').classList.toggle('hidden', mode !== 'text');
+  $('#add-metadata').classList.toggle('hidden', mode !== 'metadata');
+}
+document.querySelectorAll('.seg-btn').forEach((btn) => {
+  btn.addEventListener('click', () => setAddMode(btn.dataset.seg));
+});
+
 $('#add-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const text = $('#add-text').value.trim();
@@ -180,6 +194,7 @@ $('#add-form').addEventListener('submit', async (e) => {
     await api('/api/memories', { method: 'POST', body: JSON.stringify({ text, metadata }) });
     $('#add-text').value = '';
     $('#add-metadata').value = '';
+    setAddMode('text'); // 重置回明文模式
     toast('已添加');
     loadMemories();
   } catch (e2) { toast(e2.message); }

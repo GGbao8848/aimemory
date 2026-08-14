@@ -90,9 +90,13 @@
             </form>
           </div>
           <form id="add-form" class="add-form">
+            <div class="seg" role="tablist" aria-label="添加内容类型">
+              <button type="button" class="seg-btn active" data-seg="text" role="tab" aria-selected="true">明文</button>
+              <button type="button" class="seg-btn" data-seg="metadata" role="tab" aria-selected="false">元数据</button>
+            </div>
             <textarea id="add-text" rows="2" placeholder="添加一条新记忆，例如：生产环境 Keycloak 部署在 18443 端口，管理密码在 mykeycloak/.env 中…"></textarea>
+            <input id="add-metadata" type="text" class="hidden" placeholder='元数据（JSON），如 {"source":"manual"}；内容仍必填' />
             <div class="add-row">
-              <input id="add-metadata" type="text" placeholder='元数据（JSON，可选，如 {"source":"manual"}）' />
               <button class="btn btn-primary" type="submit">添加记忆</button>
             </div>
           </form>

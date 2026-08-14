@@ -378,8 +378,37 @@ input:focus, textarea:focus {
 .search-form { display: flex; gap: 8px; }
 .search-form input { width: 250px; }
 .add-form { margin-top: 14px; }
-.add-row { display: flex; gap: 8px; margin-top: 8px; }
-.add-row input { flex: 1; }
+.add-row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+
+/* 分段切换（明文 / 元数据） */
+.seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 10px;
+}
+.seg-btn {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  line-height: 1.4;
+  padding: 5px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: var(--t-quick);
+}
+.seg-btn:hover { color: var(--text); }
+.seg-btn.active {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.seg-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* ============================================================
    记忆列表（signature：档案条目 —— mono 元数据 + 左竖线）
