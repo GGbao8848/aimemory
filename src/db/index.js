@@ -75,6 +75,19 @@ CREATE TABLE IF NOT EXISTS sessions (
   expires_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at);
+
+-- 连接码（半自动连接：浏览器授权 → 生成短码 + 明文 token 暂存 → 插件兑换写配置）
+CREATE TABLE IF NOT EXISTS connect_codes (
+  code          TEXT PRIMARY KEY,          -- 短码 XXXX-XXXX
+  user_id       TEXT NOT NULL,
+  api_key_id    TEXT NOT NULL,
+  token_plain   TEXT NOT NULL,             -- 明文 m0-xxx，仅 TTL 窗口内存在
+  created_at    TEXT NOT NULL,
+  expires_at    TEXT NOT NULL,
+  consumed_at   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_connect_codes_user ON connect_codes(user_id);
+CREATE INDEX IF NOT EXISTS idx_connect_codes_expiry ON connect_codes(expires_at);
 `);
 
 // 老库兼容：sessions 表早期无 username 列 → 补充（幂等）

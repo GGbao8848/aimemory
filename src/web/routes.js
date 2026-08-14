@@ -111,4 +111,22 @@ apiRouter.post('/keys/:id/revoke', requireAuth, wrap(async (req, res) => {
   res.json({ success: true });
 }));
 
+// ===== 连接码兑换（半自动连接）=====
+// 码即凭据：浏览器授权后页面展示短码 → agent 端带码调用本接口换取密钥。
+// 码一次性、10 分钟 TTL，兑换后即失效；明文密钥仅在 TTL 窗口内存在于码表。
+
+apiRouter.post('/connect/claim', wrap(async (req, res) => {
+  const code = String((req.body || {}).code || '').trim().toUpperCase();
+  if (!code) return res.status(400).json({ error: '缺少连接码' });
+  const result = repo.consumeConnectCode(code);
+  if (!result) {
+    return res.status(400).json({ error: '连接码无效、已使用或已过期，请重新打开授权页获取新码' });
+  }
+  res.json({
+    user_id: result.user_id,
+    api_key: result.api_key,
+    mcp_url: `${config.publicBaseUrl || `http://${req.get('host')}`}/mcp`,
+  });
+}));
+
 module.exports = { apiRouter, resolveIdentity, buildRedirectUri };

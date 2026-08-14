@@ -1,7 +1,7 @@
 {
   "name": "aimemory",
-  "version": "0.1.0",
-  "description": "企业 AI 记忆库：让 agent 跨会话记住部署经验、踩坑记录、项目约定与个人偏好。安装后 MCP 工具自动注册，配置一次密钥即可使用。",
+  "version": "0.2.0",
+  "description": "企业 AI 记忆库：让 agent 跨会话记住部署经验、踩坑记录、项目约定与个人偏好。安装后运行 /aimemory-connect 一键自动生成密钥并接入，MCP 工具自动注册。",
   "description_i18n": {
     "en": "Enterprise AI memory: agents remember deployment experience, pitfalls, project conventions and personal preferences across sessions. MCP tools register automatically after install; configure your API key once.",
     "zh-CN": "企业 AI 记忆库：让 agent 跨会话记住部署经验、踩坑记录、项目约定与个人偏好。安装后 MCP 工具自动注册，配置一次密钥即可使用。"

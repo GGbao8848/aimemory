@@ -97,27 +97,31 @@ pm2 restart aimemory-mcp        # 更新代码后重启
 4. 之后 agent 就能调用记忆工具：写 `add_memory`、查 `search_memories`、管 `get_memories` 等。
    每个员工的数据**互相隔离**，密钥吊销后立即失效。
 
-## ZCode 插件接入（推荐，免手填 JSON）
+## ZCode 插件接入（推荐，一键安装 + 一键连接）
 
-> 手动复制 JSON 适合一次性接入；**批量给 ZCode 用户（公司员工）使用，推荐直接装插件**：添加 marketplace → 安装 → 填一次密钥，MCP 工具自动注册，agent 还会自动学会"什么时候该写/查记忆"。
+> 手动复制 JSON 适合一次性接入；**批量给 ZCode 用户（公司员工）使用，推荐直接装插件**：添加 marketplace → 点安装 → 浏览器授权一次，密钥自动生成并写入配置（`/aimemory-connect`），MCP 工具自动注册，agent 还会自动学会"什么时候该写/查记忆"。
 
-插件本体在仓库的 `plugin/` 目录（标准 ZCode 插件格式），详见 [plugin/README.md](plugin/README.md)。
+插件本体在仓库 `plugin/` 目录，**仓库根 `marketplace.json` 是市场入口**（一键安装），详见 [plugin/README.md](plugin/README.md)。
 
 ```text
-plugin/
-├── .zcode-plugin/plugin.json   # 清单：userConfig（server_url / api_key）
-├── .mcp.json                   # MCP 服务器声明（http 远程）
-├── skills/aimemory/SKILL.md    # 记忆使用准则
-├── commands/                   # /aimemory 与 /aimemory-key
-└── README.md                   # 安装与配置指引
+aimemory 仓库根/
+├── marketplace.json              # 市场入口：员工把仓库添加为 marketplace 即可点安装
+└── plugin/
+    ├── .zcode-plugin/plugin.json # 清单：userConfig（server_url / api_key）
+    ├── .mcp.json                 # MCP 服务器声明（http 远程）
+    ├── skills/aimemory/SKILL.md  # 记忆使用准则
+    ├── commands/                 # /aimemory /aimemory-key /aimemory-connect
+    └── README.md                 # 安装与配置指引
 ```
 
-**员工安装（三步）**：
-1. 获取 `plugin/` 目录（公司局域网 Git 拉取本仓库，或管理员分发的拷贝）
-2. ZCode → Settings → Plugin Management → Discover →「+」→ Add local folder → 指向 `plugin/`
-3. 安装 aimemory 插件 → 运行 **`/aimemory-key`** 按引导配好个人 API Key → `/aimemory status` 验证
+**员工安装 + 连接（全程点击，不复制粘贴）**：
+1. ZCode → Settings → Plugin Management → Discover →「+」→ 添加本仓库为 marketplace（内网 Git URL 或本地目录）→ 安装 aimemory
+2. 运行 **`/aimemory-connect`** → 浏览器打开 `http://<服务器>:18543/connect`（SSO 确认）
+3. 回 ZCode 运行 **`/aimemory-connect <连接码>`** → 密钥自动写入配置 → `/aimemory status` 验证
 
-**管理员分发**：本插件随主仓库走局域网 Git（员工 git pull 即更新）；将来要做独立插件市场时，把整个 `plugin/` 目录抽成独立仓库即可（标准格式，抽出即用，无需改造）。
+> 连接码一次性、10 分钟有效；密钥写入 `~/.zcode/cli/config.json`（`mcp.servers.aimemory`，与 mem0 配置同款写法）后持久生效。`/aimemory-key` 保留为手动兜底。
+
+**管理员分发**：员工把 aimemory 仓库添加为 marketplace 后，安装/更新都是点击完成（git pull 同步仓库即可）；将来做独立插件市场时，把 `plugin/` + `marketplace.json` 抽成独立仓库即可，标准格式抽出即用。
 
 ## MCP 工具一览
 

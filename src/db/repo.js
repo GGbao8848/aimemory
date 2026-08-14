@@ -201,6 +201,54 @@ function cleanupSessions() {
   db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(now());
 }
 
+// ============ 连接码（半自动连接）============
+
+const CODE_TTL_MS = 10 * 60 * 1000; // 10 分钟
+
+/** 生成 XXXX-XXXX 格式短码（去掉易混淆字符 I/O/0/1） */
+function generateConnectCode() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const seg = () => Array.from({ length: 4 }, () => alphabet[crypto.randomInt(alphabet.length)]).join('');
+  return `${seg()}-${seg()}`;
+}
+
+/**
+ * 为用户创建连接请求：复用其未消费且未过期的码（防刷），否则建新密钥 + 新码。
+ * 返回 { code, api_key, user_id }
+ */
+function createConnectRequest(userId) {
+  const active = db
+    .prepare('SELECT * FROM connect_codes WHERE user_id = ? AND consumed_at IS NULL AND expires_at > ?')
+    .get(userId, now());
+  if (active) {
+    return { code: active.code, api_key: active.token_plain, user_id: userId };
+  }
+  const ts = now();
+  // 生成一次 token：明文入码表（TTL 窗口），哈希入 api_keys（持久）
+  const { token, id: keyId } = require('../auth/tokens').createApiKey(userId, 'connect');
+  const code = generateConnectCode();
+  db.prepare(
+    `INSERT INTO connect_codes (code, user_id, api_key_id, token_plain, created_at, expires_at, consumed_at)
+     VALUES (?, ?, ?, ?, ?, ?, NULL)`
+  ).run(code, userId, keyId, token, ts, new Date(Date.now() + CODE_TTL_MS).toISOString());
+  return { code, api_key: token, user_id: userId };
+}
+
+/** 兑换连接码：一次性 + TTL 校验；成功返回 { user_id, api_key, mcp_url }，失败返回 null */
+function consumeConnectCode(code) {
+  const row = db.prepare('SELECT * FROM connect_codes WHERE code = ?').get(code);
+  if (!row) return null;
+  if (row.consumed_at) return null;
+  if (row.expires_at <= now()) return null;
+  db.prepare('UPDATE connect_codes SET consumed_at = ? WHERE code = ?').run(now(), code);
+  return { user_id: row.user_id, api_key: row.token_plain, api_key_id: row.api_key_id };
+}
+
+/** 清理过期 / 已消费的码（明文随之删除，不留痕） */
+function cleanupConnectCodes() {
+  db.prepare('DELETE FROM connect_codes WHERE consumed_at IS NOT NULL OR expires_at <= ?').run(now());
+}
+
 module.exports = {
   createMemory,
   getMemory,
@@ -216,4 +264,7 @@ module.exports = {
   getSession,
   deleteSession,
   cleanupSessions,
+  createConnectRequest,
+  consumeConnectCode,
+  cleanupConnectCodes,
 };

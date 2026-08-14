@@ -1,12 +1,12 @@
 ---
-description: 引导配置 aimemory 的 API Key：打开 Web 平台 → 登录 → 生成密钥 → 回到插件配置填入。首次使用或密钥失效时运行。
+description: 配置 aimemory 的 API Key。推荐先试 /aimemory-connect 一键自动连接；本命令为手动流程（打开 Web 平台生成密钥 → 填入配置），连接码流程不可用或密钥失效时使用。
 argument-hint: "[mcp服务地址]"
 skills: aimemory
 ---
 
-# 配置 aimemory API Key
+# 配置 aimemory API Key（手动兜底）
 
-按以下步骤引导用户完成密钥配置（若 $1 提供了 MCP 服务地址，用它替换下面的服务器地址）：
+> **优先用 `/aimemory-connect`**：浏览器授权后密钥自动生成并写入配置，无需手动复制粘贴。以下为手动流程兜底（若 $1 提供了 MCP 服务地址，用它替换下面的服务器地址）。
 
 ## 步骤
 

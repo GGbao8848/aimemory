@@ -17,23 +17,25 @@ plugin/
 └── README.md                   # 本文档
 ```
 
-## 员工安装（三步）
+## 员工安装（两步）
 
-1. **获取插件目录**：从公司分发渠道获取本 `plugin/` 目录（见下节"分发方式"）。
-2. **添加为本地 marketplace**：ZCode → Settings → Plugin Management → Discover 页 →「+」→ 选择 **Add local folder** → 指向本 `plugin/` 目录 → 确认。
-3. **安装并启用**：在插件列表找到 **aimemory** → 安装。
+1. **添加 aimemory 仓库为 marketplace**：ZCode → Settings → Plugin Management → Discover →「+」→ 添加公司内网上的 aimemory 仓库（Git URL 或本地目录，根目录有 `marketplace.json`）→ 确认。若仓库不可用，也可 **Add local folder** 直接指向 `plugin/` 目录（兜底）。
+2. **安装 aimemory 插件**：在插件列表找到 **aimemory** → 安装。
 
-## 首次配置（密钥）
+## 一键连接（推荐，无需手动复制密钥）
 
-安装后 MCP 工具还不会工作，因为还没有你的个人密钥（每个员工一个，互相隔离）：
+安装后运行 **`/aimemory-connect`**，按 agent 引导：
 
-1. 运行命令 **`/aimemory-key`**（agent 会一步步引导）。
-2. 浏览器打开 `http://<服务器>:18543` → 「通过登录平台登录」→ 用公司统一账号登录。
-3. 「🔑 接入密钥」→ 命名（如 `zcode`）→ 生成 → **立即复制 `m0-xxx` 明文**（只显示一次）。
-4. 回到 ZCode：Settings → Plugin Management → aimemory → 设置，把 `api_key` 填成刚复制的密钥；`server_url` 保持管理员给的地址。
-5. 运行 **`/aimemory status`** 验证连通（能 `get_memories` 即成功）。
+1. 浏览器打开 `http://<服务器>:18543/connect`（SSO 免密确认，公司统一账号）。
+2. 页面自动生成 **连接码**（10 分钟有效、一次性）与 API Key。
+3. 回 ZCode 运行 **`/aimemory-connect <连接码>`** —— 密钥自动写入你的 ZCode 配置，MCP 工具即连上。
+4. 运行 **`/aimemory status`** 验证（能 `get_memories` 即成功）。
 
-> 密钥只存在本机，只用于访问你自己的记忆；泄漏时去 Web 平台「吊销」立即失效。
+> 连接码一次性，兑换后即失效；密钥写进 `~/.zcode/cli/config.json` 后永久生效。
+
+## 手动配置（兜底）
+
+`/aimemory-connect` 不可用（如平台版本过旧）时，用 `/aimemory-key` 走手动流程：登录 Web 平台 → 生成密钥 → 填入插件设置。详见该命令引导。
 
 ## 使用
 
@@ -42,19 +44,20 @@ plugin/
 
 ## 分发方式（管理员）
 
-本插件**没有独立仓库**，随 aimemory 主仓库一起走局域网 Git 分发：
+本插件随 aimemory 主仓库分发，仓库根目录的 **`marketplace.json`** 即市场入口：
 
-- **局域网 Git 分发（推荐）**：员工 `git clone` / `git pull` 公司内网上的 aimemory 仓库，按上面三步把 `plugin/` 添加为本地 marketplace。后续更新插件 = 拉取主仓库（git pull）+ 重新指向目录。
-- **将来做独立插件市场**：把整个 `plugin/` 目录抽成一个独立仓库作为 marketplace（GitHub 或内网 Git），员工改为添加远程 marketplace URL。`plugin.json` / `.mcp.json` / `skills` / `commands` 均为标准格式，**抽出即用，无需改造**。
+- **一键安装（推荐）**：员工把 aimemory 仓库（公司内网 Git URL 或本地目录）添加为 marketplace → Discover 里点安装，即可安装/更新插件。
+- **兼容旧方式**：Add local folder 指向 `plugin/` 目录仍可用（无需 marketplace.json）。
+- **将来做独立插件市场**：把整个 `plugin/` 目录抽成独立仓库，复制一份 `marketplace.json` 放仓库根即可，**标准格式，抽出即用**。
 
 ## 配置项说明
 
 | userConfig | 说明 | 默认 |
 |---|---|---|
 | `server_url` | 公司 aimemory 服务的 MCP 端点 | `http://192.168.161.73:18543/mcp`（部署时改） |
-| `api_key` | 你的个人密钥（Web 平台生成） | 空，必填 |
+| `api_key` | 手动模式填的密钥（一键连接模式自动写入配置，无需填） | 空 |
 
-> 注：api_key 以普通配置字段存储（ZCode 暂不支持持久化 sensitive 字段）。内网个人机器可接受；更严格的环境可用个人配置覆盖或按需吊销密钥。
+> 一键连接会把密钥写入 `~/.zcode/cli/config.json` 的 `mcp.servers.aimemory`（与 mem0 配置同款写法），持久生效。手动模式需在插件设置里填 `api_key`。
 
 ## 安全
 
