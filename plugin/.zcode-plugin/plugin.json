@@ -1,0 +1,28 @@
+{
+  "name": "aimemory",
+  "version": "0.1.0",
+  "description": "企业 AI 记忆库：让 agent 跨会话记住部署经验、踩坑记录、项目约定与个人偏好。安装后 MCP 工具自动注册，配置一次密钥即可使用。",
+  "description_i18n": {
+    "en": "Enterprise AI memory: agents remember deployment experience, pitfalls, project conventions and personal preferences across sessions. MCP tools register automatically after install; configure your API key once.",
+    "zh-CN": "企业 AI 记忆库：让 agent 跨会话记住部署经验、踩坑记录、项目约定与个人偏好。安装后 MCP 工具自动注册，配置一次密钥即可使用。"
+  },
+  "author": { "name": "aimemory" },
+  "license": "MIT",
+  "keywords": ["memory", "mcp", "agent", "memory-layer", "aimemory"],
+  "userConfig": {
+    "server_url": {
+      "title": "MCP 服务地址",
+      "description": "公司 aimemory 服务的 MCP 端点（内网地址），由管理员提供。",
+      "type": "string",
+      "default": "http://192.168.161.73:18543/mcp",
+      "required": true
+    },
+    "api_key": {
+      "title": "API Key",
+      "description": "在 aimemory Web 平台生成的 m0- 开头密钥（http://<服务器>:18543 登录后生成）。密钥只存在本机配置中，仅用于访问你自己的记忆。",
+      "type": "string",
+      "default": "",
+      "required": true
+    }
+  }
+}
