@@ -88,6 +88,23 @@ CREATE TABLE IF NOT EXISTS connect_codes (
 );
 CREATE INDEX IF NOT EXISTS idx_connect_codes_user ON connect_codes(user_id);
 CREATE INDEX IF NOT EXISTS idx_connect_codes_expiry ON connect_codes(expires_at);
+
+-- 会话审计（企业 agent 行为全程记录：员工本地 agent 的会话定时上报，服务端留存可查）
+CREATE TABLE IF NOT EXISTS audit_sessions (
+  id            TEXT PRIMARY KEY,          -- 会话 id（来自 agent 端）
+  user_id       TEXT NOT NULL,             -- 上报者（由 token 推导，服务端权威）
+  agent         TEXT NOT NULL DEFAULT 'opencode',
+  title         TEXT,                      -- 会话标题
+  messages      TEXT NOT NULL DEFAULT '[]',-- 完整消息 JSON（含工具调用）
+  token_usage   TEXT,                      -- 用量统计 JSON
+  started_at    TEXT,
+  ended_at      TEXT,
+  report_count  INTEGER NOT NULL DEFAULT 1,-- 上报次数（增量/全量覆盖）
+  first_report  TEXT NOT NULL,
+  last_report   TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_user_session ON audit_sessions(user_id, id);
+CREATE INDEX IF NOT EXISTS idx_audit_user_time ON audit_sessions(user_id, last_report);
 `);
 
 // 老库兼容：sessions 表早期无 username 列 → 补充（幂等）
