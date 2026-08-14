@@ -72,11 +72,32 @@ function showApp() {
   $('#view-app').classList.remove('hidden');
   // 优先显示 Keycloak 用户名（br0004 等）；老会话无 username 时回退到 UUID 前 8 位
   const who = currentUser.username || currentUser.userId.slice(0, 8);
-  $('#user-area').innerHTML =
-    `<span class="who">${esc(who)}</span>` +
-    `<a class="btn btn-ghost" href="/auth/logout">退出</a>`;
+  $('#user-name').textContent = who;
   loadKeys().then(() => loadMemories());
 }
+
+// ===== 视图切换（侧边栏导航）=====
+
+const VIEW_META = {
+  memories: { title: '我的记忆', sub: '管理 agent 为你沉淀的记忆，跨会话复用' },
+  keys: { title: '接入密钥', sub: '生成密钥，把 aimemory 接进你的 agent' },
+  guide: { title: '接入指南', sub: 'ZCode 插件安装与 MCP 工具说明' },
+};
+
+function switchView(name) {
+  if (!VIEW_META[name]) return;
+  document.querySelectorAll('.view').forEach((v) => v.classList.remove('view-active'));
+  document.getElementById(`view-${name}`).classList.add('view-active');
+  document.querySelectorAll('.nav-item').forEach((b) =>
+    b.classList.toggle('active', b.dataset.view === name)
+  );
+  $('#view-title').textContent = VIEW_META[name].title;
+  $('#view-sub').textContent = VIEW_META[name].sub;
+}
+
+document.querySelectorAll('.nav-item').forEach((btn) => {
+  btn.addEventListener('click', () => switchView(btn.dataset.view));
+});
 
 // ===== 记忆 =====
 
@@ -100,7 +121,7 @@ function renderMemories(items, total) {
       <div class="memory-item" data-id="${esc(m.id)}">
         <div class="memory-text">${esc(m.text)}</div>
         <div class="memory-meta">
-          <span class="muted">${esc(new Date(m.updated_at).toLocaleString())}</span>
+          <span class="stamp">${esc(new Date(m.updated_at).toLocaleString())}</span>
           ${Object.keys(m.metadata || {}).length ? `<span class="meta-json">${esc(JSON.stringify(m.metadata))}</span>` : ''}
         </div>
         <div class="memory-actions">
