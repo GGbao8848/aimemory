@@ -99,6 +99,22 @@ document.querySelectorAll('.nav-item').forEach((btn) => {
   btn.addEventListener('click', () => switchView(btn.dataset.view));
 });
 
+// ===== 主题（暗/亮）=====
+
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  try { localStorage.setItem('aimemory-theme', t); } catch (e) {}
+}
+
+function initThemeToggle() {
+  const btn = $('#theme-toggle');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    const cur = document.documentElement.dataset.theme;
+    applyTheme(cur === 'light' ? 'dark' : 'light');
+  });
+}
+
 // ===== 记忆 =====
 
 async function loadMemories() {
@@ -115,7 +131,15 @@ async function loadMemories() {
 function renderMemories(items, total) {
   const list = $('#memory-list');
   if (!items.length) {
-    list.innerHTML = '<p class="muted">还没有记忆。添加一条，或让 agent 通过 MCP 写入。</p>';
+    list.innerHTML = `
+      <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+          <path d="M6 3h9l4 4v13a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 20V4.5A1.5 1.5 0 0 1 6.5 3z" stroke-linejoin="round"/>
+          <path d="M14 3v5h5M8.5 12h7M8.5 15.5h7M8.5 19h4" stroke-linecap="round"/>
+        </svg>
+        <p class="empty-title">还没有记忆</p>
+        <p class="empty-hint">在上面添加一条，或让 agent 通过 MCP 写入</p>
+      </div>`;
   } else {
     list.innerHTML = items.map((m) => `
       <div class="memory-item" data-id="${esc(m.id)}">
@@ -312,4 +336,5 @@ $('#copy-json').addEventListener('click', async () => {
   });
 });
 
+initThemeToggle();
 init();

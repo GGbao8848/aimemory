@@ -1,26 +1,31 @@
 /* ============================================================
    aimemory · 设计 token（frontend-design 方法论）
-   方向：深夜档案室 —— 深墨蓝黑底 + 电光蓝 accent + mono 档案条目
-   避开 AI 模板：奶油底衬线 / 纯黑荧光绿 / 报纸排版
+   方向：档案室 —— 暗色"深夜档案室" / 亮色"日光档案室"
+   双主题：:root = 暗色默认；[data-theme="light"] 覆盖为亮色
    ============================================================ */
 :root {
-  /* color */
-  --bg:        #0b0f17;   /* 页面底：深夜档案室 */
-  --bg-side:   #0e1320;   /* 侧边栏：略深一档 */
-  --surface:   #131a29;   /* 卡片面板 */
-  --surface-2: #1a2336;   /* 次级面板 / 悬浮 */
-  --surface-3: #212c44;   /* 激活 / hover 高亮 */
-  --border:    #243049;   /* 分隔线 */
+  /* ---- 暗色 · 深夜档案室 ---- */
+  --bg:        #0b0f17;
+  --bg-side:   #0e1320;
+  --surface:   #131a29;
+  --surface-2: #1a2336;
+  --surface-3: #212c44;
+  --border:    #243049;
   --border-2:  #2f3d5c;
-  --text:      #e8ecf4;   /* 主文字 */
-  --muted:     #8a94a8;   /* 辅助文字 */
-  --accent:    #4c8dff;   /* 电光蓝 */
+  --text:      #e8ecf4;
+  --muted:     #8a94a8;
+  --placeholder: #5b6578;
+  --accent:    #4c8dff;
   --accent-2:  #3a6fd8;
   --accent-dim: rgba(76, 141, 255, .12);
   --ok:        #34d399;
   --ok-dim:    rgba(52, 211, 153, .12);
   --danger:    #f87171;
   --danger-dim: rgba(248, 113, 113, .1);
+  --brand-glow: rgba(76, 141, 255, .35);
+  --code-bg:   #070b12;
+  --code-text: #c3cbe0;
+  --shadow:    0 10px 30px rgba(0, 0, 0, .35);
 
   /* type */
   --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", "Segoe UI", sans-serif;
@@ -32,7 +37,35 @@
   --radius: 12px;
   --radius-sm: 8px;
   --content-w: 960px;
-  --shadow: 0 10px 30px rgba(0, 0, 0, .35);
+
+  /* motion */
+  --t-theme: background-color .25s ease, color .25s ease, border-color .25s ease, box-shadow .25s ease;
+  --t-quick: background-color .15s ease, color .15s ease, border-color .15s ease;
+}
+
+/* ---- 亮色 · 日光档案室 ---- */
+:root[data-theme="light"] {
+  --bg:        #f2f4f9;
+  --bg-side:   #e9edf5;
+  --surface:   #ffffff;
+  --surface-2: #f5f7fb;
+  --surface-3: #e9eef7;
+  --border:    #dbe2ee;
+  --border-2:  #c3cde0;
+  --text:      #18213a;
+  --muted:     #5d6a83;
+  --placeholder: #9aa5b8;
+  --accent:    #2f6fe4;
+  --accent-2:  #2258c4;
+  --accent-dim: rgba(47, 111, 228, .09);
+  --ok:        #0c9c6c;
+  --ok-dim:    rgba(12, 156, 108, .1);
+  --danger:    #d43f3f;
+  --danger-dim: rgba(212, 63, 63, .08);
+  --brand-glow: rgba(47, 111, 228, .25);
+  --code-bg:   #f7f9fd;
+  --code-text: #33415e;
+  --shadow:    0 8px 24px rgba(24, 33, 58, .08);
 }
 
 * { box-sizing: border-box; }
@@ -47,6 +80,14 @@ body {
   font-size: 14px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+}
+
+/* 主题切换的平滑过渡 */
+body, .sidebar, .brand, .card, .login-wrap, .main-head h1,
+input[type="text"], input[type="search"], textarea,
+.memory-item, .btn, .mcp-json, .new-key, .key-value,
+.toast, .user-chip, .logout, .theme-toggle, .nav-item {
+  transition: var(--t-theme);
 }
 
 .hidden { display: none !important; }
@@ -96,7 +137,8 @@ body {
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   position: relative;
   flex: none;
-  box-shadow: 0 4px 14px rgba(76, 141, 255, .35);
+  box-shadow: 0 4px 14px var(--brand-glow);
+  transition: box-shadow var(--t-theme);
 }
 /* signature：记忆脉冲 */
 .brand-mark::before {
@@ -143,7 +185,7 @@ body {
   font-size: 13.5px;
   text-align: left;
   cursor: pointer;
-  transition: background .15s, color .15s;
+  transition: var(--t-quick);
   position: relative;
 }
 .nav-item:hover { background: var(--surface-2); color: var(--text); }
@@ -162,8 +204,35 @@ body {
 }
 .nav-ico { width: 16px; height: 16px; flex: none; opacity: .9; }
 
-/* 侧边栏底部：用户 + 退出 */
+/* 侧边栏底部：主题切换 + 用户 + 退出 */
 .sidebar-foot { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 12px; }
+
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: var(--t-quick);
+}
+.theme-toggle:hover { background: var(--surface-3); color: var(--text); }
+.theme-toggle .ico { width: 15px; height: 15px; flex: none; }
+.theme-toggle .lbl-sun, .theme-toggle .ico-sun { display: none; }
+.theme-toggle .lbl-moon, .theme-toggle .ico-moon { display: inline; }
+:root[data-theme="light"] .theme-toggle .lbl-sun,
+:root[data-theme="light"] .theme-toggle .ico-sun { display: inline; }
+:root[data-theme="light"] .theme-toggle .lbl-moon,
+:root[data-theme="light"] .theme-toggle .ico-moon { display: none; }
+
 .user-chip {
   display: flex;
   align-items: center;
@@ -178,7 +247,7 @@ body {
   width: 8px; height: 8px;
   border-radius: 50%;
   background: var(--ok);
-  box-shadow: 0 0 8px rgba(52, 211, 153, .6);
+  box-shadow: 0 0 8px var(--ok-dim);
   flex: none;
 }
 .who {
@@ -198,7 +267,7 @@ body {
   color: var(--muted);
   font-size: 13px;
   text-decoration: none;
-  transition: background .15s, color .15s;
+  transition: var(--t-quick);
 }
 .logout:hover { background: var(--danger-dim); color: var(--danger); }
 
@@ -253,7 +322,7 @@ body {
   justify-content: center;
   min-height: 100vh;
   background:
-    radial-gradient(600px 300px at 70% -10%, rgba(76, 141, 255, .08), transparent 60%),
+    radial-gradient(600px 300px at 70% -10%, var(--accent-dim), transparent 60%),
     var(--bg);
 }
 .login-card { max-width: 400px; width: 100%; text-align: center; padding: 36px 32px; }
@@ -275,7 +344,7 @@ body {
   font-weight: 500;
   cursor: pointer;
   text-decoration: none;
-  transition: background .15s, border-color .15s, transform .05s;
+  transition: var(--t-quick);
 }
 .btn:hover:not(:disabled) { background: var(--surface-3); border-color: var(--border-2); }
 .btn:active:not(:disabled) { transform: translateY(1px); }
@@ -297,9 +366,9 @@ input[type="text"], input[type="search"], textarea {
   padding: 9px 12px;
   font-size: 13px;
   font-family: var(--font-ui);
-  transition: border-color .15s, box-shadow .15s;
+  transition: var(--t-quick), box-shadow .15s ease;
 }
-input::placeholder, textarea::placeholder { color: #5b6578; }
+input::placeholder, textarea::placeholder { color: var(--placeholder); }
 input:focus, textarea:focus {
   outline: none;
   border-color: var(--accent);
@@ -323,7 +392,7 @@ input:focus, textarea:focus {
   border-radius: 10px;
   padding: 13px 16px;
   margin-bottom: 10px;
-  transition: border-color .15s, background .15s, transform .1s;
+  transition: var(--t-theme);
 }
 .memory-item:hover { border-left-color: var(--accent-2); background: var(--surface-3); }
 .memory-text { white-space: pre-wrap; word-break: break-word; font-size: 13.5px; }
@@ -337,7 +406,6 @@ input:focus, textarea:focus {
   color: var(--muted);
   letter-spacing: .01em;
 }
-.memory-meta .stamp { color: var(--muted); }
 .meta-json {
   color: var(--accent);
   background: var(--accent-dim);
@@ -353,6 +421,20 @@ input:focus, textarea:focus {
   color: var(--muted);
 }
 
+/* 空状态 */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 36px 20px;
+  text-align: center;
+  color: var(--muted);
+}
+.empty-state svg { width: 40px; height: 40px; opacity: .5; margin-bottom: 6px; }
+.empty-state .empty-title { font-size: 14px; font-weight: 600; color: var(--text); margin: 0; }
+.empty-state .empty-hint { margin: 0; font-size: 12.5px; }
+
 /* ============================================================
    密钥
    ============================================================ */
@@ -360,7 +442,7 @@ input:focus, textarea:focus {
 .key-form input { flex: 1; }
 .new-key {
   background: var(--ok-dim);
-  border: 1px solid rgba(52, 211, 153, .3);
+  border: 1px solid var(--ok-dim);
   border-radius: var(--radius-sm);
   padding: 12px 14px;
   margin-bottom: 14px;
@@ -370,7 +452,8 @@ input:focus, textarea:focus {
   font-family: var(--font-mono);
   font-size: 12.5px;
   word-break: break-all;
-  background: var(--bg);
+  background: var(--code-bg);
+  color: var(--code-text);
   padding: 8px 10px;
   border-radius: 6px;
   border: 1px solid var(--border);
@@ -398,6 +481,7 @@ input:focus, textarea:focus {
   text-underline-offset: 3px;
   margin-left: 6px;
   font-family: var(--font-ui);
+  transition: color .15s ease;
 }
 .link-btn:hover { color: var(--text); }
 .link-btn.active { color: var(--ok); }
@@ -406,7 +490,8 @@ input:focus, textarea:focus {
    MCP JSON / 指南
    ============================================================ */
 .mcp-json {
-  background: var(--bg);
+  background: var(--code-bg);
+  color: var(--code-text);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 14px;
@@ -416,7 +501,6 @@ input:focus, textarea:focus {
   overflow-x: auto;
   white-space: pre-wrap;
   word-break: break-all;
-  color: #c3cbe0;
 }
 .mcp-json + .btn { margin-top: 12px; }
 
@@ -463,11 +547,13 @@ input:focus, textarea:focus {
 @media (max-width: 880px) {
   .sidebar { width: 64px; padding: 16px 8px; }
   .brand { justify-content: center; padding: 2px 0 16px; }
-  .brand-text, .nav-item span, .logout span, .user-chip .who, .who-dot { display: none; }
+  .brand-text, .nav-item span, .logout span, .user-chip .who, .who-dot,
+  .theme-toggle .lbl-sun, .theme-toggle .lbl-moon { display: none; }
   .nav-item { justify-content: center; padding: 11px 0; }
   .nav-item.active::before { left: -8px; }
   .sidebar-foot { display: flex; flex-direction: column; align-items: center; gap: 8px; }
   .user-chip { padding: 8px; margin-bottom: 0; }
+  .theme-toggle { padding: 9px 0; margin-bottom: 0; }
   .main { margin-left: 64px; padding: 20px 18px 40px; }
   .search-form input { width: 150px; }
 }
