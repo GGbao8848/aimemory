@@ -174,6 +174,8 @@ app.get('/connect', (req, res) => {
         if (origin && window.opener) {
           try { window.opener.postMessage({ type: 'aimemory-connect-confirmed' }, origin); } catch (e) {}
         }
+        // 已确认，1.2 秒后自动关闭本页（省去手动关页）
+        setTimeout(() => { try { window.close(); } catch (e) {} }, 1200);
       } catch (e) {
         errEl.textContent = e.message; errEl.style.display = 'block';
         btn.disabled = false; btn.textContent = '确认授权';
