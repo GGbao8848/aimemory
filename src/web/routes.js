@@ -129,4 +129,35 @@ apiRouter.post('/connect/claim', wrap(async (req, res) => {
   });
 }));
 
+// ===== 设备流连接（零粘贴：发起 → 授权页确认 → 轮询拿 key）=====
+
+// agent 端发起连接请求（匿名，不绑定用户）→ 返回 request_id 供浏览器授权页 + 轮询
+apiRouter.post('/connect/start', wrap(async (req, res) => {
+  const { request_id } = repo.createConnectRequest();
+  res.status(201).json({
+    request_id,
+    authorize_url: `${config.publicBaseUrl || `http://${req.get('host')}`}/connect?request_id=${request_id}`,
+    expires_in: 600,
+  });
+}));
+
+// agent 端轮询：authorized → { token, key_name }；pending → null；失效/不存在 → { error }
+apiRouter.get('/connect/poll', wrap(async (req, res) => {
+  const requestId = String(req.query.request_id || '').trim();
+  if (!requestId) return res.status(400).json({ error: '缺少 request_id' });
+  const r = repo.pollConnectRequest(requestId);
+  if (r === 'expired') return res.status(410).json({ error: '授权请求已过期或不存在，请重新发起' });
+  if (r === null) return res.json({ status: 'pending' });
+  res.json({ status: 'authorized', token: r.token, key_name: r.key_name, api_key_id: r.api_key_id });
+}));
+
+// 授权页「确认授权」：绑定当前登录用户 + 生成密钥（命名自动去重）
+apiRouter.post('/connect/confirm', requireAuth, wrap(async (req, res) => {
+  const { request_id, name } = req.body || {};
+  if (!request_id) return res.status(400).json({ error: '缺少 request_id' });
+  const r = repo.confirmConnectRequest(String(request_id), req.identity.userId, name);
+  if (!r) return res.status(400).json({ error: '授权请求无效、已处理或已过期，请从 agent 端重新发起' });
+  res.status(201).json({ token: r.token, key_name: r.key_name, api_key_id: r.api_key_id });
+}));
+
 module.exports = { apiRouter, resolveIdentity, buildRedirectUri };

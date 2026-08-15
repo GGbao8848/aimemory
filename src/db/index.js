@@ -88,6 +88,21 @@ CREATE TABLE IF NOT EXISTS connect_codes (
 );
 CREATE INDEX IF NOT EXISTS idx_connect_codes_user ON connect_codes(user_id);
 CREATE INDEX IF NOT EXISTS idx_connect_codes_expiry ON connect_codes(expires_at);
+
+-- 设备流连接请求（零粘贴：agent 发起 → 授权页确认 → 轮询拿 key）
+CREATE TABLE IF NOT EXISTS connect_requests (
+  request_id    TEXT PRIMARY KEY,          -- 32 位随机（agent 轮询凭据）
+  user_id       TEXT,                      -- 确认授权的登录用户（pending 时为空）
+  key_name      TEXT,                      -- 授权时命名（可选）
+  status        TEXT NOT NULL DEFAULT 'pending',  -- pending | authorized | expired
+  api_key_id    TEXT,
+  token_plain   TEXT,                      -- 明文 m0-xxx，确认后生成
+  created_at    TEXT NOT NULL,
+  expires_at    TEXT NOT NULL,
+  confirmed_at  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_connect_requests_user ON connect_requests(user_id);
+CREATE INDEX IF NOT EXISTS idx_connect_requests_expiry ON connect_requests(expires_at);
 `);
 
 // 老库兼容：sessions 表早期无 username 列 → 补充（幂等）

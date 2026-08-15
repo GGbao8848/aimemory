@@ -87,13 +87,13 @@ app.get('/auth/logout', async (req, res) => {
   res.redirect(kcLogout);
 });
 
-// ===== 半自动连接授权页 =====
-// 员工浏览器访问 → SSO 登录确认 → 生成密钥 + 短连接码 → agent 端用码兑换
+// ===== 设备流授权页 =====
+// agent 端发起连接 → 浏览器打开 /connect?request_id=xxx → SSO 登录 → 点「确认授权」
+// （可给 token 命名）→ agent 轮询 /api/connect/poll 拿到密钥，全程零粘贴复制。
 app.get('/connect', (req, res) => {
   const id = web.resolveIdentity(req);
   if (!id) return res.redirect('/auth/login?next=/connect');
-  const result = repo.createConnectRequest(id.userId);
-  const mcpUrl = `${config.publicBaseUrl || `http://${req.get('host')}`}/mcp`;
+  const requestId = typeof req.query.request_id === 'string' ? req.query.request_id : '';
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   res.type('html').send(`<!DOCTYPE html>
 <html lang="zh-CN">
@@ -103,76 +103,82 @@ app.get('/connect', (req, res) => {
 <title>aimemory · 连接授权</title>
 <style>
   :root { --bg:#0b0f17; --surface:#131a29; --surface-2:#1a2336; --border:#243049;
-          --text:#e8ecf4; --muted:#8a94a8; --accent:#4c8dff; --ok:#34d399; --mono:ui-monospace,Menlo,Consolas,monospace; }
+          --text:#e8ecf4; --muted:#8a94a8; --accent:#4c8dff; --ok:#34d399; --danger:#f87171;
+          --mono:ui-monospace,Menlo,Consolas,monospace; }
   * { box-sizing:border-box; }
   body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
          background:radial-gradient(600px 300px at 70% -10%, rgba(76,141,255,.08), transparent 60%), var(--bg);
          font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; color:var(--text); }
-  .card { width:100%; max-width:520px; margin:24px; padding:36px 32px; background:var(--surface);
+  .card { width:100%; max-width:480px; margin:24px; padding:34px 30px; background:var(--surface);
           border:1px solid var(--border); border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.35); }
   h1 { margin:0 0 6px; font-size:20px; }
-  .sub { margin:0 0 24px; color:var(--muted); font-size:13px; }
-  .okline { display:flex; align-items:center; gap:8px; color:var(--ok); font-size:13px; margin-bottom:20px; }
-  .okline .dot { width:8px; height:8px; border-radius:50%; background:var(--ok); box-shadow:0 0 8px rgba(52,211,153,.6); }
-  label { display:block; font-size:12px; color:var(--muted); margin:16px 0 6px; }
-  .code { font-family:var(--mono); font-size:28px; font-weight:700; letter-spacing:.08em;
-          background:var(--surface-2); border:1px solid var(--border); border-radius:10px;
-          padding:14px 18px; text-align:center; color:var(--accent); }
-  .token { font-family:var(--mono); font-size:12.5px; word-break:break-all; background:var(--surface-2);
-           border:1px solid var(--border); border-radius:8px; padding:10px 12px; color:#c3cbe0; }
-  .row { display:flex; gap:8px; align-items:center; margin-top:8px; }
-  .btn { border:1px solid var(--accent); background:var(--accent); color:#fff; border-radius:8px;
-         padding:8px 14px; font-size:13px; cursor:pointer; font-family:inherit; }
+  .sub { margin:0 0 20px; color:var(--muted); font-size:13px; }
+  .who { display:flex; align-items:center; gap:8px; color:var(--ok); font-size:13px; margin-bottom:22px; }
+  .who .dot { width:8px; height:8px; border-radius:50%; background:var(--ok); box-shadow:0 0 8px rgba(52,211,153,.6); }
+  .reqbox { font-family:var(--mono); font-size:13px; background:var(--surface-2); border:1px solid var(--border);
+            border-radius:8px; padding:10px 12px; color:var(--accent); word-break:break-all; margin-bottom:18px; }
+  label { display:block; font-size:12px; color:var(--muted); margin:14px 0 6px; }
+  input[type=text] { width:100%; background:var(--surface-2); border:1px solid var(--border); border-radius:8px;
+                     color:var(--text); padding:9px 12px; font-size:13px; font-family:inherit; }
+  input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px rgba(76,141,255,.12); }
+  .btn { width:100%; border:none; background:var(--accent); color:#fff; border-radius:8px;
+         padding:11px 0; font-size:14px; font-weight:600; cursor:pointer; margin-top:18px; font-family:inherit; }
   .btn:hover { background:#3a6fd8; }
-  .steps { margin:24px 0 0; padding:16px; background:rgba(76,141,255,.08); border:1px solid rgba(76,141,255,.25);
-           border-radius:10px; font-size:13px; line-height:1.8; }
-  .steps code { font-family:var(--mono); background:var(--surface-2); border:1px solid var(--border); border-radius:4px; padding:1px 6px; font-size:12px; }
-  .hint { color:var(--muted); font-size:12px; margin-top:6px; }
+  .btn:disabled { opacity:.5; cursor:not-allowed; }
+  .err { color:var(--danger); font-size:12.5px; margin-top:10px; display:none; }
+  .done { display:none; text-align:center; padding:16px 0; }
+  .done .ok { color:var(--ok); font-size:18px; font-weight:700; }
+  .done .hint { color:var(--muted); font-size:13px; margin-top:8px; }
 </style>
 </head>
 <body>
   <div class="card">
-    <h1>✅ 连接授权成功</h1>
-    <p class="sub">已为你自动生成接入密钥，并准备好连接码。</p>
-    <div class="okline"><span class="dot"></span><span>已通过统一登录平台确认身份：${esc(id.username || id.userId.slice(0,8))}</span></div>
+    <h1 id="title">连接授权</h1>
+    <p class="sub">为你的 agent 授权访问 aimemory 记忆库。</p>
+    <div class="who"><span class="dot"></span><span>已通过统一登录平台确认身份：${esc(id.username || id.userId.slice(0,8))}</span></div>
 
-    <label>连接码（10 分钟有效，一次性）</label>
-    <div class="code" id="code">${esc(result.code)}</div>
-    <button class="btn" id="copy-code" style="margin-top:10px">复制连接码</button>
-
-    <label>API Key（兜底：若 agent 端兑换失败，可手动复制使用）</label>
-    <div class="row">
-      <span class="token" id="token" style="flex:1">${esc(result.api_key)}</span>
-      <button class="btn" id="copy-token" type="button">复制</button>
+    <div id="form-area">
+      <label>连接请求</label>
+      <div class="reqbox" id="reqbox">${requestId ? esc(requestId.slice(0,8)) + '…' : '（缺少请求标识，请从 agent 端重新发起）'}</div>
+      <label>密钥名称（可选，重名自动加后缀）</label>
+      <input type="text" id="key-name" placeholder="如 zcode / claude-code" maxlength="50" />
+      <button class="btn" id="confirm-btn" ${requestId ? '' : 'disabled'}>确认授权</button>
+      <p class="err" id="err"></p>
     </div>
 
-    <div class="steps">
-      <b>回到 ZCode：</b>运行 <code>/aimemory-connect ${esc(result.code)}</code>，
-      密钥会自动写入你的 ZCode 配置并连上（或运行 <code>/aimemory-connect</code> 查看指引）。
-      <div class="hint">MCP 端点：${esc(mcpUrl)}</div>
+    <div class="done" id="done">
+      <div class="ok">✓ 已授权，可回到 agent 继续</div>
+      <div class="hint">密钥已自动发送到你的 agent，无需复制粘贴。本页可关闭。</div>
     </div>
   </div>
   <script>
-    const cp = (id) => { const el = document.getElementById(id);
-      (navigator.clipboard ? navigator.clipboard.writeText(el.textContent.trim())
-        : Promise.reject()).catch(() => { const r = document.createRange(); r.selectNode(el);
-        window.getSelection().removeAllRanges(); window.getSelection().addRange(r);
-        document.execCommand('copy'); });
-      el.closest('.row, .card')?.querySelector('.btn').innerText = '已复制';
-    };
-    document.getElementById('copy-code').onclick = () => cp('code');
-    document.getElementById('copy-token').onclick = () => cp('token');
-    // 自动回传连接码给来源窗口（如插件市场演示）：同源/内网白名单，并尝试自动关闭本页
-    (function () {
-      const params = new URLSearchParams(location.search);
-      const origin = params.get('origin') || '';
-      const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1|(\d{1,3}\.){3}\d{1,3})(:\d+)?$/.test(origin);
-      if (isLocal && window.opener && window.opener !== window) {
-        const code = document.getElementById('code').textContent.trim();
-        try { window.opener.postMessage({ type: 'aimemory-connect', code }, origin); } catch (e) {}
-        setTimeout(() => { try { window.close(); } catch (e) {} }, 1200);
+    const requestId = ${JSON.stringify(requestId)};
+    const doneEl = document.getElementById('done');
+    const formEl = document.getElementById('form-area');
+    document.getElementById('confirm-btn').onclick = async () => {
+      const btn = document.getElementById('confirm-btn');
+      btn.disabled = true; btn.textContent = '授权中…';
+      const errEl = document.getElementById('err'); errEl.style.display = 'none';
+      try {
+        const r = await fetch('/api/connect/confirm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ request_id: requestId, name: document.getElementById('key-name').value.trim() }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || '授权失败');
+        formEl.style.display = 'none';
+        doneEl.style.display = 'block';
+        // 回传确认给来源窗口（可选）
+        const origin = new URLSearchParams(location.search).get('origin') || '';
+        if (origin && window.opener) {
+          try { window.opener.postMessage({ type: 'aimemory-connect-confirmed' }, origin); } catch (e) {}
+        }
+      } catch (e) {
+        errEl.textContent = e.message; errEl.style.display = 'block';
+        btn.disabled = false; btn.textContent = '确认授权';
       }
-    })();
+    };
   </script>
 </body>
 </html>`);
@@ -197,8 +203,10 @@ app.get('/slo-logout', (req, res) => {
 // ===== 启动 =====
 repo.cleanupSessions();
 repo.cleanupConnectCodes();
+repo.cleanupConnectRequests();
 setInterval(() => repo.cleanupSessions(), 3600_000).unref();
 setInterval(() => repo.cleanupConnectCodes(), 600_000).unref();
+setInterval(() => repo.cleanupConnectRequests(), 600_000).unref();
 
 app.listen(config.port, '0.0.0.0', () => {
   console.log(`[aimemory] MCP + API + Web 已启动: http://0.0.0.0:${config.port}`);

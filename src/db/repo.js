@@ -213,10 +213,9 @@ function generateConnectCode() {
 }
 
 /**
- * 为用户创建连接请求：复用其未消费且未过期的码（防刷），否则建新密钥 + 新码。
- * 返回 { code, api_key, user_id }
+ * 【旧】连接码模式：创建连接请求（生成密钥+短码）。新逻辑见下方设备流 createConnectRequest。
  */
-function createConnectRequest(userId) {
+function createLegacyConnectRequest(userId) {
   const active = db
     .prepare('SELECT * FROM connect_codes WHERE user_id = ? AND consumed_at IS NULL AND expires_at > ?')
     .get(userId, now());
@@ -249,6 +248,75 @@ function cleanupConnectCodes() {
   db.prepare('DELETE FROM connect_codes WHERE consumed_at IS NOT NULL OR expires_at <= ?').run(now());
 }
 
+// ============ 设备流连接（零粘贴）============
+
+const REQ_TTL_MS = 10 * 60 * 1000; // 10 分钟
+
+/** 生成 32 位随机请求 id（agent 轮询凭据） */
+function generateRequestId() {
+  return crypto.randomBytes(24).toString('hex');
+}
+
+/** 创建设备流连接请求（匿名 pending，不建 key）；返回 { request_id } */
+function createConnectRequest() {
+  const requestId = generateRequestId();
+  const ts = now();
+  db.prepare(
+    `INSERT INTO connect_requests (request_id, user_id, status, created_at, expires_at)
+     VALUES (?, NULL, 'pending', ?, ?)`
+  ).run(requestId, ts, new Date(Date.now() + REQ_TTL_MS).toISOString());
+  return { request_id: requestId };
+}
+
+/** 确认授权：绑定当前登录用户 + 生成 API Key（命名自动去重）；返回 { token, key_name } */
+function confirmConnectRequest(requestId, userId, name) {
+  const row = db.prepare('SELECT * FROM connect_requests WHERE request_id = ?').get(requestId);
+  if (!row) return null;
+  if (row.status !== 'pending') return null;
+  if (row.user_id && row.user_id !== userId) return null; // 已被他人绑定
+  if (row.expires_at <= now()) {
+    db.prepare("UPDATE connect_requests SET status='expired' WHERE request_id=?").run(requestId);
+    return null;
+  }
+  const safeName = (name || '').trim().slice(0, 50) || 'zcode';
+  const keyName = uniqueApiKeyName(userId, safeName);
+  const { token, id: keyId } = require('../auth/tokens').createApiKey(userId, keyName);
+  db.prepare(
+    `UPDATE connect_requests SET status='authorized', user_id=?, key_name=?, api_key_id=?, token_plain=?, confirmed_at=? WHERE request_id=?`
+  ).run(userId, keyName, keyId, token, now(), requestId);
+  return { token, key_name: keyName, api_key_id: keyId };
+}
+
+/** 轮询授权状态：authorized 返回 { token, key_name }，pending 返回 null，过期返回 'expired' */
+function pollConnectRequest(requestId) {
+  const row = db.prepare('SELECT * FROM connect_requests WHERE request_id = ?').get(requestId);
+  if (!row) return 'expired';
+  if (row.status === 'authorized') {
+    return { token: row.token_plain, key_name: row.key_name, api_key_id: row.api_key_id };
+  }
+  if (row.expires_at <= now()) {
+    db.prepare("UPDATE connect_requests SET status='expired' WHERE request_id=?").run(requestId);
+    return 'expired';
+  }
+  return null;
+}
+
+/** 清理过期/已确认的请求（明文随之删除） */
+function cleanupConnectRequests() {
+  db.prepare("DELETE FROM connect_requests WHERE status != 'pending' OR expires_at <= ?").run(now());
+}
+
+/** 唯一化 API Key 名称（重名自动加 -2/-3…），解决"token 重名" */
+function uniqueApiKeyName(userId, base) {
+  const exists = db
+    .prepare("SELECT name FROM api_keys WHERE user_id=? AND revoked_at IS NULL AND name=?")
+    .get(userId, base);
+  if (!exists) return base;
+  let i = 2;
+  while (db.prepare("SELECT 1 FROM api_keys WHERE user_id=? AND revoked_at IS NULL AND name=?").get(userId, `${base}-${i}`)) i++;
+  return `${base}-${i}`;
+}
+
 module.exports = {
   createMemory,
   getMemory,
@@ -264,7 +332,12 @@ module.exports = {
   getSession,
   deleteSession,
   cleanupSessions,
-  createConnectRequest,
+  createLegacyConnectRequest,
   consumeConnectCode,
   cleanupConnectCodes,
+  createConnectRequest,
+  confirmConnectRequest,
+  pollConnectRequest,
+  cleanupConnectRequests,
+  uniqueApiKeyName,
 };
