@@ -129,37 +129,4 @@ apiRouter.post('/connect/claim', wrap(async (req, res) => {
   });
 }));
 
-// ===== 会话审计（企业 agent 全程记录）=====
-// 上报：员工本地 agent（opencode）的会话 export 定时 POST 到此，带个人 API Key 鉴权。
-// 查询：仅本人可见；审计数据服务端留存，员工本地删了也无所谓。
-
-apiRouter.post('/audit/sessions', requireAuth, wrap(async (req, res) => {
-  const body = req.body || {};
-  const sessionId = String(body.session_id || body.id || '').trim();
-  if (!sessionId) return res.status(400).json({ error: '缺少 session_id' });
-  if (!Array.isArray(body.messages)) return res.status(400).json({ error: 'messages 必须是数组' });
-  const r = repo.upsertAuditSession({
-    sessionId,
-    userId: req.identity.userId,
-    agent: String(body.agent || 'opencode').slice(0, 32),
-    title: body.title ? String(body.title).slice(0, 300) : null,
-    messages: body.messages,
-    tokenUsage: body.token_usage && typeof body.token_usage === 'object' ? body.token_usage : null,
-    startedAt: body.started_at ? String(body.started_at) : null,
-    endedAt: body.ended_at ? String(body.ended_at) : null,
-  });
-  res.status(r.created ? 201 : 200).json(r);
-}));
-
-apiRouter.get('/audit/sessions', requireAuth, wrap(async (req, res) => {
-  const { q, page = 1, page_size = 20 } = req.query;
-  res.json(repo.listAuditSessions({ userId: req.identity.userId, q: q ? String(q) : undefined, page: Number(page), pageSize: Number(page_size) }));
-}));
-
-apiRouter.get('/audit/sessions/:id', requireAuth, wrap(async (req, res) => {
-  const s = repo.getAuditSession(req.params.id, req.identity.userId);
-  if (!s) return res.status(404).json({ error: '审计记录不存在' });
-  res.json(s);
-}));
-
 module.exports = { apiRouter, resolveIdentity, buildRedirectUri };

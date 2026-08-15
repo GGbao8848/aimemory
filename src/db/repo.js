@@ -249,68 +249,6 @@ function cleanupConnectCodes() {
   db.prepare('DELETE FROM connect_codes WHERE consumed_at IS NOT NULL OR expires_at <= ?').run(now());
 }
 
-// ============ 会话审计（企业 agent 全程记录）============
-
-/** 上报/更新一条会话记录（按 user+session 幂等 upsert；全量覆盖消息，report_count 递增） */
-function upsertAuditSession({ sessionId, userId, agent = 'opencode', title, messages, tokenUsage, startedAt, endedAt }) {
-  const ts = now();
-  const existing = db
-    .prepare('SELECT * FROM audit_sessions WHERE user_id = ? AND id = ?')
-    .get(userId, sessionId);
-  if (existing) {
-    db.prepare(
-      `UPDATE audit_sessions SET title = ?, messages = ?, token_usage = ?, ended_at = ?,
-         report_count = report_count + 1, last_report = ?
-       WHERE user_id = ? AND id = ?`
-    ).run(
-      title ?? existing.title,
-      JSON.stringify(messages || []),
-      tokenUsage ? JSON.stringify(tokenUsage) : existing.token_usage,
-      endedAt ?? existing.ended_at,
-      ts, userId, sessionId
-    );
-    return { id: sessionId, user_id: userId, updated: true };
-  }
-  db.prepare(
-    `INSERT INTO audit_sessions (id, user_id, agent, title, messages, token_usage, started_at, ended_at, report_count, first_report, last_report)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
-  ).run(
-    sessionId, userId, agent, title ?? null,
-    JSON.stringify(messages || []),
-    tokenUsage ? JSON.stringify(tokenUsage) : null,
-    startedAt ?? ts, endedAt ?? null,
-    ts, ts
-  );
-  return { id: sessionId, user_id: userId, created: true };
-}
-
-/** 分页查询某用户的审计记录（带搜索） */
-function listAuditSessions({ userId, q, page = 1, pageSize = 20 }) {
-  page = clamp(page, 1, 100000, 1);
-  pageSize = clamp(pageSize, 1, 100, 20);
-  const where = ['user_id = ?'];
-  const args = [userId];
-  if (q) { where.push('(title LIKE ? OR messages LIKE ?)'); args.push(`%${q}%`, `%${q}%`); }
-  const w = where.join(' AND ');
-  const total = db.prepare(`SELECT COUNT(*) c FROM audit_sessions WHERE ${w}`).get(...args).c;
-  const rows = db.prepare(
-    `SELECT id, agent, title, report_count, first_report, last_report, started_at, ended_at,
-            json_array_length(messages) AS message_count, token_usage
-     FROM audit_sessions WHERE ${w} ORDER BY last_report DESC LIMIT ? OFFSET ?`
-  ).all(...args, pageSize, (page - 1) * pageSize);
-  return {
-    results: rows.map((r) => ({ ...r, token_usage: r.token_usage ? JSON.parse(r.token_usage) : null })),
-    total, page, pageSize,
-  };
-}
-
-/** 单条审计详情（含完整消息） */
-function getAuditSession(sessionId, userId) {
-  const row = db.prepare('SELECT * FROM audit_sessions WHERE user_id = ? AND id = ?').get(userId, sessionId);
-  if (!row) return null;
-  return { ...row, messages: JSON.parse(row.messages), token_usage: row.token_usage ? JSON.parse(row.token_usage) : null };
-}
-
 module.exports = {
   createMemory,
   getMemory,
@@ -329,7 +267,4 @@ module.exports = {
   createConnectRequest,
   consumeConnectCode,
   cleanupConnectCodes,
-  upsertAuditSession,
-  listAuditSessions,
-  getAuditSession,
 };
