@@ -82,6 +82,7 @@ const VIEW_META = {
   memories: { title: '我的记忆', sub: '管理 agent 为你沉淀的记忆，跨会话复用' },
   keys: { title: '接入密钥', sub: '生成密钥，把 aimemory 接进你的 agent' },
   guide: { title: '接入指南', sub: 'ZCode 插件安装与 MCP 工具说明' },
+  sessions: { title: '会话记录', sub: '企业 agent 全程记录：你的 agent 会话自动留存，可回溯' },
 };
 
 function switchView(name) {
@@ -93,6 +94,7 @@ function switchView(name) {
   );
   $('#view-title').textContent = VIEW_META[name].title;
   $('#view-sub').textContent = VIEW_META[name].sub;
+  if (name === 'sessions') loadSessions(); // 进入会话记录视图时加载
 }
 
 document.querySelectorAll('.nav-item').forEach((btn) => {
@@ -163,6 +165,84 @@ function renderMemories(items, total) {
   $('#pg-prev').onclick = () => { if (page > 1) { page--; loadMemories(); } };
   $('#pg-next').onclick = () => { if (page < totalPages) { page++; loadMemories(); } };
 }
+
+// ===== 会话记录（企业 agent 全程记录）=====
+
+let auditPage = 1;
+let auditQuery = '';
+
+async function loadSessions() {
+  const list = $('#session-list');
+  list.innerHTML = '<p class="muted">加载中…</p>';
+  try {
+    const qs = new URLSearchParams({ page: auditPage, page_size: 10 });
+    if (auditQuery) qs.set('q', auditQuery);
+    const data = await api(`/api/audit/sessions?${qs}`);
+    renderSessions(data.results, data.total);
+  } catch (e) { list.innerHTML = `<p class="error">${esc(e.message)}</p>`; }
+}
+
+function renderSessions(items, total) {
+  const list = $('#session-list');
+  if (!items.length) {
+    list.innerHTML = `<div class="empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+        <path d="M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z" stroke-linejoin="round"/>
+        <path d="M7 9h10M7 12h10M7 15h6" stroke-linecap="round"/>
+      </svg>
+      <p class="empty-title">暂无会话记录</p>
+      <p class="empty-hint">员工 agent（opencode）会话上报后会自动出现在这里</p>
+    </div>`;
+  } else {
+    list.innerHTML = items.map((s) => `
+      <div class="session-item" data-id="${esc(s.id)}">
+        <div class="session-head">
+          <span class="session-title">${esc(s.title || s.id)}</span>
+          <span class="session-agent">${esc(s.agent)}</span>
+        </div>
+        <div class="memory-meta">
+          <span class="stamp">${esc(new Date(s.last_report).toLocaleString())}</span>
+          <span>${s.message_count} 条消息</span>
+          <span>上报 ${s.report_count} 次</span>
+          ${s.token_usage ? `<span class="meta-json">${esc(JSON.stringify(s.token_usage))}</span>` : ''}
+        </div>
+      </div>`).join('');
+  }
+  const totalPages = Math.max(1, Math.ceil(total / 10));
+  $('#session-pagination').innerHTML =
+    `<button class="btn btn-ghost" id="sa-prev" ${auditPage <= 1 ? 'disabled' : ''}>‹ 上一页</button>` +
+    `<span class="pg-info">第 ${auditPage} / ${totalPages} 页 · 共 ${total} 条</span>` +
+    `<button class="btn btn-ghost" id="sa-next" ${auditPage >= totalPages ? 'disabled' : ''}>下一页 ›</button>`;
+  $('#sa-prev').onclick = () => { if (auditPage > 1) { auditPage--; loadSessions(); } };
+  $('#sa-next').onclick = () => { if (auditPage < totalPages) { auditPage++; loadSessions(); } };
+}
+
+// 点击会话 → 展开完整消息
+$('#session-list').addEventListener('click', async (e) => {
+  const item = e.target.closest('.session-item');
+  if (!item) return;
+  const expanded = item.querySelector('.session-detail');
+  if (expanded) { expanded.remove(); return; }
+  try {
+    const s = await api(`/api/audit/sessions/${item.dataset.id}`);
+    const detail = document.createElement('div');
+    detail.className = 'session-detail';
+    detail.innerHTML = (s.messages || []).map((m) => `
+      <div class="msg ${m.role === 'user' ? 'msg-user' : 'msg-assistant'}">
+        <div class="msg-role">${esc(m.role)}${m.toolCalls ? ` · 调用了 ${m.toolCalls.length} 个工具` : ''}</div>
+        <div class="msg-content">${esc(typeof m.content === 'string' ? m.content : JSON.stringify(m.content))}</div>
+        ${m.toolCalls ? `<div class="msg-tools">${esc(JSON.stringify(m.toolCalls))}</div>` : ''}
+      </div>`).join('') || '<p class="muted">（无消息内容）</p>';
+    item.appendChild(detail);
+  } catch (e2) { toast(e2.message); }
+});
+
+$('#audit-search-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  auditQuery = $('#audit-search-input').value.trim();
+  auditPage = 1;
+  loadSessions();
+});
 
 // ===== 事件绑定 =====
 
