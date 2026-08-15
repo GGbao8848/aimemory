@@ -52,10 +52,6 @@
           <svg viewBox="0 0 16 16" class="nav-ico" aria-hidden="true"><path d="M3 2.5h7a2 2 0 0 1 2 2V13a1.5 1.5 0 0 0-1.5-1.5H3z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M10 4.5v6.5" stroke="currentColor" stroke-width="1.4"/></svg>
           <span>接入指南</span>
         </button>
-        <button class="nav-item" data-view="sessions">
-          <svg viewBox="0 0 16 16" class="nav-ico" aria-hidden="true"><path d="M2.5 3h11a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M4.5 6h7M4.5 8.5h7M4.5 11h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
-          <span>会话记录</span>
-        </button>
       </nav>
 
       <div class="sidebar-foot">
@@ -156,21 +152,6 @@
             <li><code>update_memory</code> / <code>delete_memory</code> — 修正 / 删除</li>
           </ul>
           <p class="muted small">与 mem0 官方 MCP 参数同构；<code>infer</code> / <code>rerank</code> / <code>threshold</code> 为兼容保留字段（本实例为关键词检索）。</p>
-        </div>
-      </section>
-
-      <!-- 视图：会话记录（企业 agent 全程记录） -->
-      <section id="view-sessions" class="view">
-        <div class="card">
-          <div class="card-head">
-            <h2>会话列表</h2>
-            <form id="audit-search-form" class="search-form" role="search">
-              <input id="audit-search-input" type="search" placeholder="搜索会话…（标题/内容）" />
-              <button class="btn btn-ghost" type="submit">搜索</button>
-            </form>
-          </div>
-          <div id="session-list" class="memory-list"></div>
-          <div id="session-pagination" class="pagination"></div>
         </div>
       </section>
     </main>
