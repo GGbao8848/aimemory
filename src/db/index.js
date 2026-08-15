@@ -65,6 +65,8 @@ CREATE TABLE IF NOT EXISTS api_keys (
   revoked_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
+-- 硬约束：同一用户未吊销的密钥名称必须唯一（重名创建直接报错；吊销后可复用）
+CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_user_name ON api_keys(user_id, name) WHERE revoked_at IS NULL;
 
 -- Web 登录会话（Keycloak 登录成功后建立，HttpOnly cookie 引用 sid）
 CREATE TABLE IF NOT EXISTS sessions (

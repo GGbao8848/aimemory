@@ -96,8 +96,13 @@ apiRouter.delete('/memories/:id', requireAuth, wrap(async (req, res) => {
 // ===== API Key =====
 
 apiRouter.post('/keys', requireAuth, wrap(async (req, res) => {
-  const { name } = req.body || {};
-  res.status(201).json(tokens.createApiKey(req.identity.userId, name || 'default'));
+  const name = String((req.body || {}).name || 'default').trim().slice(0, 50);
+  // 限制重名：同一用户未吊销的密钥名称唯一（吊销后可复用）
+  const exists = repo.listApiKeys(req.identity.userId).some((k) => k.name === name);
+  if (exists) {
+    return res.status(400).json({ error: `密钥名称「${name}」已存在，请换一个名称或先吊销旧密钥` });
+  }
+  res.status(201).json(tokens.createApiKey(req.identity.userId, name));
 }));
 
 apiRouter.get('/keys', requireAuth, wrap(async (req, res) => {
