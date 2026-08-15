@@ -22,18 +22,19 @@ plugin/
 1. **添加 aimemory 仓库为 marketplace**：ZCode → Settings → Plugin Management → Discover →「+」→ 添加公司内网上的 aimemory 仓库（Git URL 或本地目录，根目录有 `marketplace.json`）→ 确认。若仓库不可用，也可 **Add local folder** 直接指向 `plugin/` 目录（兜底）。
 2. **安装 aimemory 插件**：在插件列表找到 **aimemory** → 安装。
 
-## 一键连接（推荐，无需手动复制密钥）
+## 一键连接（设备流，零粘贴）
 
 安装后运行 **`/aimemory-connect`**，按 agent 引导：
 
-1. 浏览器打开 `http://<服务器>:18543/connect`（SSO 免密确认，公司统一账号）。
-2. 页面自动生成 **连接码**（10 分钟有效、一次性）与 API Key。
-3. 回 ZCode 运行 **`/aimemory-connect <连接码>`** —— 密钥自动写入你的 ZCode 配置，MCP 工具即连上。
+1. agent 发起设备流请求 → 给出**授权页地址**（自动弹出）。
+2. 浏览器打开授权页：用公司统一账号登录（SSO，已登录免密）→ 显示本人身份 → 可选填密钥名称 → 点**「确认授权」**。
+3. agent 自动轮询 → 拿到密钥 → **自动写入你的 ZCode 配置**，MCP 工具即连上。
 4. 运行 **`/aimemory status`** 验证（能 `get_memories` 即成功）。
 
-> 连接码一次性，兑换后即失效；密钥写进 `~/.zcode/cli/config.json` 后永久生效。
+> **零粘贴**：全程无需复制任何 token / 连接码。标准认证不降级（SSO 校验 + 授权确认 + 密钥服务端生成），密钥写进 `~/.zcode/cli/config.json` 后持久生效。
+> 内部市场插件走快速连接；外部/手动接入仍用「MCP 配置 JSON」标准方式（见下节）。
 
-## 手动配置（兜底）
+## 手动配置（外部接入 / 兜底）
 
 `/aimemory-connect` 不可用（如平台版本过旧）时，用 `/aimemory-key` 走手动流程：登录 Web 平台 → 生成密钥 → 填入插件设置。详见该命令引导。
 

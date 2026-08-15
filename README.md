@@ -114,12 +114,12 @@ aimemory 仓库根/
     └── README.md                 # 安装与配置指引
 ```
 
-**员工安装 + 连接（全程点击，不复制粘贴）**：
+**员工安装 + 连接（内部市场快速链接，全程点击、零粘贴）**：
 1. ZCode → Settings → Plugin Management → Discover →「+」→ 添加本仓库为 marketplace（内网 Git URL 或本地目录）→ 安装 aimemory
-2. 运行 **`/aimemory-connect`** → 浏览器打开 `http://<服务器>:18543/connect`（SSO 确认）
-3. 回 ZCode 运行 **`/aimemory-connect <连接码>`** → 密钥自动写入配置 → `/aimemory status` 验证
+2. 运行 **`/aimemory-connect`** → agent 发起设备流请求，浏览器自动打开授权页（SSO 确认，已登录免密）
+3. 授权页点**「确认授权」**（可选填密钥名称，重名自动去重）→ 密钥自动写入配置 → `/aimemory status` 验证
 
-> 连接码一次性、10 分钟有效；密钥写入 `~/.zcode/cli/config.json`（`mcp.servers.aimemory`，与 mem0 配置同款写法）后持久生效。`/aimemory-key` 保留为手动兜底。
+> **内部市场 = 绝对可信来源**：标准认证不降级（Keycloak SSO 校验 + 授权确认 + 密钥服务端生成），设备流只是消除「复制粘贴字符串」。密钥写入 `~/.zcode/cli/config.json`（`mcp.servers.aimemory`）后持久生效。`/aimemory-key` 保留为手动兜底；外部客户端仍可用 Web 平台「复制 JSON」标准方式接入。
 
 **管理员分发**：员工把 aimemory 仓库添加为 marketplace 后，安装/更新都是点击完成（git pull 同步仓库即可）；将来做独立插件市场时，把 `plugin/` + `marketplace.json` 抽成独立仓库即可，标准格式抽出即用。
 
