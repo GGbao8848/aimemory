@@ -143,6 +143,33 @@ async function ensureRealm() {
   console.log(`  ✓ 已创建 realm ${REALM}`);
 }
 
+// Keycloak 26 默认不给 access token 签 aud；aimemory 验签强制要求 aud=clientId。
+// 因此 client 必须有 Audience mapper，否则 Web 登录回调报「missing required aud claim」。
+async function ensureAudienceMapper(clientUuid) {
+  const mappers = (await kc(`/admin/realms/${REALM}/clients/${clientUuid}/protocol-mappers/models`)).data || [];
+  const has = mappers.some(
+    (m) => m.protocolMapper === 'oidc-audience-mapper' && (m.config?.['included.client.audience'] || '') === CLIENT_ID
+  );
+  if (has) {
+    console.log(`  ✓ client ${CLIENT_ID} 已有 audience mapper（aud=${CLIENT_ID}），跳过`);
+    return;
+  }
+  await kc(`/admin/realms/${REALM}/clients/${clientUuid}/protocol-mappers/models`, {
+    method: 'POST',
+    body: {
+      name: `audience-${CLIENT_ID}`,
+      protocol: 'openid-connect',
+      protocolMapper: 'oidc-audience-mapper',
+      config: {
+        'included.client.audience': CLIENT_ID,
+        'access.token.claim': 'true',
+        'id.token.claim': 'false',
+      },
+    },
+  });
+  console.log(`  ✓ 已创建 audience mapper（access token 将包含 aud=${CLIENT_ID}）`);
+}
+
 async function ensureClient() {
   const { data } = await kc(`/admin/realms/${REALM}/clients?clientId=${CLIENT_ID}`);
   if (data?.length) {
@@ -162,6 +189,7 @@ async function ensureClient() {
     } else {
       console.log(`  ✓ client ${CLIENT_ID} 已存在，跳过`);
     }
+    await ensureAudienceMapper(existing.id);
     return;
   }
   await kc(`/admin/realms/${REALM}/clients`, {
@@ -183,6 +211,9 @@ async function ensureClient() {
   });
   console.log(`  ✓ 已创建 client ${CLIENT_ID}`);
   console.log(`    回调地址: ${redirectUris.join(', ')}`);
+  // 创建后立即补 Audience mapper（幂等），避免 Keycloak 26 默认无 aud 导致登录失败
+  const { data: created } = await kc(`/admin/realms/${REALM}/clients?clientId=${CLIENT_ID}`);
+  if (created?.length) await ensureAudienceMapper(created[0].id);
 }
 
 // BR-Agent client（br-agent，web+桌面共用）：配置单点登出
