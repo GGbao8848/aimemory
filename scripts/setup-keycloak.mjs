@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 幂等初始化 Keycloak：创建 realm、client（aimemory-web）、配置 br-agent 单点登出、测试用户。
+ * 幂等初始化 Keycloak：创建 realm、client（aimemory-web）、audience mapper、测试用户。
  * 用 master realm 的管理凭据（KEYCLOAK_ADMIN_USER / KEYCLOAK_ADMIN_PASSWORD，默认从 .env 读取）。
  *
  * 用法: node scripts/setup-keycloak.mjs
@@ -36,9 +36,6 @@ const ADMIN_PASSWORD = process.env.KEYCLOAK_ADMIN_PASSWORD || localEnv.KEYCLOAK_
 const REALM = process.env.KEYCLOAK_REALM || localEnv.KEYCLOAK_REALM || 'aimemory';
 const CLIENT_ID = process.env.KEYCLOAK_CLIENT_ID || localEnv.KEYCLOAK_CLIENT_ID || 'aimemory-web';
 const PORT = process.env.PORT || localEnv.PORT || '18543';
-// BR-Agent 单点登录：web 端口（front-channel logout 回跳页）与 server 端口（back-channel logout 回调）
-const BR_AGENT_WEB_PORT = process.env.BR_AGENT_WEB_PORT || localEnv.BR_AGENT_WEB_PORT || '9005';
-const BR_AGENT_SERVER_PORT = process.env.BR_AGENT_SERVER_PORT || localEnv.BR_AGENT_SERVER_PORT || '9004';
 // 用 ?? 而非 ||：显式留空的 TEST_USERS=（复用现有用户、不创建测试用户）应被尊重，不回退到默认
 const TEST_USERS = (process.env.TEST_USERS ?? localEnv.TEST_USERS ?? 'alice,bob,charlie').split(',').map((s) => s.trim()).filter(Boolean);
 const TEST_PASSWORD = process.env.TEST_USERS_PASSWORD || localEnv.TEST_USERS_PASSWORD || 'aimemory-test-2026';
@@ -176,16 +173,12 @@ async function ensureClient() {
     const existing = data[0];
     const current = existing.redirectUris || [];
     const missing = redirectUris.filter((u) => !current.includes(u));
-    // 单点登出：front-channel logout URL（Keycloak end_session 后以 iframe 加载，清本端会话）
-    const frontChannelLogoutUrl = `http://${IP}:${PORT}/slo-logout`;
-    const currentAttrs = existing.attributes || {};
-    const needFront = currentAttrs['frontchannel.logout.url'] !== frontChannelLogoutUrl;
-    if (missing.length || needFront) {
+    if (missing.length) {
       await kc(`/admin/realms/${REALM}/clients/${existing.id}`, {
         method: 'PUT',
-        body: { ...existing, redirectUris: [...current, ...missing], attributes: { ...currentAttrs, 'frontchannel.logout.url': frontChannelLogoutUrl } },
+        body: { ...existing, redirectUris: [...current, ...missing] },
       });
-      console.log(`  ✓ 已更新 client ${CLIENT_ID}（回调地址 + front-channel logout）`);
+      console.log(`  ✓ 已更新 client ${CLIENT_ID}（补齐回调地址: ${missing.join(', ')}）`);
     } else {
       console.log(`  ✓ client ${CLIENT_ID} 已存在，跳过`);
     }
@@ -205,7 +198,6 @@ async function ensureClient() {
       webOrigins: ['+'],
       attributes: {
         'pkce.code.challenge.method': 'S256',
-        'frontchannel.logout.url': `http://${IP}:${PORT}/slo-logout`,
       },
     },
   });
@@ -214,42 +206,6 @@ async function ensureClient() {
   // 创建后立即补 Audience mapper（幂等），避免 Keycloak 26 默认无 aud 导致登录失败
   const { data: created } = await kc(`/admin/realms/${REALM}/clients?clientId=${CLIENT_ID}`);
   if (created?.length) await ensureAudienceMapper(created[0].id);
-}
-
-// BR-Agent client（br-agent，web+桌面共用）：配置单点登出
-// - front-channel logout：BR-Agent web 端清 localStorage token
-// - back-channel logout：Keycloak 服务端 POST 到 BR-Agent server，由其广播给桌面客户端
-// 注意：br-agent 的 redirectUris（9005 web 回调 / 127.0.0.1:30088 桌面回调）由其部署侧管理，
-// 此处只追加/更新 logout 属性，绝不改动其 redirectUris 与 webOrigins。
-async function ensureBrAgentClient() {
-  const BR_CLIENT_ID = 'br-agent';
-  const { data } = await kc(`/admin/realms/${REALM}/clients?clientId=${BR_CLIENT_ID}`);
-  // CS 模式：BR-Agent 只有桌面客户端（无 web），SLO 走 back-channel（server 广播到桌面 WS）；
-  // front-channel logout（指向 web 的 slo-logout 页）已随 web 移除，显式清除避免 Keycloak 加载失效 URL。
-  const attributes = {
-    'frontchannel.logout.url': '',
-    'backchannel.logout.url': `http://localhost:${BR_AGENT_SERVER_PORT}/api/auth/kc-logout`,
-    'backchannel.logout.session.required': 'true',
-  };
-  if (data?.length) {
-    const existing = data[0];
-    const current = existing.attributes || {};
-    const needsUpdate =
-      (current['frontchannel.logout.url'] || '') !== attributes['frontchannel.logout.url'] ||
-      current['backchannel.logout.url'] !== attributes['backchannel.logout.url'] ||
-      current['backchannel.logout.session.required'] !== attributes['backchannel.logout.session.required'];
-    if (needsUpdate) {
-      await kc(`/admin/realms/${REALM}/clients/${existing.id}`, {
-        method: 'PUT',
-        body: { ...existing, attributes: { ...current, ...attributes } },
-      });
-      console.log(`  ✓ 已更新 client ${BR_CLIENT_ID}（back-channel logout，front-channel 已清）`);
-    } else {
-      console.log(`  ✓ client ${BR_CLIENT_ID} 已配置单点登出，跳过`);
-    }
-    return;
-  }
-  console.log(`  ⚠ client ${BR_CLIENT_ID} 不存在，跳过（BR-Agent 的 client 需在其部署侧创建）`);
 }
 
 async function ensureUser(username) {
@@ -307,7 +263,6 @@ const steps = [
     `目标 realm（${REALM}）下若已有同名 client，脚本只补齐回调地址，不动其它配置`,
     '若 403/409：该 client 可能被限制，或管理员 token 权限不足',
   ] },
-  { name: '配置 br-agent 单点登出', fn: ensureBrAgentClient, hints: ['br-agent 不存在时跳过属正常（其 client 由 BR-Agent 部署侧管理）'] },
   { name: '创建测试用户', fn: ensureTestUsers, hints: ['TEST_USERS 留空时本步自动跳过（复用现有用户）'] },
 ];
 
@@ -332,8 +287,7 @@ async function main() {
 
   for (let i = 0; i < steps.length; i++) {
     const { name, fn, hints } = steps[i];
-    console.log(`\n[${i + 1}/${steps.length}] ${name}`);
-    try {
+    console.log(`\n[${i + 1}/${steps.length}] ${name}`);    try {
       await fn();
     } catch (e) {
       console.error(`\n✗ 第 ${i + 1} 步「${name}」失败`);
