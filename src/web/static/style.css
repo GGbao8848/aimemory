@@ -131,28 +131,21 @@ input[type="text"], input[type="search"], textarea,
   border-bottom: 1px solid var(--border);
   margin-bottom: 14px;
 }
-.brand-mark {
+.brand-logo {
   width: 34px; height: 34px;
   border-radius: 9px;
-  background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  position: relative;
   flex: none;
+  object-fit: cover;
   box-shadow: 0 4px 14px var(--brand-glow);
   transition: box-shadow var(--t-theme);
 }
-/* signature：记忆脉冲 */
-.brand-mark::before {
-  content: "";
-  position: absolute; inset: 9px;
-  border-radius: 50%;
-  background: #fff;
-  opacity: .92;
-}
-.brand-mark::after {
-  content: "";
-  position: absolute; inset: 14px;
-  border-radius: 50%;
-  background: var(--accent);
+.login-logo {
+  display: block;
+  width: 64px; height: 64px;
+  margin: 0 auto 12px;
+  border-radius: 14px;
+  object-fit: cover;
+  box-shadow: 0 6px 18px var(--brand-glow);
 }
 .brand-text strong {
   display: block;

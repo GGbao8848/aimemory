@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>aimemory · 企业 AI 记忆库</title>
+  <link rel="icon" type="image/png" href="/icon-32.png" />
+  <link rel="apple-touch-icon" href="/icon-192.png" />
   <script>
     // 防闪烁：在 CSS 生效前就定好主题（localStorage 优先，其次跟随系统）
     (function () {
@@ -22,6 +24,7 @@
   <!-- 未登录视图（SSO 未通过时短暂显示） -->
   <section id="view-login" class="login-wrap hidden">
     <div class="card login-card">
+      <img class="login-logo" src="/icon-128.png" alt="aimemory" />
       <h1>登录记忆平台</h1>
       <p class="muted">通过公司统一登录平台（Keycloak）登录后，即可管理你的记忆、生成接入密钥。</p>
       <a class="btn btn-primary btn-block" href="/auth/login">通过登录平台登录</a>
@@ -32,7 +35,7 @@
   <div id="view-app" class="app hidden">
     <aside class="sidebar">
       <div class="brand">
-        <span class="brand-mark" aria-hidden="true"></span>
+        <img class="brand-logo" src="/icon-128.png" alt="aimemory" />
         <div class="brand-text">
           <strong>aimemory</strong>
           <span>企业 AI 记忆库</span>
