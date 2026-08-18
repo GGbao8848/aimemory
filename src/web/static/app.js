@@ -21,6 +21,25 @@ function toast(msg) {
   el._t = setTimeout(() => el.classList.add('hidden'), 2600);
 }
 
+// 兼容复制：安全上下文（HTTPS/localhost）用 navigator.clipboard；
+// 内网 HTTP（http://IP:端口）下 clipboard API 不可用 → 降级为隐藏 textarea + execCommand
+function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(text);
+  }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.position = 'fixed';
+  ta.style.left = '-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+  document.body.removeChild(ta);
+  return ok ? Promise.resolve() : Promise.reject(new Error('复制失败（浏览器限制）'));
+}
+
 async function api(path, opts = {}) {
   const res = await fetch(path, {
     headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
@@ -309,8 +328,7 @@ $('#key-form').addEventListener('submit', async (e) => {
 $('#copy-new-key').addEventListener('click', (e) => {
   const token = e.target.dataset.token;
   if (!token) return;
-  navigator.clipboard.writeText(token).then(() => toast('密钥已复制'));
-});
+  copyText(token).then(() => toast('密钥已复制'));});
 
 // ===== MCP 配置 JSON =====
 
@@ -370,7 +388,7 @@ document.querySelectorAll('[data-mcp-seg]').forEach((b) => {
 // 手动模式字段复制
 document.querySelectorAll('[data-copy]').forEach((b) => {
   b.onclick = () => {
-    navigator.clipboard.writeText($(`#${b.dataset.copy}`).textContent).then(() => toast('已复制'));
+    copyText($(`#${b.dataset.copy}`).textContent).then(() => toast('已复制'));
   };
 });
 
@@ -378,7 +396,7 @@ $('#copy-json').addEventListener('click', async () => {
   if (!selectedKey && !keyToken) return toast('请先生成一个密钥');
   if (!keyToken) return toast('密钥明文只显示一次：请生成新密钥后复制，或在 JSON 中手动填入 Token');
   renderJson(); // 手动模式切回来时也确保复制的是最新内容
-  navigator.clipboard.writeText($('#mcp-json').textContent).then(() => {
+  copyText($('#mcp-json').textContent).then(() => {
     toast('已复制完整 MCP 配置 JSON');
   });
 });
