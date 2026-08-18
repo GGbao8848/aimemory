@@ -124,9 +124,35 @@
 
         <div class="card">
           <h2>🔌 MCP 配置</h2>
-          <p class="muted">复制以下 JSON 到你的 agent 的 MCP 客户端配置中即可接入（url 指向本服务器内网地址）。</p>
-          <pre id="mcp-json" class="mcp-json"></pre>
-          <button id="copy-json" class="btn btn-primary btn-block" type="button">复制 JSON</button>
+          <p class="muted">选择一种方式接入：一键复制 JSON，或手动模式按字段填入你的 MCP 客户端（url 指向本服务器内网地址）。</p>
+          <div class="seg" role="tablist" aria-label="MCP 配置格式">
+            <button type="button" class="seg-btn active" data-mcp-seg="json" role="tab" aria-selected="true">JSON 配置</button>
+            <button type="button" class="seg-btn" data-mcp-seg="manual" role="tab" aria-selected="false">手动模式</button>
+          </div>
+          <div id="json-config">
+            <pre id="mcp-json" class="mcp-json"></pre>
+            <button id="copy-json" class="btn btn-primary btn-block" type="button">复制 JSON</button>
+          </div>
+          <div id="manual-config" class="hidden">
+            <div class="manual-field">
+              <span class="label">服务器名称</span>
+              <div class="row"><code id="manual-name">aimemory</code><button class="btn btn-ghost" type="button" data-copy="manual-name">复制</button></div>
+            </div>
+            <div class="manual-field">
+              <span class="label">传输类型</span>
+              <div class="row"><code id="manual-transport">http</code><button class="btn btn-ghost" type="button" data-copy="manual-transport">复制</button></div>
+            </div>
+            <div class="manual-field">
+              <span class="label">服务器 URL</span>
+              <div class="row"><code id="manual-url"></code><button class="btn btn-ghost" type="button" data-copy="manual-url">复制</button></div>
+            </div>
+            <div class="manual-field">
+              <span class="label">自定义 Headers</span>
+              <div class="row"><span class="hd-label">Header 名称</span><code id="manual-header-name">Authorization</code><button class="btn btn-ghost" type="button" data-copy="manual-header-name">复制</button></div>
+              <div class="row"><span class="hd-label">Header 值</span><code id="manual-header-value"></code><button class="btn btn-ghost" type="button" data-copy="manual-header-value">复制</button></div>
+            </div>
+            <p class="muted small">按上面的「服务器名称 / 传输类型 / 服务器 URL / 自定义 Headers」对应填入你的 MCP 客户端（如 BR-Agent 自定义连接器、Claude Code 等）。Token 明文只显示一次，刷新后需用已保存密钥的占位提示。</p>
+          </div>
         </div>
       </section>
 

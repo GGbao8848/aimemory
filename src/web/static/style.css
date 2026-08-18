@@ -489,6 +489,36 @@ input:focus, textarea:focus {
   display: block;
   margin-bottom: 8px;
 }
+/* 手动模式字段：label 一行，值 + 复制按钮一行（对应通用 MCP 客户端表单） */
+.manual-field { margin-bottom: 12px; }
+.manual-field .label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.manual-field .row { display: flex; align-items: center; gap: 8px; }
+.manual-field code {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  word-break: break-all;
+  background: var(--code-bg);
+  color: var(--code-text);
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  white-space: pre-wrap;
+}
+.manual-field .btn { flex-shrink: 0; }
+.manual-field .hd-label {
+  flex-shrink: 0;
+  width: 76px;
+  font-size: 11.5px;
+  color: var(--muted);
+  font-family: var(--font-sans);
+}
 .key-list { list-style: none; margin: 0; padding: 0; }
 .key-item {
   display: flex;

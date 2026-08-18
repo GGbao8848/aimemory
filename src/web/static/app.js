@@ -341,11 +341,43 @@ function renderJson() {
     $('#copy-json').textContent = '复制 JSON 模板';
   }
   $('#mcp-json').textContent = JSON.stringify(json, null, 2);
+  // 手动模式字段（与通用 MCP 客户端「自定义连接器」表单一一对应）
+  $('#manual-url').textContent = `${baseUrl()}/mcp`;
+  $('#manual-header-name').textContent = 'Authorization';
+  if (keyToken) {
+    $('#manual-header-value').textContent = `Token ${keyToken}`;
+  } else if (selectedKey) {
+    $('#manual-header-value').textContent = 'Token <在此粘贴你的 m0-xxx 密钥>';
+  } else {
+    $('#manual-header-value').textContent = 'Token m0-xxx（先生成一个密钥）';
+  }
 }
+
+// MCP 配置格式切换（JSON / 手动）
+document.querySelectorAll('[data-mcp-seg]').forEach((b) => {
+  b.onclick = () => {
+    document.querySelectorAll('[data-mcp-seg]').forEach((x) => {
+      const on = x === b;
+      x.classList.toggle('active', on);
+      x.setAttribute('aria-selected', String(on));
+    });
+    const manual = b.dataset.mcpSeg === 'manual';
+    $('#json-config').classList.toggle('hidden', manual);
+    $('#manual-config').classList.toggle('hidden', !manual);
+  };
+});
+
+// 手动模式字段复制
+document.querySelectorAll('[data-copy]').forEach((b) => {
+  b.onclick = () => {
+    navigator.clipboard.writeText($(`#${b.dataset.copy}`).textContent).then(() => toast('已复制'));
+  };
+});
 
 $('#copy-json').addEventListener('click', async () => {
   if (!selectedKey && !keyToken) return toast('请先生成一个密钥');
   if (!keyToken) return toast('密钥明文只显示一次：请生成新密钥后复制，或在 JSON 中手动填入 Token');
+  renderJson(); // 手动模式切回来时也确保复制的是最新内容
   navigator.clipboard.writeText($('#mcp-json').textContent).then(() => {
     toast('已复制完整 MCP 配置 JSON');
   });
