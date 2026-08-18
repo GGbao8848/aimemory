@@ -354,4 +354,5 @@ npm run setup-keycloak
 
 ## 参考
 
+- 下一阶段计划：见 **[docs/下一阶段计划.md](docs/下一阶段计划.md)**（阶段 0 运营收尾 → P0 AI 化 → P1/P2）
 - 产品构想：本仓库旧版 `README.md` 已归档为本文档前身（多租户设计见 mykeycloak 项目 docs）
