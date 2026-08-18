@@ -102,28 +102,6 @@ pm2 restart aimemory-mcp        # 更新代码后重启
 4. 之后 agent 就能调用记忆工具：写 `add_memory`、查 `search_memories`、管 `get_memories` 等。
    每个员工的数据**互相隔离**，密钥吊销后立即失效。
 
-## ZCode 插件接入（推荐，一键安装 + 一键连接）
-
-> 手动复制 JSON 适合一次性接入；**批量给 ZCode 用户（公司员工）使用，推荐直接装插件**：添加 marketplace → 点安装 → 浏览器授权一次，密钥自动生成并写入配置（`/aimemory-connect`），MCP 工具自动注册，agent 还会自动学会"什么时候该写/查记忆"。
-
-**aimemory 的插件已迁入独立市场仓库 [plugin-market](../plugin-market)**（与 aimemory 解耦，市场统一维护所有公司插件，详见该仓库 README）：
-
-```text
-plugin-market/                    # 公司内部插件市场（独立仓库）
-├── marketplace.json              # 市场清单 = 唯一事实源（所有插件在这里登记）
-├── plugins/aimemory/             # aimemory 插件本体（.zcode-plugin / .mcp.json / skills / commands）
-└── web/                          # 市场 Web 端（列表从 marketplace.json 派生）
-```
-
-**员工安装 + 连接（内部市场快速链接，全程点击、零粘贴）**：
-1. ZCode → Settings → Plugin Management → Discover →「+」→ 添加 plugin-market 仓库为 marketplace（内网 Git URL 或本地目录）→ 安装 aimemory
-2. 运行 **`/aimemory-connect`** → agent 发起设备流请求，浏览器自动打开授权页（SSO 确认，已登录免密）
-3. 授权页点**「确认授权」**（可选填密钥名称，重名自动去重）→ 密钥自动写入配置 → `/aimemory status` 验证
-
-> **内部市场 = 绝对可信来源**：标准认证不降级（Keycloak SSO 校验 + 授权确认 + 密钥服务端生成），设备流只是消除「复制粘贴字符串」。密钥写入 `~/.zcode/cli/config.json`（`mcp.servers.aimemory`）后持久生效。`/aimemory-key` 保留为手动兜底；外部客户端仍可用 Web 平台「复制 JSON」标准方式接入。
-
-**管理员分发**：市场独立在 plugin-market 仓库，员工添加一次后安装/更新都是点击完成；**新增/维护插件只改 plugin-market**（详见其 README 的维护说明）。
-
 ## MCP 工具一览
 
 | 工具 | 说明 |

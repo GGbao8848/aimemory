@@ -100,7 +100,7 @@ function showApp() {
 const VIEW_META = {
   memories: { title: '我的记忆', sub: '管理 agent 为你沉淀的记忆，跨会话复用' },
   keys: { title: '接入密钥', sub: '生成密钥，把 aimemory 接进你的 agent' },
-  guide: { title: '接入指南', sub: 'ZCode 插件安装与 MCP 工具说明' },
+  guide: { title: '接入指南', sub: 'MCP 接入步骤与工具说明' },
 };
 
 function switchView(name) {

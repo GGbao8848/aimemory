@@ -162,14 +162,14 @@
       <!-- 视图：接入指南 -->
       <section id="view-guide" class="view">
         <div class="card">
-          <h2>📦 ZCode 插件安装（推荐）</h2>
-          <p class="muted">批量接入首选：装插件后 MCP 工具自动注册，agent 还会自动学会"何时该写/查记忆"。替代手动复制 JSON。</p>
+          <h2>🔌 MCP 接入步骤</h2>
           <ol class="steps">
-            <li><b>获取插件目录</b>：公司局域网 Git 拉取 aimemory 仓库，取其中的 <code>plugin/</code> 目录（管理员可分发拷贝）</li>
-            <li><b>添加本地 marketplace</b>：ZCode → Settings → Plugin Management → Discover →「+」→ <b>Add local folder</b> → 指向 <code>plugin/</code></li>
-            <li><b>安装并配密钥</b>：安装 aimemory 插件 → 运行 <b><code>/aimemory-key</code></b> 按引导填个人密钥 → <b><code>/aimemory status</code></b> 验证</li>
+            <li><b>生成接入密钥</b>：切到「接入密钥」→ 填名称（如 <code>claude-code</code>）→ 生成，复制一次性的 <code>m0-xxx</code> 明文</li>
+            <li><b>复制配置</b>：「MCP 配置」里复制完整 JSON（含密钥），或切「手动模式」按字段复制</li>
+            <li><b>填入客户端</b>：把 JSON 或字段粘贴到你的 agent 的 MCP 客户端配置（Claude Code / Codex / BR-Agent 自定义连接器…）</li>
+            <li><b>验证</b>：agent 调用 <code>add_memory</code> 写一条测试记忆，再到本平台「我的记忆」确认</li>
           </ol>
-          <p class="muted small">插件含 skill（记忆使用准则）与命令 <code>/aimemory</code>、<code>/aimemory-key</code>；安装后 agent 自动把部署经验、踩坑、偏好写入记忆，新任务先检索复用。</p>
+          <p class="muted small">每个员工密钥互不可见、数据互相隔离；密钥吊销后立即失效。MCP 端点：<code>http://&lt;服务器内网IP&gt;:18543/mcp</code></p>
         </div>
 
         <div class="card">
