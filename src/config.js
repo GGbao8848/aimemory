@@ -40,6 +40,17 @@ function ensureSessionSecret() {
 }
 ensureSessionSecret();
 
+// ===== Embedding 语义检索 =====
+// 用于 search_memories 的语义召回。指向任意 OpenAI 兼容的 /v1/embeddings 服务。
+// EMBEDDING_ENABLED=1 时启用语义检索；不可用/失败时自动回退关键词检索，不影响现有调用。
+const embedding = {
+  enabled: process.env.EMBEDDING_ENABLED === '1',
+  baseUrl: (process.env.EMBEDDING_BASE_URL || 'http://10.10.10.146:8005/v1').replace(/\/$/, ''),
+  model: process.env.EMBEDDING_MODEL || '/models/Qwen3-Embedding-8B',
+  apiKey: process.env.EMBEDDING_API_KEY || '',
+  timeoutMs: parseInt(process.env.EMBEDDING_TIMEOUT_MS || '15000', 10),
+};
+
 module.exports = {
   root,
   dataDir: path.join(root, 'data'),
@@ -51,6 +62,7 @@ module.exports = {
     realm: process.env.KEYCLOAK_REALM || 'aimemory',
     clientId: process.env.KEYCLOAK_CLIENT_ID || 'aimemory-web',
   },
+  embedding,
   sessionSecret: process.env.SESSION_SECRET,
   sessionTtlMs: 7 * 24 * 3600 * 1000, // Web 会话 7 天
   mcpSessionTtlMs: 30 * 60 * 1000, // MCP session 空闲 30 分钟清理

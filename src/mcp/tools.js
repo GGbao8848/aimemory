@@ -43,7 +43,7 @@ const tools = [
         },
         infer: {
           type: 'boolean',
-          description: '本实例为关键词存储，无 LLM 抽取；参数为兼容保留，忽略',
+          description: '本实例暂未实现 LLM 事实抽取，参数为兼容保留，忽略',
         },
       },
       required: ['text'],
@@ -60,7 +60,8 @@ const tools = [
 
   {
     name: 'search_memories',
-    description: '按关键词/全文检索记忆（FTS5 trigram，支持中文子串，查询建议 >= 3 字符）',
+    description:
+      '语义+关键词混合检索：向量语义召回（同义/口语化可命中）+ FTS5 关键词召回（中文子串），threshold 过滤低相似度向量结果',
     inputSchema: {
       type: 'object',
       properties: {
@@ -69,7 +70,7 @@ const tools = [
         limit: { type: 'integer', minimum: 1, maximum: 100, description: '返回条数，默认 10' },
         threshold: {
           type: 'number',
-          description: '本实例无向量相似度，参数为兼容保留，忽略',
+          description: '向量相似度阈值（0~1，默认 0 不过滤）。语义召回结果中低于该值的将被排除',
         },
         filters: {
           type: 'object',
@@ -77,12 +78,12 @@ const tools = [
         },
         rerank: {
           type: 'boolean',
-          description: '本实例无向量 rerank，参数为兼容保留，忽略',
+          description: '结果重排序（语义优先）；当前默认已按语义相关度排序，参数保留兼容',
         },
       },
       required: ['query'],
     },
-    handler: async ({ query, limit, user_id, filters = {} }, userId) => {
+    handler: async ({ query, limit, threshold, user_id, filters = {} }, userId) => {
       if (!query || !String(query).trim()) {
         throw new McpError(ErrorCode.InvalidParams, 'query 不能为空');
       }
@@ -90,7 +91,7 @@ const tools = [
       if (filters && filters.user_id !== undefined && filters.user_id !== null) {
         resolveUserId(uid, filters.user_id);
       }
-      const results = repo.searchMemories({ userId: uid, query: String(query), limit });
+      const results = await repo.searchMemories({ userId: uid, query: String(query), limit, threshold });
       return { content: [{ type: 'text', text: jsonText({ results }) }] };
     },
   },

@@ -8,7 +8,7 @@
 - **mem0 兼容的 MCP 工具集**：`add_memory` / `search_memories` / `get_memories` / `get_memory` / `update_memory` / `delete_memory` + `create_api_key` / `list_api_keys` / `revoke_api_key`
 - **内网单端口 18543**：`/mcp`（MCP 端点）+ `/api/*`（REST）+ `/`（Web 管理平台）
 - **多租户隔离**：所有数据按用户隔离，跨用户访问直接拒绝（MCP 与 REST 均验证）
-- **关键词全文检索**（SQLite FTS5 trigram）：支持中文子串，零外部依赖、完全离线
+- **语义 + 关键词混合检索**：embedding 向量召回（同义/口语化可命中）+ SQLite FTS5 trigram 关键词召回（中文子串）；embedding 不可用时自动回退纯关键词，完全离线可用
 - **记忆历史**：每次修改/删除保留旧值快照，可追溯时间线
 - **密钥管理**：Web 平台生成 `m0-xxx` 密钥（仅存 sha256 哈希），一键复制 MCP 配置 JSON
 - **pm2 部署**：单进程即可服务全公司
@@ -31,7 +31,12 @@
 │ keycloak.js  OIDC+JWKS 验签   │   │ SQLite: memories          │
 │ tokens.js    API key 签发校验 │   │ memories_fts (FTS5)       │
 └──────────────────────────────┘   │ memories_history / keys   │
-                                   └───────────────────────────┘
+                                   └──────────┬────────────────┘
+                                              ▼
+                          ┌─ embeddings/client.js ─────────┐
+                          │ OpenAI 兼容 /v1/embeddings     │
+                          │ （向量化 + 降级回退）           │
+                          └───────────────────────────────┘
 ```
 
 ## 快速开始（本机部署）
@@ -107,7 +112,7 @@ pm2 restart aimemory-mcp        # 更新代码后重启
 | 工具 | 说明 |
 |---|---|
 | `add_memory` | 写入一条记忆（text + metadata） |
-| `search_memories` | 关键词全文检索（支持中文子串，查询建议 ≥3 字符） |
+| `search_memories` | 语义 + 关键词混合检索（embedding 向量召回 + 中文子串） |
 | `get_memories` | 分页列出自己的记忆 |
 | `get_memory` | 按 id 获取单条（含修改历史时间线） |
 | `update_memory` | 更新 text / metadata（旧值进历史） |
@@ -115,7 +120,8 @@ pm2 restart aimemory-mcp        # 更新代码后重启
 | `create_api_key` / `list_api_keys` / `revoke_api_key` | 密钥管理 |
 
 > 参数与 mem0 官方 MCP 同构（`user_id` / `filters` / `page_size` / `limit` 等）。
-> `infer` / `rerank` / `threshold` 为兼容保留：本实例为关键词检索，无 LLM 抽取/向量排序。
+> `threshold` 已生效：过滤低于相似度阈值的向量召回结果（0~1，默认 0 不过滤）。
+> `rerank` / `infer` 为兼容保留：本实例已按语义相关度排序，暂未实现 LLM 事实抽取。
 
 ## 测试用户（隔离验证）
 
@@ -151,6 +157,9 @@ pm2 restart aimemory-mcp        # 更新代码后重启
 | `KEYCLOAK_ADMIN_USER` / `KEYCLOAK_ADMIN_PASSWORD` | 初始化脚本用（可读 mykeycloak/.env） |
 | `TEST_USERS` / `TEST_USERS_PASSWORD` | 测试用户 |
 | `SESSION_SECRET` | Web 会话签名密钥（首次启动自动生成） |
+| `EMBEDDING_ENABLED` | 置 `1` 启用语义检索；`0` 或未配置时纯关键词（可选） |
+| `EMBEDDING_BASE_URL` / `EMBEDDING_MODEL` / `EMBEDDING_API_KEY` | OpenAI 兼容 embeddings 服务（vLLM 等） |
+| `EMBEDDING_TIMEOUT_MS` | 单次 embedding 调用超时（默认 15000） |
 
 ## 对接其他主机的 Keycloak（迁移部署）
 
@@ -262,7 +271,7 @@ npm run setup-keycloak
 
 ### 一、为什么保留完整字段
 
-工具 schema 与 **mem0 官方 MCP 完全同构**，其中 `infer` / `rerank` / `threshold` 等参数已为 LLM 能力预留，当前按关键词存储**忽略它们**（见 `src/mcp/tools.js` 中的"兼容保留"注释）。这样做的价值：
+工具 schema 与 **mem0 官方 MCP 完全同构**，其中 `infer` / `rerank` / `threshold` 等参数为 LLM 能力预留。当前 `threshold` 已随 embedding 生效；`infer` / `rerank` 仍在实现中（见 `src/mcp/tools.js` 注释）。这样做的价值：
 
 - **下游零改动**：agent 端早已按 mem0 的完整参数写调用，将来服务端升级能力时客户端无需任何变更
 - **平滑升级**：扩展全部为增量，不破坏现有调用
@@ -272,8 +281,8 @@ npm run setup-keycloak
 | 字段 | 所在工具 | 当前行为 | 保留用途 |
 |---|---|---|---|
 | `infer` | add_memory | 忽略（原文直接入库） | 接入 LLM 后：从文本自动抽取结构化事实/实体 |
-| `threshold` | search_memories | 忽略 | 接入向量后：相似度阈值过滤低置信结果 |
-| `rerank` | search_memories | 忽略 | 接入向量后：结果重排序（语义优先） |
+| `threshold` | search_memories | **已生效**：过滤低于相似度阈值的向量召回 | 随 embedding 上线已完成 |
+| `rerank` | search_memories | 忽略（结果已按语义相关度排序） | 接入交叉编码器后：更精细的重排序 |
 | `filters` | search_memories / get_memories | 仅支持 `user_id`（已强制隔离） | 扩展为 metadata 键值 / 时间范围 / 命名空间过滤 |
 | `user_id` | 所有工具 | 已完整实现：只能等于当前身份，跨租户拒绝 | 多租户隔离底座，无需再扩展 |
 
@@ -281,12 +290,11 @@ npm run setup-keycloak
 
 #### P0 —— 核心竞争力（建议优先，做完才是"AI 记忆库"而非"普通 CRUD"）
 
-**1. 向量语义检索（embedding 召回）**
-- 扩展内容：接入 embedding（OpenAI 兼容 API 或本地模型），记忆增加向量列，`search_memories` 升级为"向量语义 + 关键词混合召回"
-- **扩展前**：搜"怎么连数据库"查不到"用 psql 连接 PostgreSQL"这类**语义相近但无共同词**的记忆
-- **扩展后**：语义相近即可命中，中文同义/口语化表达有效
-- 依赖：外部 LLM 的 base_url + key（本机无 ollama，需配置），或后续部署本地 embedding
-- 影响：纯增量；`threshold` / `rerank` 参数位已就绪
+**1. 向量语义检索（embedding 召回）✅ 已完成**
+- 接入 OpenAI 兼容 embedding 服务（vLLM `/v1/embeddings`），记忆表增加向量列，`search_memories` 升级为「向量语义 + 关键词混合召回」
+- 效果：搜"怎么连数据库"可命中"用 psql 连接 PostgreSQL"这类语义相近但无共同词的记忆
+- 降级：embedding 服务不可用/失败时自动回退纯关键词，不影响现有调用；`EMBEDDING_ENABLED=0` 可关闭
+- 相关实现：`src/embeddings/client.js`、`src/db/repo.js`（`getVecCandidates` / `cosineSimilarity`）、`memories.embedding` 列
 
 **2. LLM 事实抽取（`infer` 生效）**
 - 扩展内容：`add_memory` 时把自由文本交给 LLM，抽取事实/实体/关系结构化入库，支持记忆合并去重

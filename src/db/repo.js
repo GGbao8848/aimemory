@@ -2,11 +2,15 @@
 
 const crypto = require('crypto');
 const db = require('./index');
+const { embed, embedBatch } = require('../embeddings/client');
 
 const now = () => new Date().toISOString();
 const uuid = () => crypto.randomUUID();
-const toObj = (row) =>
-  row ? { ...row, metadata: JSON.parse(row.metadata || '{}') } : null;
+const toObj = (row) => {
+  if (!row) return null;
+  const { embedding, ...rest } = row; // embedding 为内部向量，不对外暴露
+  return { ...rest, metadata: JSON.parse(rest.metadata || '{}') };
+};
 
 function clamp(n, min, max, def) {
   const v = Number.parseInt(n, 10);
@@ -47,7 +51,15 @@ function createMemory({ userId, text, metadata = {} }) {
   db.prepare(
     'INSERT INTO memories (id, user_id, text, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
   ).run(id, userId, text, JSON.stringify(metadata || {}), ts, ts);
+  syncEmbedding(id, text); // 异步补向量，失败静默，不影响写入
   return toObj(getMemoryRow(id, userId));
+}
+
+/** 异步为记忆补 embedding 向量（新增/更新后调用）；失败静默，搜索自动回退关键词 */
+function syncEmbedding(id, text) {
+  embed(String(text).slice(0, 8000)).then((vec) => {
+    if (vec) db.prepare('UPDATE memories SET embedding = ? WHERE id = ?').run(vec, id);
+  }).catch(() => {});
 }
 
 function getMemory(id, userId) {
@@ -70,18 +82,23 @@ function listMemories({ userId, page = 1, pageSize = 10 }) {
   return { results: rows.map(toObj), total, page, pageSize };
 }
 
-function searchMemories({ userId, query, limit = 10 }) {
+async function searchMemories({ userId, query, limit = 10, threshold = 0 }) {
   limit = clamp(limit, 1, 100, 10);
   const q = (query || '').trim();
   const words = q.split(/\s+/).filter(Boolean);
   if (!words.length) return [];
 
-  // 1. FTS5 trigram 候选：>=3 字符的词 AND 匹配（trigram 无法索引 1-2 字符片段）
+  // 1. 向量语义召回：查询向量与所有带向量记忆做余弦相似度，取 topN 候选
+  //    （embedding 未启用/失败/无向量数据时返回 []，自动走关键词路径）
+  const topN = Math.max(limit * 4, 50);
+  const vecCandidates = await getVecCandidates(userId, q, topN, threshold);
+
+  // 2. FTS5 trigram 关键词候选：>=3 字符的词 AND 匹配（trigram 无法索引 1-2 字符片段）
   const ftsWords = words.filter((w) => w.length >= 3);
-  let rows = [];
+  let ftsRows = [];
   if (ftsWords.length) {
     const match = ftsWords.map((w) => `"${w.replace(/"/g, '""')}"`).join(' AND ');
-    rows = db
+    ftsRows = db
       .prepare(
         `SELECT m.id, m.text, m.metadata, m.created_at, m.updated_at, bm25(memories_fts) AS score
          FROM memories_fts JOIN memories m ON m.rowid = memories_fts.rowid
@@ -89,18 +106,71 @@ function searchMemories({ userId, query, limit = 10 }) {
       )
       .all(match, userId);
   }
-  // 2. FTS 无候选（全为短词）→ 全表兜底
-  if (!rows.length) {
-    rows = db
+
+  // 3. 关键词全表兜底（FTS 无候选，全为短词）
+  if (!ftsRows.length) {
+    ftsRows = db
       .prepare(
         `SELECT id, text, metadata, created_at, updated_at, 0 AS score
          FROM memories WHERE user_id = ? ORDER BY updated_at DESC LIMIT 500`
       )
       .all(userId);
   }
-  // 3. LIKE 二次过滤：每个词都必须出现（覆盖 2 字符中文词如"端口"）
-  const filtered = rows.filter((m) => words.every((w) => m.text.includes(w)));
-  return filtered.slice(0, limit).map(toObj);
+  // 4. LIKE 二次过滤：每个词都必须出现（覆盖 2 字符中文词如"端口"）
+  ftsRows = ftsRows.filter((m) => words.every((w) => m.text.includes(w)));
+
+  // 5. 混合去重合并：向量召回优先（语义命中），再补关键词命中（保底字面命中）
+  const seen = new Set();
+  const merged = [];
+  const push = (m, score) => {
+    if (seen.has(m.id)) return;
+    seen.add(m.id);
+    merged.push({ ...m, score: Number(score.toFixed(4)) });
+  };
+  for (const m of vecCandidates) push(m, m.similarity);
+  for (const m of ftsRows) push(m, m.score ?? 0);
+
+  return merged.slice(0, limit).map(toObj);
+}
+
+/**
+ * 向量候选：查询文本向量化后与该用户全部带向量记忆做余弦相似度。
+ * embedding 未启用/失败/无向量数据时返回 []（调用方走关键词路径）。
+ */
+function getVecCandidates(userId, query, topN, threshold) {
+  const cfg = require('../config').embedding;
+  if (!cfg.enabled) return [];
+  return embed(query).then((qVec) => {
+    if (!qVec) return [];
+    const rows = db
+      .prepare(
+        'SELECT id, text, metadata, created_at, updated_at, embedding FROM memories WHERE user_id = ? AND embedding IS NOT NULL'
+      )
+      .all(userId);
+    const scored = [];
+    for (const r of rows) {
+      const sim = cosineSimilarity(qVec, r.embedding);
+      if (sim >= threshold) scored.push({ ...r, similarity: sim });
+    }
+    scored.sort((a, b) => b.similarity - a.similarity);
+    return scored.slice(0, topN);
+  }).catch(() => []);
+}
+
+/** 两个 float32 Buffer 的余弦相似度 */
+function cosineSimilarity(a, b) {
+  if (!a || !b || a.length !== b.length) return 0;
+  const n = a.length / 4;
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i < n; i++) {
+    const x = a.readFloatLE(i * 4);
+    const y = b.readFloatLE(i * 4);
+    dot += x * y;
+    na += x * x;
+    nb += y * y;
+  }
+  const denom = Math.sqrt(na) * Math.sqrt(nb);
+  return denom === 0 ? 0 : dot / denom;
 }
 
 function updateMemory({ id, userId, text, metadata }) {
@@ -122,6 +192,7 @@ function updateMemory({ id, userId, text, metadata }) {
     );
   });
   tx();
+  if (newText !== existing.text) syncEmbedding(id, newText);
   return toObj(getMemoryRow(id, userId));
 }
 

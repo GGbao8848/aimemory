@@ -58,7 +58,7 @@ apiRouter.get('/me', wrap(async (req, res) => {
 apiRouter.get('/memories', requireAuth, wrap(async (req, res) => {
   const { page = 1, page_size = 10, q } = req.query;
   if (q) {
-    const results = repo.searchMemories({ userId: req.identity.userId, query: String(q), limit: 100 });
+    const results = await repo.searchMemories({ userId: req.identity.userId, query: String(q), limit: 100 });
     // 与列表接口保持同构：分页字段由后端补齐（搜索不翻页，返回全部命中）
     res.json({ results, total: results.length, page: 1, page_size: 100 });
   } else {

@@ -113,4 +113,10 @@ if (!sessionCols.includes('username')) {
   db.exec('ALTER TABLE sessions ADD COLUMN username TEXT');
 }
 
+// 老库兼容：memories 早期无 embedding 列 → 补充（float32 BLOB，可为空，空则无向量）
+const memCols = db.prepare("PRAGMA table_info(memories)").all().map((c) => c.name);
+if (!memCols.includes('embedding')) {
+  db.exec('ALTER TABLE memories ADD COLUMN embedding BLOB');
+}
+
 module.exports = db;
