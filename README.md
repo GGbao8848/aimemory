@@ -113,8 +113,10 @@ pm2 restart aimemory-mcp        # 更新代码后重启
 
 | 工具 | 说明 |
 |---|---|
-| `add_memory` | 写入记忆：`text` 单条 或 `messages` 多轮对话（LLM 自动提炼成**多条**独立记忆）；支持 `agent_id`/`run_id` 归属；`infer` 默认异步提炼事实存 `facts` |
-| `import_memories` | **批量导入**：`groups` 多段对话一次提炼成多条记忆（历史会话/聊天记录批量沉淀，auto-merge 自动去重） |
+| `add_memory` | 写入记忆：`text` 单条 或 `messages` 多轮对话（**异步受理**：messages 模式立即返回 `event_id`，后台 LLM 提炼成多条）；支持 `agent_id`/`run_id` 归属；`infer` 默认异步提炼事实存 `facts` |
+| `import_memories` | **批量导入**（异步）：`groups` 多段对话一次沉淀成记忆，立即返回 `event_id`，后台逐段提炼，auto-merge 自动去重 |
+| `get_event_status` | 查询异步任务状态（pending/processing/done/failed，done 含提炼结果） |
+| `list_events` | 列出当前用户的记忆操作事件 |
 | `search_memories` | 语义 + 关键词 + 实体混合检索（支持 `rerank=true` LLM 重排；支持按 agent/run 过滤） |
 | `get_memories` | 分页列出自己的记忆（支持按 agent/run 过滤） |
 | `get_memory` | 按 id 获取单条（含修改历史时间线） |

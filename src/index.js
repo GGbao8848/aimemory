@@ -206,9 +206,14 @@ app.get('/slo-logout', (req, res) => {
 repo.cleanupSessions();
 repo.cleanupConnectCodes();
 repo.cleanupConnectRequests();
+repo.cleanupEvents();
 setInterval(() => repo.cleanupSessions(), 3600_000).unref();
 setInterval(() => repo.cleanupConnectCodes(), 600_000).unref();
 setInterval(() => repo.cleanupConnectRequests(), 600_000).unref();
+// 异步记忆事件后台处理：启动处理一次 + 每 2 秒轮询 pending（add_memory(messages)/import 提炼）
+repo.processPendingEvents();
+setInterval(() => repo.processPendingEvents(), 2000).unref();
+setInterval(() => repo.cleanupEvents(), 3600_000).unref();
 
 app.listen(config.port, '0.0.0.0', () => {
   console.log(`[aimemory] MCP + API + Web 已启动: http://0.0.0.0:${config.port}`);

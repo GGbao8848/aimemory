@@ -70,15 +70,18 @@ const tools = [
       const uid = resolveUserId(userId, user_id);
       const inferFlag = infer !== false;
 
-      // messages 模式：提炼成多条独立记忆并逐条入库（mem0 批量）
+      // messages 模式：异步受理——立即返回 event_id，后台 LLM 提炼入库（避免大段对话超时）
       if (messages && Array.isArray(messages) && messages.length) {
-        const res = await repo.createMemoriesFromDialogue({
-          userId: uid, messages, metadata, infer: inferFlag, agentId: agent_id, runId: run_id,
+        const eventId = repo.createEvent({
+          userId: uid,
+          eventType: 'add_memory',
+          payload: { messages, metadata: metadata || {}, infer: inferFlag, agent_id: agent_id, run_id: run_id },
         });
+        repo.processPendingEvents(); // 触发后台处理（不 await，立即返回）
         return {
           content: [{
             type: 'text',
-            text: jsonText({ count: res.created.length, memories: res.created, skipped: res.skipped, user_id: uid, agent_id: agent_id || null, run_id: run_id || null }),
+            text: jsonText({ event_id: eventId, status: 'pending', user_id: uid, agent_id: agent_id || null, run_id: run_id || null }),
           }],
         };
       }
@@ -131,18 +134,58 @@ const tools = [
         throw new McpError(ErrorCode.InvalidParams, 'groups 至少提供一段对话');
       }
       const uid = resolveUserId(userId, user_id);
-      const res = await repo.importMemoriesFromGroups({
-        userId: uid, groups, metadata, infer: infer !== false, agentId: agent_id, runId: run_id,
+      // 异步受理：立即返回 event_id，后台逐段提炼（避免多段 LLM 超时）
+      const eventId = repo.createEvent({
+        userId: uid,
+        eventType: 'import_memories',
+        payload: { groups, metadata: metadata || {}, infer: infer !== false, agent_id: agent_id, run_id: run_id },
       });
+      repo.processPendingEvents(); // 触发后台处理（不 await，立即返回）
       return {
         content: [{
           type: 'text',
-          text: jsonText({
-            total: res.total, skipped: res.skipped, memories: res.created,
-            user_id: uid, agent_id: agent_id || null, run_id: run_id || null,
-          }),
+          text: jsonText({ event_id: eventId, status: 'pending', user_id: uid, agent_id: agent_id || null, run_id: run_id || null }),
         }],
       };
+    },
+  },
+
+  {
+    name: 'get_event_status',
+    description: '查询异步记忆操作的状态（add_memory/import_memories 返回的 event_id）。status: pending | processing | done | failed；done 含提炼结果',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        event_id: { type: 'string', description: '异步事件 id（add_memory/import_memories 返回）' },
+        user_id: { type: 'string', description: '用户标识（可选，仅限当前身份）' },
+      },
+      required: ['event_id'],
+    },
+    handler: async ({ event_id, user_id }, userId) => {
+      const uid = resolveUserId(userId, user_id);
+      const ev = repo.getEvent(event_id, uid);
+      if (!ev) {
+        throw new McpError(ErrorCode.InvalidParams, `event_id ${event_id} 不存在（或不属于当前用户）`);
+      }
+      return { content: [{ type: 'text', text: jsonText({ event: ev }) }] };
+    },
+  },
+
+  {
+    name: 'list_events',
+    description: '列出当前用户的记忆操作事件（异步任务，按时间倒序）',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        user_id: { type: 'string', description: '用户标识（可选，仅限当前身份）' },
+        page: { type: 'integer', minimum: 1, description: '页码，默认 1' },
+        page_size: { type: 'integer', minimum: 1, maximum: 100, description: '每页条数，默认 20' },
+      },
+    },
+    handler: async ({ page, page_size, user_id }, userId) => {
+      const uid = resolveUserId(userId, user_id);
+      const res = repo.listEvents({ userId: uid, page, pageSize: page_size });
+      return { content: [{ type: 'text', text: jsonText({ results: res.results, total: res.total, page: res.page, page_size: res.page_size }) }] };
     },
   },
 

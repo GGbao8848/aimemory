@@ -708,11 +708,116 @@ function uniqueApiKeyName(userId, base) {
   return `${base}-${i}`;
 }
 
+// ============ 异步事件（mem0 兼容：add/import 立即受理返回 event_id，后台提炼） ============
+
+/** 创建异步事件，立即返回 event_id（pending）。后台由 processPendingEvents 执行。 */
+function createEvent({ userId, eventType, payload }) {
+  const id = uuid();
+  const ts = now();
+  db.prepare(
+    'INSERT INTO events (id, user_id, event_type, status, payload, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(id, userId, eventType, 'pending', JSON.stringify(payload), ts);
+  return id;
+}
+
+function getEvent(id, userId) {
+  const row = db.prepare('SELECT * FROM events WHERE id = ? AND user_id = ?').get(id, userId);
+  if (!row) return null;
+  return {
+    id: row.id,
+    event_type: row.event_type,
+    status: row.status,
+    payload: JSON.parse(row.payload || '{}'),
+    result: row.result ? JSON.parse(row.result) : null,
+    error: row.error,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+function listEvents({ userId, page = 1, pageSize = 20 }) {
+  page = clamp(page, 1, 100000, 1);
+  pageSize = clamp(pageSize, 1, 100, 20);
+  const total = db.prepare('SELECT COUNT(*) c FROM events WHERE user_id = ?').get(userId).c;
+  const rows = db
+    .prepare('SELECT * FROM events WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?')
+    .all(userId, pageSize, (page - 1) * pageSize);
+  return {
+    results: rows.map((r) => ({
+      id: r.id, event_type: r.event_type, status: r.status,
+      result: r.result ? JSON.parse(r.result) : null, error: r.error,
+      created_at: r.created_at, updated_at: r.updated_at,
+    })),
+    total, page, page_size: pageSize,
+  };
+}
+
+/** 处理一个 pending 事件：根据 payload 执行提炼入库，更新状态。返回处理后的行。 */
+async function processEvent(event) {
+  const userId = event.user_id; // DB 列名 user_id
+  const id = event.id;
+  const p = JSON.parse(event.payload || '{}');
+  db.prepare("UPDATE events SET status='processing', updated_at=? WHERE id=?").run(now(), id);
+  try {
+    let result;
+    if (event.event_type === 'import_memories' && Array.isArray(p.groups)) {
+      const r = await importMemoriesFromGroups({
+        userId, groups: p.groups, metadata: p.metadata, infer: p.infer !== false,
+        agentId: p.agent_id, runId: p.run_id,
+      });
+      result = { total: r.total, skipped: r.skipped, memories: r.created };
+    } else if (Array.isArray(p.messages)) {
+      const r = await createMemoriesFromDialogue({
+        userId, messages: p.messages, metadata: p.metadata, infer: p.infer !== false,
+        agentId: p.agent_id, runId: p.run_id,
+      });
+      result = { count: r.created.length, skipped: r.skipped, memories: r.created };
+    } else if (typeof p.text === 'string' && p.text.trim()) {
+      const mem = await createMemory({
+        userId, text: p.text, metadata: p.metadata, infer: p.infer !== false,
+        agentId: p.agent_id, runId: p.run_id,
+      });
+      result = mem.merged
+        ? { merged: true, duplicate_of: mem.duplicate_of }
+        : { id: mem.id, text: mem.text };
+    } else {
+      throw new Error('payload 缺少 text / messages / groups');
+    }
+    db.prepare("UPDATE events SET status='done', result=?, updated_at=? WHERE id=?")
+      .run(JSON.stringify(result), now(), id);
+  } catch (e) {
+    db.prepare("UPDATE events SET status='failed', error=?, updated_at=? WHERE id=?")
+      .run(String(e.message || e).slice(0, 500), now(), id);
+  }
+  return getEvent(id, userId);
+}
+
+/** 扫描并处理所有 pending 事件（串行，避免并发写冲突）。由服务启动定时调用。 */
+async function processPendingEvents() {
+  const pendings = db
+    .prepare("SELECT * FROM events WHERE status IN ('pending','processing') ORDER BY created_at LIMIT 5")
+    .all();
+  for (const ev of pendings) {
+    await processEvent(ev);
+  }
+  return pendings.length;
+}
+
+/** 清理 7 天前的已完成/失败事件（防表膨胀） */
+function cleanupEvents() {
+  const cutoff = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+  db.prepare("DELETE FROM events WHERE status IN ('done','failed') AND created_at <= ?").run(cutoff);
+}
+
 module.exports = {
   createMemory,
   createMemoriesFromDialogue,
   importMemoriesFromGroups,
-  getMemory,
+  createEvent,
+  getEvent,
+  listEvents,
+  processPendingEvents,
+  cleanupEvents,
   listMemories,
   searchMemories,
   updateMemory,

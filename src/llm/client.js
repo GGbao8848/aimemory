@@ -38,9 +38,20 @@ async function complete(messages, { maxTokens = 512, temperature = 0 } = {}) {
     return null;
   }
   const data = await res.json();
-  const content = data?.choices?.[0]?.message?.content;
+  const msg = data?.choices?.[0]?.message || {};
+  let content = msg.content;
+  // 思考模型（如 qwen 系列）可能把正式输出放在 reasoning 而 content 为空，
+  // 或 content 被截断只剩思考。此时回退取 reasoning 的最后一段（最接近正式回答）。
   if (typeof content !== 'string' || !content.trim()) {
-    console.error('[llm] 响应缺少 content');
+    const reasoning = msg.reasoning;
+    if (typeof reasoning === 'string' && reasoning.trim()) {
+      const lines = reasoning.split('\n').filter((l) => l.trim());
+      // 取最后一段非空内容（通常包含最终答案/序号），截断保护长度
+      content = lines.length ? lines[lines.length - 1].trim() : reasoning.trim();
+    }
+  }
+  if (typeof content !== 'string' || !content.trim()) {
+    console.error('[llm] 响应缺少 content 与 reasoning');
     return null;
   }
   return content;

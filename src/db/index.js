@@ -105,6 +105,20 @@ CREATE TABLE IF NOT EXISTS connect_requests (
 );
 CREATE INDEX IF NOT EXISTS idx_connect_requests_user ON connect_requests(user_id);
 CREATE INDEX IF NOT EXISTS idx_connect_requests_expiry ON connect_requests(expires_at);
+
+-- 异步任务事件（mem0 兼容：add_memory(messages)/import_memories 立即受理返回 event_id，后台提炼）
+CREATE TABLE IF NOT EXISTS events (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL,
+  event_type  TEXT NOT NULL,            -- add_memory | import_memories
+  status      TEXT NOT NULL DEFAULT 'pending',  -- pending | processing | done | failed
+  payload     TEXT NOT NULL,            -- JSON：请求内容（后台执行用）
+  result      TEXT,                     -- JSON：成功结果（记忆 id 列表）
+  error       TEXT,                     -- 失败原因
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_events_user ON events(user_id, created_at);
 `);
 
 // 老库兼容：sessions 表早期无 username 列 → 补充（幂等）
