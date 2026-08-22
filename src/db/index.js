@@ -118,5 +118,9 @@ const memCols = db.prepare("PRAGMA table_info(memories)").all().map((c) => c.nam
 if (!memCols.includes('embedding')) {
   db.exec('ALTER TABLE memories ADD COLUMN embedding BLOB');
 }
+// 老库兼容：memories 早期无 facts 列 → 补充（infer 抽取的结构化事实，JSON 字符串数组）
+if (!memCols.includes('facts')) {
+  db.exec("ALTER TABLE memories ADD COLUMN facts TEXT");
+}
 
 module.exports = db;

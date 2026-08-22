@@ -3,13 +3,20 @@
 const crypto = require('crypto');
 const db = require('./index');
 const { embed, embedBatch } = require('../embeddings/client');
+const { complete } = require('../llm/client');
 
 const now = () => new Date().toISOString();
 const uuid = () => crypto.randomUUID();
+const parseFacts = (s) => {
+  try {
+    const v = JSON.parse(s || '[]');
+    return Array.isArray(v) ? v : [];
+  } catch { return []; }
+};
 const toObj = (row) => {
   if (!row) return null;
   const { embedding, ...rest } = row; // embedding 为内部向量，不对外暴露
-  return { ...rest, metadata: JSON.parse(rest.metadata || '{}') };
+  return { ...rest, metadata: JSON.parse(rest.metadata || '{}'), facts: parseFacts(rest.facts) };
 };
 
 function clamp(n, min, max, def) {
@@ -45,14 +52,47 @@ function getHistory(memoryId, userId) {
     }));
 }
 
-function createMemory({ userId, text, metadata = {} }) {
+function createMemory({ userId, text, metadata = {}, infer = true }) {
   const id = uuid();
   const ts = now();
   db.prepare(
-    'INSERT INTO memories (id, user_id, text, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
+    'INSERT INTO memories (id, user_id, text, metadata, facts, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, ?, ?)'
   ).run(id, userId, text, JSON.stringify(metadata || {}), ts, ts);
-  syncEmbedding(id, text); // 异步补向量，失败静默，不影响写入
+  syncEmbedding(id, text); // 异步补向量（facts 为空时），失败静默，不影响写入
+  if (infer) syncFacts(id, text); // 异步 LLM 抽取事实，抽取后再补一次向量
   return toObj(getMemoryRow(id, userId));
+}
+
+/**
+ * 异步 LLM 事实抽取：把自由文本提炼成结构化事实（字符串数组）存 facts 列。
+ * 抽取成功后重算向量（text + facts），让事实参与语义召回。失败静默，原样保留。
+ */
+function syncFacts(id, text) {
+  const prompt = `请从下面的文本中提炼出独立的、可复用的简短事实陈述，每条用一行输出，不要编号、不要前缀、不要解释。只输出事实本身，无法提炼时输出空。\n\n文本：${String(text).slice(0, 4000)}`;
+  complete([
+    { role: 'system', content: '你是信息抽取助手，只输出事实条目，每行一条，语言与输入一致。' },
+    { role: 'user', content: prompt },
+  ], { maxTokens: 1024, temperature: 0.1 })
+    .then((content) => {
+      if (!content) return;
+      const facts = content
+        .split('\n')
+        .map((l) => l.replace(/^[-*•\d.\s]+/, '').trim())
+        .filter((l) => l.length >= 3);
+      if (!facts.length) return;
+      db.prepare('UPDATE memories SET facts = ? WHERE id = ?').run(JSON.stringify(facts), id);
+      // 事实就绪后重算向量（text + facts）
+      const vec = embed(semanticText(text, facts));
+      vec.then((v) => {
+        if (v) db.prepare('UPDATE memories SET embedding = ? WHERE id = ?').run(v, id);
+      }).catch(() => {});
+    })
+    .catch(() => {});
+}
+
+/** 语义向量文本源：原文 + 抽取事实（增强事实命中） */
+function semanticText(text, facts = []) {
+  return facts.length ? `${text}\n${facts.join('\n')}` : String(text).slice(0, 8000);
 }
 
 /** 异步为记忆补 embedding 向量（新增/更新后调用）；失败静默，搜索自动回退关键词 */
@@ -100,7 +140,7 @@ async function searchMemories({ userId, query, limit = 10, threshold = 0 }) {
     const match = ftsWords.map((w) => `"${w.replace(/"/g, '""')}"`).join(' AND ');
     ftsRows = db
       .prepare(
-        `SELECT m.id, m.text, m.metadata, m.created_at, m.updated_at, bm25(memories_fts) AS score
+        `SELECT m.id, m.text, m.metadata, m.facts, m.created_at, m.updated_at, bm25(memories_fts) AS score
          FROM memories_fts JOIN memories m ON m.rowid = memories_fts.rowid
          WHERE memories_fts MATCH ? AND m.user_id = ? ORDER BY score LIMIT 500`
       )
@@ -111,13 +151,16 @@ async function searchMemories({ userId, query, limit = 10, threshold = 0 }) {
   if (!ftsRows.length) {
     ftsRows = db
       .prepare(
-        `SELECT id, text, metadata, created_at, updated_at, 0 AS score
+        `SELECT id, text, metadata, facts, created_at, updated_at, 0 AS score
          FROM memories WHERE user_id = ? ORDER BY updated_at DESC LIMIT 500`
       )
       .all(userId);
   }
-  // 4. LIKE 二次过滤：每个词都必须出现（覆盖 2 字符中文词如"端口"）
-  ftsRows = ftsRows.filter((m) => words.every((w) => m.text.includes(w)));
+  // 4. LIKE 二次过滤：每个词都必须出现在 text 或 facts 中（覆盖 2 字符中文词如"端口"，含 infer 事实命中）
+  ftsRows = ftsRows.filter((m) => {
+    const hay = `${m.text}\n${m.facts || ''}`;
+    return words.every((w) => hay.includes(w));
+  });
 
   // 5. 混合去重合并：向量召回优先（语义命中），再补关键词命中（保底字面命中）
   const seen = new Set();
@@ -192,7 +235,11 @@ function updateMemory({ id, userId, text, metadata }) {
     );
   });
   tx();
-  if (newText !== existing.text) syncEmbedding(id, newText);
+  if (newText !== existing.text) {
+    db.prepare('UPDATE memories SET facts = NULL WHERE id = ?').run(id);
+    syncEmbedding(id, newText);
+    syncFacts(id, newText); // 文本变化后重抽事实（向量会由 syncFacts 基于 text+facts 重算）
+  }
   return toObj(getMemoryRow(id, userId));
 }
 

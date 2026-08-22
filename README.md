@@ -111,7 +111,7 @@ pm2 restart aimemory-mcp        # 更新代码后重启
 
 | 工具 | 说明 |
 |---|---|
-| `add_memory` | 写入一条记忆（text + metadata） |
+| `add_memory` | 写入一条记忆（text + metadata；`infer=true` 默认异步 LLM 提炼事实存 `facts`） |
 | `search_memories` | 语义 + 关键词混合检索（embedding 向量召回 + 中文子串） |
 | `get_memories` | 分页列出自己的记忆 |
 | `get_memory` | 按 id 获取单条（含修改历史时间线） |
@@ -124,7 +124,8 @@ pm2 restart aimemory-mcp        # 更新代码后重启
 
 > 参数与 mem0 官方 MCP 同构（`user_id` / `filters` / `page_size` / `limit` 等）。
 > `threshold` 已生效：过滤低于相似度阈值的向量召回结果（0~1，默认 0 不过滤）。
-> `rerank` / `infer` 为兼容保留：本实例已按语义相关度排序，暂未实现 LLM 事实抽取。
+> `infer` 已生效：`add_memory` 默认异步 LLM 提炼事实存 `facts`（增强语义召回，失败降级原样入库）。
+> `rerank` 为兼容保留：本实例已按语义相关度排序。
 
 ## 测试用户（隔离验证）
 
@@ -163,6 +164,9 @@ pm2 restart aimemory-mcp        # 更新代码后重启
 | `EMBEDDING_ENABLED` | 置 `1` 启用语义检索；`0` 或未配置时纯关键词（可选） |
 | `EMBEDDING_BASE_URL` / `EMBEDDING_MODEL` / `EMBEDDING_API_KEY` | OpenAI 兼容 embeddings 服务（vLLM 等） |
 | `EMBEDDING_TIMEOUT_MS` | 单次 embedding 调用超时（默认 15000） |
+| `LLM_ENABLED` | 置 `1` 启用 infer 事实抽取；`0` 关闭（可选） |
+| `LLM_BASE_URL` / `LLM_MODEL` / `LLM_API_KEY` | OpenAI 兼容 chat/completions 服务（infer 用） |
+| `LLM_TIMEOUT_MS` | 单次 LLM 调用超时（默认 30000） |
 
 ## 对接其他主机的 Keycloak（迁移部署）
 
@@ -274,7 +278,7 @@ npm run setup-keycloak
 
 ### 一、为什么保留完整字段
 
-工具 schema 与 **mem0 官方 MCP 完全同构**，其中 `infer` / `rerank` / `threshold` 等参数为 LLM 能力预留。当前 `threshold` 已随 embedding 生效；`infer` / `rerank` 仍在实现中（见 `src/mcp/tools.js` 注释）。这样做的价值：
+工具 schema 与 **mem0 官方 MCP 完全同构**，其中 `infer` / `rerank` / `threshold` 等参数为 LLM 能力预留。当前 `threshold` 与 `infer` 均已生效（随 embedding / LLM 上线）；`rerank` 仍在实现中（见 `src/mcp/tools.js` 注释）。这样做的价值：
 
 - **下游零改动**：agent 端早已按 mem0 的完整参数写调用，将来服务端升级能力时客户端无需任何变更
 - **平滑升级**：扩展全部为增量，不破坏现有调用
@@ -283,7 +287,7 @@ npm run setup-keycloak
 
 | 字段 | 所在工具 | 当前行为 | 保留用途 |
 |---|---|---|---|
-| `infer` | add_memory | 忽略（原文直接入库） | 接入 LLM 后：从文本自动抽取结构化事实/实体 |
+| `infer` | add_memory | **已生效**：默认异步 LLM 提炼事实存 `facts`（失败降级原样入库） | 随 P0-2 LLM 上线已完成 |
 | `threshold` | search_memories | **已生效**：过滤低于相似度阈值的向量召回 | 随 embedding 上线已完成 |
 | `rerank` | search_memories | 忽略（结果已按语义相关度排序） | 接入交叉编码器后：更精细的重排序 |
 | `filters` | search_memories / get_memories | 仅支持 `user_id`（已强制隔离） | 扩展为 metadata 键值 / 时间范围 / 命名空间过滤 |
@@ -310,11 +314,12 @@ npm run setup-keycloak
 
 > 原理：查询与记忆都转成向量做余弦相似度，语义相近即可命中，不再要求查询与记忆出现相同字词；关键词路径作为兜底仍保留（如搜「BIP」）。
 
-**2. LLM 事实抽取（`infer` 生效）**
-- 扩展内容：`add_memory` 时把自由文本交给 LLM，抽取事实/实体/关系结构化入库，支持记忆合并去重
-- **扩展前**：存的是原始句子，检索靠关键词命中
-- **扩展后**：agent 问"上次部署踩了什么坑"能精准召回被抽取过的事实（如"端口冲突"）；记忆可跨上下文复用
-- 影响：`add_memory` 多一次 LLM 调用（建议异步化）；`infer=false` 保持原样
+**2. LLM 事实抽取（`infer` 生效）✅ 已完成**
+- `add_memory` 时把自由文本交给 LLM，提炼成结构化事实存 `memories.facts`；向量对「原文 + facts」生成，事实参与语义召回
+- **效果**：agent 问"用的是什么服务器系统"能命中原本只说"部署服务器是 Windows Server 2022"的记忆
+- **降级**：LLM 不可用/失败时静默，原样入库；`infer=false` 保持原样不抽取
+- 相关实现：`src/llm/client.js`、`syncFacts` / `semanticText`（`src/db/repo.js`）、`memories.facts` 列
+- 依赖：`LLM_ENABLED=1` + OpenAI 兼容 chat/completions（`10.10.10.146:8001`，`qwen3.8-27b`）
 
 #### P1 —— 体验增强
 

@@ -31,7 +31,7 @@ function jsonText(obj) {
 const tools = [
   {
     name: 'add_memory',
-    description: '添加一条新记忆（写入记忆库，用户隔离）',
+    description: '添加一条新记忆（写入记忆库，用户隔离）。infer=true 时异步用 LLM 提炼事实存 facts（增强语义召回），失败不影响原样入库',
     inputSchema: {
       type: 'object',
       properties: {
@@ -43,17 +43,17 @@ const tools = [
         },
         infer: {
           type: 'boolean',
-          description: '本实例暂未实现 LLM 事实抽取，参数为兼容保留，忽略',
+          description: '是否 LLM 事实抽取，默认 true；false 时原样入库不抽取',
         },
       },
       required: ['text'],
     },
-    handler: async ({ text, metadata, user_id }, userId) => {
+    handler: async ({ text, metadata, infer, user_id }, userId) => {
       if (!text || !String(text).trim()) {
         throw new McpError(ErrorCode.InvalidParams, 'text 不能为空');
       }
       const uid = resolveUserId(userId, user_id);
-      const mem = repo.createMemory({ userId: uid, text: String(text), metadata });
+      const mem = repo.createMemory({ userId: uid, text: String(text), metadata, infer: infer !== false });
       return { content: [{ type: 'text', text: jsonText({ id: mem.id, user_id: uid, text: mem.text }) }] };
     },
   },

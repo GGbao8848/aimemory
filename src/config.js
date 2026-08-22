@@ -51,6 +51,17 @@ const embedding = {
   timeoutMs: parseInt(process.env.EMBEDDING_TIMEOUT_MS || '15000', 10),
 };
 
+// ===== LLM（infer 事实抽取，P0-2）=====
+// 用于 add_memory 的 infer：把自由文本提炼成结构化事实，增强语义召回。
+// 对话模型端点（chat/completions），失败时不影响原样入库。
+const llm = {
+  enabled: process.env.LLM_ENABLED === '1',
+  baseUrl: (process.env.LLM_BASE_URL || 'http://10.10.10.146:8001/v1').replace(/\/$/, ''),
+  model: process.env.LLM_MODEL || 'qwen3.8-27b',
+  apiKey: process.env.LLM_API_KEY || 'dc5bcb91f400e8b3b40d9156ddc9a1ef60c2ea953f46f359',
+  timeoutMs: parseInt(process.env.LLM_TIMEOUT_MS || '30000', 10),
+};
+
 module.exports = {
   root,
   dataDir: path.join(root, 'data'),
@@ -63,6 +74,7 @@ module.exports = {
     clientId: process.env.KEYCLOAK_CLIENT_ID || 'aimemory-web',
   },
   embedding,
+  llm,
   sessionSecret: process.env.SESSION_SECRET,
   sessionTtlMs: 7 * 24 * 3600 * 1000, // Web 会话 7 天
   mcpSessionTtlMs: 30 * 60 * 1000, // MCP session 空闲 30 分钟清理
