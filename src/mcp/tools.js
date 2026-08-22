@@ -72,13 +72,13 @@ const tools = [
 
       // messages 模式：提炼成多条独立记忆并逐条入库（mem0 批量）
       if (messages && Array.isArray(messages) && messages.length) {
-        const created = await repo.createMemoriesFromDialogue({
+        const res = await repo.createMemoriesFromDialogue({
           userId: uid, messages, metadata, infer: inferFlag, agentId: agent_id, runId: run_id,
         });
         return {
           content: [{
             type: 'text',
-            text: jsonText({ count: created.length, memories: created, user_id: uid, agent_id: agent_id || null, run_id: run_id || null }),
+            text: jsonText({ count: res.created.length, memories: res.created, skipped: res.skipped, user_id: uid, agent_id: agent_id || null, run_id: run_id || null }),
           }],
         };
       }
@@ -92,6 +92,57 @@ const tools = [
         runId: run_id,
       });
       return { content: [{ type: 'text', text: jsonText({ id: mem.id, user_id: uid, text: mem.text, agent_id: agent_id || null, run_id: run_id || null }) }] };
+    },
+  },
+
+  {
+    name: 'import_memories',
+    description:
+      '批量导入多段对话成记忆：groups 为多段 messages 的数组，每段自动 LLM 提炼成多条记忆入库。' +
+      '适合一次性把历史会话/聊天记录批量沉淀。auto-merge 自动去重（重复跳过）。返回汇总统计。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        groups: {
+          type: 'array',
+          description: '多段对话数组，每段是 [{role, content}, ...]',
+          items: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                role: { type: 'string', description: 'speaker，如 user/assistant' },
+                content: { type: 'string', description: '发言内容' },
+              },
+              required: ['role', 'content'],
+            },
+          },
+        },
+        user_id: { type: 'string', description: '用户标识（可选，仅限当前身份）' },
+        agent_id: { type: 'string', description: 'agent 标识（可选，记忆归属此 agent）' },
+        run_id: { type: 'string', description: '会话/运行标识（可选）' },
+        metadata: { type: 'object', description: '附加元数据（可含任意键）' },
+        infer: { type: 'boolean', description: '是否 LLM 事实抽取，默认 true' },
+      },
+      required: ['groups'],
+    },
+    handler: async ({ groups, metadata, infer, user_id, agent_id, run_id }, userId) => {
+      if (!Array.isArray(groups) || !groups.length) {
+        throw new McpError(ErrorCode.InvalidParams, 'groups 至少提供一段对话');
+      }
+      const uid = resolveUserId(userId, user_id);
+      const res = await repo.importMemoriesFromGroups({
+        userId: uid, groups, metadata, infer: infer !== false, agentId: agent_id, runId: run_id,
+      });
+      return {
+        content: [{
+          type: 'text',
+          text: jsonText({
+            total: res.total, skipped: res.skipped, memories: res.created,
+            user_id: uid, agent_id: agent_id || null, run_id: run_id || null,
+          }),
+        }],
+      };
     },
   },
 

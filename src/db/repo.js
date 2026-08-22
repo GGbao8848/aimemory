@@ -164,12 +164,40 @@ async function createMemoriesFromDialogue({ userId, messages, metadata = {}, inf
   }
 
   const created = [];
+  let skipped = 0;
   for (const item of items) {
     const mem = await createMemory({ userId, text: item, metadata, infer, agentId, runId });
-    if (mem.merged) continue; // auto-merge：已有重复记忆，跳过不重复入库
+    if (mem.merged) { skipped++; continue; } // auto-merge：已有重复记忆，跳过不重复入库
     created.push({ id: mem.id, text: mem.text });
   }
-  return created;
+  return { created, skipped };
+}
+
+/**
+ * 批量导入：多段对话（groups，每段是 messages 数组）逐段提炼成记忆。
+ * 支持并段处理（并发 3）提速；每段独立提炼、独立入库，auto-merge 全局生效去重。
+ * 返回 { total, created, skipped, groups: [{group, created, skipped}] }。
+ */
+async function importMemoriesFromGroups({ userId, groups, metadata = {}, infer = true, agentId = null, runId = null }) {
+  if (!Array.isArray(groups) || !groups.length) {
+    return { total: 0, created: [], skipped: 0, groups: [] };
+  }
+  const CONCURRENCY = 3;
+  const results = [];
+  let idx = 0;
+  async function worker() {
+    while (idx < groups.length) {
+      const gi = idx++;
+      const group = groups[gi];
+      const r = await createMemoriesFromDialogue({ userId, messages: group, metadata, infer, agentId, runId });
+      results[gi] = { group: gi, created: r.created, skipped: r.skipped };
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, groups.length) }, worker));
+
+  const created = results.flatMap((r) => r.created);
+  const skipped = results.reduce((s, r) => s + r.skipped, 0);
+  return { total: created.length, created, skipped, groups: results };
 }
 
 /**
@@ -683,6 +711,7 @@ function uniqueApiKeyName(userId, base) {
 module.exports = {
   createMemory,
   createMemoriesFromDialogue,
+  importMemoriesFromGroups,
   getMemory,
   listMemories,
   searchMemories,
