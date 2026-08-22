@@ -2,14 +2,15 @@
 
 /**
  * MCP 工具定义与处理器。
- * 行为对齐 mem0 官方 MCP server 的同类工具（add / search / get_all / get / update / delete），
- * 另加三个 API Key 管理工具。所有数据访问强制 user_id 隔离。
+ * 行为对齐 mem0 官方 MCP server 的同类工具（add / search / get_all / get / update / delete /
+ * delete_all / list_entities / delete_entities / list_events / get_event_status），另加批量导入
+ * import_memories。所有数据访问强制 user_id 隔离。
+ * 注：API Key 管理不暴露为 MCP 工具，由 Web 平台 REST（/api/keys）提供。
  */
 const { McpError, ErrorCode, ListToolsRequestSchema, CallToolRequestSchema } =
   require('@modelcontextprotocol/sdk/types.js');
 const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
 const repo = require('../db/repo');
-const tokens = require('../auth/tokens');
 
 /** 把调用方的 user_id 解析出来；user_id 参数只能等于当前身份，否则拒绝（防跨租户） */
 function resolveUserId(userId, paramsUserId) {
@@ -325,51 +326,11 @@ const tools = [
     },
   },
 
-  // ============ API Key 管理工具 ============
-
-  {
-    name: 'create_api_key',
-    description: '创建一个新的 API Key（返回 m0- 前缀明文，仅此一次），供其他 agent/服务接入',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        name: { type: 'string', description: '密钥名称，默认 default' },
-      },
-    },
-    handler: async ({ name }, userId) => {
-      const key = tokens.createApiKey(userId, name || 'default');
-      return { content: [{ type: 'text', text: jsonText({ id: key.id, name: key.name, token: key.token, created_at: key.created_at }) }] };
-    },
-  },
-
-  {
-    name: 'list_api_keys',
-    description: '列出当前用户的 API Key（不含明文）',
-    inputSchema: { type: 'object', properties: {} },
-    handler: async (_args, userId) => {
-      return { content: [{ type: 'text', text: jsonText({ results: tokens.listApiKeys(userId) }) }] };
-    },
-  },
-
-  {
-    name: 'revoke_api_key',
-    description: '吊销一个 API Key，吊销后立即失效',
-    inputSchema: {
-      type: 'object',
-      properties: { key_id: { type: 'string', description: 'API Key id' } },
-      required: ['key_id'],
-    },
-    handler: async ({ key_id }, userId) => {
-      if (!tokens.revokeApiKey(key_id, userId)) {
-        throw new McpError(ErrorCode.InvalidParams, `key_id ${key_id} 不存在或已吊销`);
-      }
-      return { content: [{ type: 'text', text: jsonText({ success: true }) }] };
-    },
-  },
-
   // ============ 实体/批量管理（对齐 mem0 工具面） ============
   // 本实例当前只有 user 维度（无 agent/app/run），故 user_id 只能等于当前身份，
   // 跨用户删除一律拒绝——多租户隔离底线不变。
+  // 注：API Key 管理（create/list/revoke）不暴露为 MCP 工具——由 Web 平台 REST 端点
+  //     （/api/keys）提供，避免 agent 用 MCP 自助管理密钥，保持接入走人工/Web。
 
   {
     name: 'delete_all_memories',

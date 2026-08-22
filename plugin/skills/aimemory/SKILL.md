@@ -26,7 +26,7 @@ aimemory 是自托管的 AI 记忆库（mem0 兼容 MCP），多租户隔离、�
 | "清空记忆" | `mcp__aimemory__delete_all_memories` | 清空当前用户全部记忆（需用户明确确认） |
 | "有哪些用户/实体" | `mcp__aimemory__list_entities` | 列出有记忆的实体 |
 | "删用户/实体" | `mcp__aimemory__delete_entities` | 删用户及其记忆（需用户明确确认，不可恢复） |
-| 记忆键管理 | `mcp__aimemory__create_api_key` / `list_api_keys` / `revoke_api_key` | API Key 管理 |
+| 记忆键管理 | 引导用户到 Web 平台（REST `/api/keys`）生成/管理密钥 | API Key 管理（MCP 不暴露） |
 
 ## 核心规则
 

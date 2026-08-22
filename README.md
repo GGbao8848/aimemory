@@ -125,7 +125,8 @@ pm2 restart aimemory-mcp        # 更新代码后重启
 | `delete_all_memories` | 清空当前用户的全部记忆（用户与密钥保留） |
 | `list_entities` | 列出有记忆的用户实体（记忆数 + 最后活跃时间） |
 | `delete_entities` | 删除用户及其全部记忆、密钥、会话（不可恢复） |
-| `create_api_key` / `list_api_keys` / `revoke_api_key` | 密钥管理 |
+
+> **API Key 管理不暴露为 MCP 工具**——由 Web 平台 REST 端点提供（`POST/GET /api/keys`、`POST /api/keys/:id/revoke`），接入走人工/Web 生成，避免 agent 用 MCP 自助管理密钥。
 
 > 参数与 mem0 官方 MCP 同构（`user_id` / `agent_id` / `run_id` / `messages` / `filters` / `page_size` / `limit` 等）。
 > `messages` 已生效：多轮对话自动提炼成记忆（mem0 核心模式）。
