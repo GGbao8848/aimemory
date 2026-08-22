@@ -299,7 +299,7 @@ npm run setup-keycloak
 | `agent_id`/`run_id` | add_memory / search_memories / get_memories | **已生效**：记忆按 agent/run 隔离，可过滤 | 多作用域已完成 |
 | `threshold` | search_memories | **已生效**：过滤低于相似度阈值的向量召回 | 随 embedding 上线已完成 |
 | `rerank` | search_memories | **已生效**：`rerank=true` 时 LLM 按查询相关性重排 | 随 LLM 上线已完成（缓解短查询排序噪声） |
-| `filters` | search_memories / get_memories | 支持 `user_id` / `agent_id` / `run_id` | 扩展为 metadata 键值 / 时间范围过滤 |
+| `filters` | search_memories / get_memories | **已生效**：`user_id` / `agent_id` / `run_id` / `metadata` 键值 / `created_at`、`updated_at` 时间范围 | 随 filters 上线已完成 |
 | `user_id` | 所有工具 | 已完整实现：只能等于当前身份，跨租户拒绝 | 多租户隔离底座，无需再扩展 |
 
 ### 三、扩展路线图（按重要程度）
@@ -340,10 +340,10 @@ npm run setup-keycloak
 - **扩展前**：参数被忽略，无法控制"多像才算命中"
 - **扩展后**：调用方可设阈值过滤低置信结果，减少噪音（随 P0-1 embedding 一起上线）
 
-**5. `filters` 多维过滤**
+**5. `filters` 多维过滤 ✅ 已生效**
 - **扩展前**：仅 `user_id`
-- **扩展后**：支持 `metadata` 键值过滤（如 `{"source":"claude-code"}`）、时间范围（`created_at` 之后）、命名空间
-- 影响：纯增量
+- **扩展后**：支持 `metadata` 键值过滤（如 `{"source":"claude-code"}`）、时间范围（`created_at`/`updated_at` 的 `gte`/`lte`）、命名空间（`agent_id`/`run_id`）
+- 影响：纯增量，随 filters 上线已完成
 
 **6. 遗忘与记忆衰减（TTL / 主动 forget）**
 - 扩展内容：记忆带优先级/衰减曲线，低频旧记忆自动降级归档，检索默认召回"活跃"记忆

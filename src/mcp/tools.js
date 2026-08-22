@@ -207,7 +207,7 @@ const tools = [
         },
         filters: {
           type: 'object',
-          description: '过滤条件：支持 user_id（仅当前身份）、agent_id、run_id',
+          description: '过滤条件：支持 user_id（仅当前身份）、agent_id、run_id、metadata（键值，如 {"source":"claude-code"}）、created_at/updated_at（时间范围，如 {"gte":"2026-08-01","lte":"2026-08-31"}）',
         },
         rerank: {
           type: 'boolean',
@@ -227,7 +227,9 @@ const tools = [
       // 作用域：顶层参数优先，其次 filters
       const agentId = agent_id || filters?.agent_id || undefined;
       const runId = run_id || filters?.run_id || undefined;
-      const results = await repo.searchMemories({ userId: uid, query: String(query), limit, threshold, agentId, runId, rerank: rerank === true });
+      // 透传剩余 filters（metadata/created_at/updated_at）给 repo
+      const { user_id: _fuid, agent_id: _faid, run_id: _frid, ...restFilters } = filters || {};
+      const results = await repo.searchMemories({ userId: uid, query: String(query), limit, threshold, agentId, runId, rerank: rerank === true, filters: restFilters });
       return { content: [{ type: 'text', text: jsonText({ results }) }] };
     },
   },
@@ -241,7 +243,7 @@ const tools = [
         user_id: { type: 'string', description: '用户标识（可选，仅限当前身份）' },
         agent_id: { type: 'string', description: '仅列出该 agent 的记忆（可选）' },
         run_id: { type: 'string', description: '仅列出该 run 的记忆（可选）' },
-        filters: { type: 'object', description: '过滤条件：支持 user_id / agent_id / run_id' },
+        filters: { type: 'object', description: '过滤条件：支持 user_id / agent_id / run_id / metadata（键值）/ created_at、updated_at（时间范围）' },
         page: { type: 'integer', minimum: 1, description: '页码，默认 1' },
         page_size: { type: 'integer', minimum: 1, maximum: 100, description: '每页条数，默认 10' },
       },
@@ -253,7 +255,8 @@ const tools = [
       }
       const agentId = agent_id || filters?.agent_id || undefined;
       const runId = run_id || filters?.run_id || undefined;
-      const res = repo.listMemories({ userId: uid, page, pageSize: page_size, agentId, runId });
+      const { user_id: _fuid, agent_id: _faid, run_id: _frid, ...restFilters } = filters || {};
+      const res = repo.listMemories({ userId: uid, page, pageSize: page_size, agentId, runId, filters: restFilters });
       return { content: [{ type: 'text', text: jsonText({ results: res.results, total: res.total, page: res.page, page_size: res.page_size }) }] };
     },
   },

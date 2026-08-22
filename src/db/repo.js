@@ -272,33 +272,74 @@ function scopeClause(alias, { agentId, runId }) {
   return { sql: parts.length ? ` AND ${parts.join(' AND ')}` : '', params };
 }
 
-function listMemories({ userId, page = 1, pageSize = 10, agentId, runId }) {
+/**
+ * 多维过滤 SQL（mem0 filters 兼容）：支持
+ * - metadata：键值对象，如 {source:"claude-code"} → metadata JSON 包含该键值
+ * - created_at / updated_at：时间范围对象，如 {gte:"2026-08-01", lte:"2026-08-31"}
+ * 返回 { sql, params }，未提供任何过滤时 sql 为空。
+ */
+function filtersClause(alias, filters = {}) {
+  const a = alias ? `${alias}.` : '';
+  const parts = [];
+  const params = [];
+
+  // metadata 键值过滤：metadata 为 JSON 文本，匹配 "key":"value"（value 为字符串或数字）
+  const meta = filters.metadata;
+  if (meta && typeof meta === 'object' && !Array.isArray(meta)) {
+    for (const [k, v] of Object.entries(meta)) {
+      if (v === undefined || v === null) continue;
+      // JSON 序列化值：字符串带引号，数字/布尔不带
+      const val = typeof v === 'string' ? JSON.stringify(v) : String(v);
+      parts.push(`${a}metadata LIKE ?`);
+      params.push(`%"${k}":${val}%`);
+    }
+  }
+
+  // 时间范围过滤：created_at / updated_at，支持 {gte, lte}（ISO 字符串可比对）
+  for (const field of ['created_at', 'updated_at']) {
+    const range = filters[field];
+    if (range && typeof range === 'object') {
+      if (range.gte) { parts.push(`${a}${field} >= ?`); params.push(String(range.gte)); }
+      if (range.lte) { parts.push(`${a}${field} <= ?`); params.push(String(range.lte)); }
+    }
+  }
+
+  return { sql: parts.length ? ` AND ${parts.join(' AND ')}` : '', params };
+}
+
+function listMemories({ userId, page = 1, pageSize = 10, agentId, runId, filters = {} }) {
   page = clamp(page, 1, 100000, 1);
   pageSize = clamp(pageSize, 1, 100, 10);
   const scope = scopeClause('', { agentId, runId });
+  const extra = filtersClause('', filters);
+  const where = `WHERE user_id = ?${scope.sql}${extra.sql}`;
+  const params = [userId, ...scope.params, ...extra.params];
   const total = db
-    .prepare(`SELECT COUNT(*) AS c FROM memories WHERE user_id = ?${scope.sql}`)
-    .get(userId, ...scope.params).c;
+    .prepare(`SELECT COUNT(*) AS c FROM memories ${where}`)
+    .get(...params).c;
   const rows = db
     .prepare(
-      `SELECT * FROM memories WHERE user_id = ?${scope.sql} ORDER BY updated_at DESC LIMIT ? OFFSET ?`
+      `SELECT * FROM memories ${where} ORDER BY updated_at DESC LIMIT ? OFFSET ?`
     )
-    .all(userId, ...scope.params, pageSize, (page - 1) * pageSize);
+    .all(...params, pageSize, (page - 1) * pageSize);
   return { results: rows.map(toObj), total, page, pageSize };
 }
 
-async function searchMemories({ userId, query, limit = 10, threshold = 0, agentId, runId, rerank = false }) {
+async function searchMemories({ userId, query, limit = 10, threshold = 0, agentId, runId, rerank = false, filters = {} }) {
   limit = clamp(limit, 1, 100, 10);
   const q = (query || '').trim();
   const words = q.split(/\s+/).filter(Boolean);
   if (!words.length) return [];
 
+  // 作用域 + 多维过滤（metadata/时间），统一为 where 片段（别名 m）
   const scope = scopeClause('m', { agentId, runId });
+  const extra = filtersClause('m', filters);
+  const where = { sql: `${scope.sql}${extra.sql}`, params: [...scope.params, ...extra.params] };
 
   // 1. 向量语义召回：查询向量与所有带向量记忆做余弦相似度，取 topN 候选
   //    （embedding 未启用/失败/无向量数据时返回 []，自动走关键词路径）
   const topN = Math.max(limit * 4, 50);
-  const vecCandidates = await getVecCandidates(userId, q, topN, threshold, scope);
+  const vecCandidates = await getVecCandidates(userId, q, topN, threshold, where);
 
   // 2. FTS5 trigram 关键词候选：>=3 字符的词 AND 匹配（trigram 无法索引 1-2 字符片段）
   const ftsWords = words.filter((w) => w.length >= 3);
@@ -309,9 +350,9 @@ async function searchMemories({ userId, query, limit = 10, threshold = 0, agentI
       .prepare(
         `SELECT m.id, m.text, m.metadata, m.facts, m.entities, m.created_at, m.updated_at, bm25(memories_fts) AS score
          FROM memories_fts JOIN memories m ON m.rowid = memories_fts.rowid
-         WHERE memories_fts MATCH ? AND m.user_id = ?${scope.sql} ORDER BY score LIMIT 500`
+         WHERE memories_fts MATCH ? AND m.user_id = ?${where.sql} ORDER BY score LIMIT 500`
       )
-      .all(match, userId, ...scope.params);
+      .all(match, userId, ...where.params);
   }
 
   // 3. 关键词全表兜底（FTS 无候选，全为短词）
@@ -319,9 +360,9 @@ async function searchMemories({ userId, query, limit = 10, threshold = 0, agentI
     ftsRows = db
       .prepare(
         `SELECT m.id, m.text, m.metadata, m.facts, m.entities, m.created_at, m.updated_at, 0 AS score
-         FROM memories m WHERE m.user_id = ?${scope.sql} ORDER BY m.updated_at DESC LIMIT 500`
+         FROM memories m WHERE m.user_id = ?${where.sql} ORDER BY m.updated_at DESC LIMIT 500`
       )
-      .all(userId, ...scope.params);
+      .all(userId, ...where.params);
   }
   // 4. LIKE 二次过滤：每个词都必须出现在 text / facts / entities 中（覆盖 2 字符中文词、事实与实体命中）
   ftsRows = ftsRows.filter((m) => {
@@ -813,6 +854,7 @@ module.exports = {
   createMemory,
   createMemoriesFromDialogue,
   importMemoriesFromGroups,
+  getMemory,
   createEvent,
   getEvent,
   listEvents,
