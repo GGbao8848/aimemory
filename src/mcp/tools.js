@@ -228,9 +228,10 @@ const tools = [
       // 作用域：顶层参数优先，其次 filters
       const agentId = agent_id || filters?.agent_id || undefined;
       const runId = run_id || filters?.run_id || undefined;
+      const includeArchived = filters?.include_archived === true;
       // 透传剩余 filters（metadata/created_at/updated_at）给 repo
-      const { user_id: _fuid, agent_id: _faid, run_id: _frid, ...restFilters } = filters || {};
-      const results = await repo.searchMemories({ userId: uid, query: String(query), limit, threshold, agentId, runId, rerank: rerank === true, filters: restFilters });
+      const { user_id: _fuid, agent_id: _faid, run_id: _frid, include_archived: _finc, ...restFilters } = filters || {};
+      const results = await repo.searchMemories({ userId: uid, query: String(query), limit, threshold, agentId, runId, rerank: rerank === true, filters: restFilters, includeArchived });
       return { content: [{ type: 'text', text: jsonText({ results }) }] };
     },
   },
@@ -256,8 +257,9 @@ const tools = [
       }
       const agentId = agent_id || filters?.agent_id || undefined;
       const runId = run_id || filters?.run_id || undefined;
-      const { user_id: _fuid, agent_id: _faid, run_id: _frid, ...restFilters } = filters || {};
-      const res = repo.listMemories({ userId: uid, page, pageSize: page_size, agentId, runId, filters: restFilters });
+      const includeArchived = filters?.include_archived === true;
+      const { user_id: _fuid, agent_id: _faid, run_id: _frid, include_archived: _finc, ...restFilters } = filters || {};
+      const res = repo.listMemories({ userId: uid, page, pageSize: page_size, agentId, runId, filters: restFilters, includeArchived });
       return { content: [{ type: 'text', text: jsonText({ results: res.results, total: res.total, page: res.page, page_size: res.page_size }) }] };
     },
   },

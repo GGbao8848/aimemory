@@ -147,7 +147,19 @@ if (!memCols.includes('run_id')) {
 if (!memCols.includes('entities')) {
   db.exec("ALTER TABLE memories ADD COLUMN entities TEXT");
 }
+// TTL/遗忘字段：活跃度追踪 + 归档（低频旧记忆自动降级，默认 30 天未访问可归档）
+if (!memCols.includes('last_access_at')) {
+  db.exec('ALTER TABLE memories ADD COLUMN last_access_at TEXT');
+}
+if (!memCols.includes('access_count')) {
+  db.exec('ALTER TABLE memories ADD COLUMN access_count INTEGER DEFAULT 0');
+}
+if (!memCols.includes('archived')) {
+  db.exec('ALTER TABLE memories ADD COLUMN archived INTEGER DEFAULT 0');
+}
 // 作用域检索索引（user + agent + run 组合过滤加速）
 db.exec('CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories(user_id, agent_id, run_id)');
+// 活跃度索引（归档排除 + 按访问时间排序加速）
+db.exec('CREATE INDEX IF NOT EXISTS idx_memories_active ON memories(user_id, archived, last_access_at)');
 
 module.exports = db;

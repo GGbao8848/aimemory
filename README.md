@@ -11,6 +11,7 @@
 - **语义 + 关键词混合检索**：embedding 向量召回（同义/口语化可命中）+ SQLite FTS5 trigram 关键词召回（中文子串）；embedding 不可用时自动回退纯关键词，完全离线可用
 - **自动去重（auto-merge）**：写入时与已有记忆做语义相似度检测，高度重复自动跳过（≥0.92），防止记忆库变脏
 - **实体抽取与链接**：LLM 自动抽取实体（公司/人名/IP/端口等）存 `entities`，检索时实体命中加权排前（对标 mem0 entity linking）
+- **TTL / 遗忘**：追踪记忆活跃度（访问次数/时间），活跃记忆检索微加权；超过 `MEMORY_TTL_DAYS`（默认 30）未访问的记忆自动归档，默认不参与检索（可用 `include_archived` 召回）
 - **记忆历史**：每次修改/删除保留旧值快照，可追溯时间线
 - **密钥管理**：Web 平台生成 `m0-xxx` 密钥（仅存 sha256 哈希），一键复制 MCP 配置 JSON
 - **pm2 部署**：单进程即可服务全公司
@@ -175,6 +176,7 @@ pm2 restart aimemory-mcp        # 更新代码后重启
 | `LLM_ENABLED` | 置 `1` 启用 infer 事实抽取；`0` 关闭（可选） |
 | `LLM_BASE_URL` / `LLM_MODEL` / `LLM_API_KEY` | OpenAI 兼容 chat/completions 服务（infer 用） |
 | `LLM_TIMEOUT_MS` | 单次 LLM 调用超时（默认 30000） |
+| `MEMORY_TTL_DAYS` | 记忆未访问自动归档天数（默认 30；0 则启动即归档全部） |
 
 ## 对接其他主机的 Keycloak（迁移部署）
 

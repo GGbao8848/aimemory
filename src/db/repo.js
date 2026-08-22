@@ -307,12 +307,13 @@ function filtersClause(alias, filters = {}) {
   return { sql: parts.length ? ` AND ${parts.join(' AND ')}` : '', params };
 }
 
-function listMemories({ userId, page = 1, pageSize = 10, agentId, runId, filters = {} }) {
+function listMemories({ userId, page = 1, pageSize = 10, agentId, runId, filters = {}, includeArchived = false }) {
   page = clamp(page, 1, 100000, 1);
   pageSize = clamp(pageSize, 1, 100, 10);
   const scope = scopeClause('', { agentId, runId });
   const extra = filtersClause('', filters);
-  const where = `WHERE user_id = ?${scope.sql}${extra.sql}`;
+  const arch = includeArchived ? '' : ' AND archived = 0';
+  const where = `WHERE user_id = ?${scope.sql}${extra.sql}${arch}`;
   const params = [userId, ...scope.params, ...extra.params];
   const total = db
     .prepare(`SELECT COUNT(*) AS c FROM memories ${where}`)
@@ -325,16 +326,17 @@ function listMemories({ userId, page = 1, pageSize = 10, agentId, runId, filters
   return { results: rows.map(toObj), total, page, pageSize };
 }
 
-async function searchMemories({ userId, query, limit = 10, threshold = 0, agentId, runId, rerank = false, filters = {} }) {
+async function searchMemories({ userId, query, limit = 10, threshold = 0, agentId, runId, rerank = false, filters = {}, includeArchived = false }) {
   limit = clamp(limit, 1, 100, 10);
   const q = (query || '').trim();
   const words = q.split(/\s+/).filter(Boolean);
   if (!words.length) return [];
 
-  // 作用域 + 多维过滤（metadata/时间），统一为 where 片段（别名 m）
+  // 作用域 + 多维过滤（metadata/时间）+ 归档排除，统一为 where 片段（别名 m）
   const scope = scopeClause('m', { agentId, runId });
   const extra = filtersClause('m', filters);
-  const where = { sql: `${scope.sql}${extra.sql}`, params: [...scope.params, ...extra.params] };
+  const arch = includeArchived ? '' : ' AND m.archived = 0';
+  const where = { sql: `${scope.sql}${extra.sql}${arch}`, params: [...scope.params, ...extra.params] };
 
   // 1. 向量语义召回：查询向量与所有带向量记忆做余弦相似度，取 topN 候选
   //    （embedding 未启用/失败/无向量数据时返回 []，自动走关键词路径）
@@ -348,7 +350,7 @@ async function searchMemories({ userId, query, limit = 10, threshold = 0, agentI
     const match = ftsWords.map((w) => `"${w.replace(/"/g, '""')}"`).join(' AND ');
     ftsRows = db
       .prepare(
-        `SELECT m.id, m.text, m.metadata, m.facts, m.entities, m.created_at, m.updated_at, bm25(memories_fts) AS score
+        `SELECT m.id, m.text, m.metadata, m.facts, m.entities, m.created_at, m.updated_at, m.access_count, bm25(memories_fts) AS score
          FROM memories_fts JOIN memories m ON m.rowid = memories_fts.rowid
          WHERE memories_fts MATCH ? AND m.user_id = ?${where.sql} ORDER BY score LIMIT 500`
       )
@@ -359,7 +361,7 @@ async function searchMemories({ userId, query, limit = 10, threshold = 0, agentI
   if (!ftsRows.length) {
     ftsRows = db
       .prepare(
-        `SELECT m.id, m.text, m.metadata, m.facts, m.entities, m.created_at, m.updated_at, 0 AS score
+        `SELECT m.id, m.text, m.metadata, m.facts, m.entities, m.created_at, m.updated_at, m.access_count, 0 AS score
          FROM memories m WHERE m.user_id = ?${where.sql} ORDER BY m.updated_at DESC LIMIT 500`
       )
       .all(userId, ...where.params);
@@ -371,7 +373,7 @@ async function searchMemories({ userId, query, limit = 10, threshold = 0, agentI
   });
 
   // 5. 混合去重合并：向量召回优先（语义命中），再补关键词命中（保底字面命中）；
-  //    查询词命中记忆实体的，加权排前（实体链接增强）
+  //    查询词命中记忆实体的加权排前（实体链接增强）；活跃记忆（访问多）微加权（遗忘衰减）
   const seen = new Set();
   const merged = [];
   const push = (m, score) => {
@@ -379,7 +381,12 @@ async function searchMemories({ userId, query, limit = 10, threshold = 0, agentI
     seen.add(m.id);
     const entities = parseList(m.entities);
     const entityHit = entities.some((e) => words.some((w) => e.includes(w) || w.includes(e)));
-    merged.push({ ...m, score: Number((score + (entityHit ? 0.08 : 0)).toFixed(4)), entityHit: !!entityHit });
+    const accessBoost = Math.min(Number(m.access_count) || 0, 10) * 0.005; // 活跃记忆微加权
+    merged.push({
+      ...m,
+      score: Number((score + (entityHit ? 0.08 : 0) + accessBoost).toFixed(4)),
+      entityHit: !!entityHit,
+    });
   };
   for (const m of vecCandidates) push(m, m.similarity);
   for (const m of ftsRows) push(m, m.score ?? 0);
@@ -389,6 +396,15 @@ async function searchMemories({ userId, query, limit = 10, threshold = 0, agentI
   let results = merged.slice(0, limit);
   if (rerank && merged.length > 1) {
     results = await rerankResults(q, merged.slice(0, Math.max(limit * 3, 15)), limit) || results;
+  }
+
+  // 7. 活跃度追踪：命中记忆更新 last_access_at / access_count（遗忘机制的数据基础）
+  if (results.length) {
+    const ids = results.map((r) => r.id);
+    const placeholders = ids.map(() => '?').join(',');
+    db.prepare(
+      `UPDATE memories SET access_count = access_count + 1, last_access_at = ? WHERE id IN (${placeholders})`
+    ).run(now(), ...ids);
   }
 
   return results.map(toObj);
@@ -445,7 +461,7 @@ function getVecCandidates(userId, query, topN, threshold, scope = { sql: '', par
     if (!qVec) return [];
     const rows = db
       .prepare(
-        `SELECT m.id, m.text, m.metadata, m.facts, m.entities, m.created_at, m.updated_at, m.embedding FROM memories m WHERE m.user_id = ? AND m.embedding IS NOT NULL${scope.sql}`
+        `SELECT m.id, m.text, m.metadata, m.facts, m.entities, m.created_at, m.updated_at, m.access_count, m.embedding FROM memories m WHERE m.user_id = ? AND m.embedding IS NOT NULL${scope.sql}`
       )
       .all(userId, ...scope.params);
     const scored = [];
@@ -850,6 +866,35 @@ function cleanupEvents() {
   db.prepare("DELETE FROM events WHERE status IN ('done','failed') AND created_at <= ?").run(cutoff);
 }
 
+// ============ TTL / 遗忘（低频旧记忆自动降级归档） ============
+
+/**
+ * 自动归档：超过 ttlDays 未被访问（last_access_at 为空则按 created_at）的记忆标记 archived=1。
+ * 归档后默认不被检索召回（除非 include_archived）。返回本次归档条数。
+ */
+function archiveStaleMemories(ttlDays = 30) {
+  const cutoff = new Date(Date.now() - ttlDays * 24 * 3600 * 1000).toISOString();
+  const res = db.prepare(
+    `UPDATE memories SET archived = 1
+     WHERE archived = 0 AND COALESCE(last_access_at, created_at) <= ?`
+  ).run(cutoff);
+  return res.changes;
+}
+
+/** 手动归档一条记忆（按 id，仅限当前用户） */
+function archiveMemory(id, userId) {
+  const res = db.prepare('UPDATE memories SET archived = 1 WHERE id = ? AND user_id = ?').run(id, userId);
+  return res.changes > 0;
+}
+
+/** 统计归档/活跃记忆数（供状态展示） */
+function archiveStats(userId) {
+  return {
+    active: db.prepare('SELECT COUNT(*) c FROM memories WHERE user_id = ? AND archived = 0').get(userId).c,
+    archived: db.prepare('SELECT COUNT(*) c FROM memories WHERE user_id = ? AND archived = 1').get(userId).c,
+  };
+}
+
 module.exports = {
   createMemory,
   createMemoriesFromDialogue,
@@ -860,6 +905,9 @@ module.exports = {
   listEvents,
   processPendingEvents,
   cleanupEvents,
+  archiveStaleMemories,
+  archiveMemory,
+  archiveStats,
   listMemories,
   searchMemories,
   updateMemory,

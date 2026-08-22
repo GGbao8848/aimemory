@@ -207,6 +207,9 @@ repo.cleanupSessions();
 repo.cleanupConnectCodes();
 repo.cleanupConnectRequests();
 repo.cleanupEvents();
+// TTL 遗忘：启动时 + 每天归档超过 MEMORY_TTL_DAYS（默认 30）未访问的记忆
+repo.archiveStaleMemories(parseInt(process.env.MEMORY_TTL_DAYS || '30', 10));
+setInterval(() => repo.archiveStaleMemories(parseInt(process.env.MEMORY_TTL_DAYS || '30', 10)), 24 * 3600_000).unref();
 setInterval(() => repo.cleanupSessions(), 3600_000).unref();
 setInterval(() => repo.cleanupConnectCodes(), 600_000).unref();
 setInterval(() => repo.cleanupConnectRequests(), 600_000).unref();
