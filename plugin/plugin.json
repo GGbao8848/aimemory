@@ -1,0 +1,8 @@
+{
+  "name": "aimemory",
+  "version": "0.1.0",
+  "description": "aimemory 记忆库插件——为 agent 提供持久化记忆：任务开始自动加载相关记忆（recall）、对话关键信息自动沉淀（remember）、记忆库管理（查/列/改/删/导入）。核心逻辑由 aimemory MCP 服务提供。",
+  "author": { "name": "aimemory" },
+  "license": "Apache-2.0",
+  "skills": "skills"
+}

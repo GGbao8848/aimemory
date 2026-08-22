@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "aimemory": {
+      "type": "http",
+      "url": "${AIMEMORY_MCP_URL}",
+      "headers": {
+        "Authorization": "Token ${MEM0_API_KEY}"
+      }
+    }
+  }
+}
