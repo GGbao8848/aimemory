@@ -129,7 +129,7 @@ pm2 restart aimemory-mcp        # 更新代码后重启
 > `agent_id`/`run_id` 已生效：记忆按 agent/run 隔离，搜索/列出可过滤。
 > `threshold` 已生效：过滤低于相似度阈值的向量召回结果（0~1，默认 0 不过滤）。
 > `infer` 已生效：`add_memory` 默认异步 LLM 提炼事实存 `facts`（增强语义召回，失败降级原样入库）。
-> `rerank` 为兼容保留：本实例已按语义相关度排序。
+> `rerank` 已生效：`search_memories` 传 `rerank=true` 时用 LLM 按查询相关性重排（更精准，略增延迟；LLM 不可用自动回退）。
 
 ## 测试用户（隔离验证）
 
@@ -282,7 +282,7 @@ npm run setup-keycloak
 
 ### 一、为什么保留完整字段
 
-工具 schema 与 **mem0 官方 MCP 完全同构**，其中 `infer` / `rerank` / `threshold` 等参数为 LLM 能力预留。当前 `threshold` 与 `infer` 均已生效（随 embedding / LLM 上线）；`rerank` 仍在实现中（见 `src/mcp/tools.js` 注释）。这样做的价值：
+工具 schema 与 **mem0 官方 MCP 完全同构**，其中 `infer` / `rerank` / `threshold` 等参数为 LLM 能力预留。当前 `threshold` / `infer` / `rerank` 均已生效（随 embedding / LLM 上线）。这样做的价值：
 
 - **下游零改动**：agent 端早已按 mem0 的完整参数写调用，将来服务端升级能力时客户端无需任何变更
 - **平滑升级**：扩展全部为增量，不破坏现有调用
@@ -295,7 +295,7 @@ npm run setup-keycloak
 | `messages` | add_memory | **已生效**：多轮对话自动提炼成记忆（mem0 核心模式） | 随 messages 批量上线已完成 |
 | `agent_id`/`run_id` | add_memory / search_memories / get_memories | **已生效**：记忆按 agent/run 隔离，可过滤 | 多作用域已完成 |
 | `threshold` | search_memories | **已生效**：过滤低于相似度阈值的向量召回 | 随 embedding 上线已完成 |
-| `rerank` | search_memories | 忽略（结果已按语义相关度排序） | 接入交叉编码器后：更精细的重排序 |
+| `rerank` | search_memories | **已生效**：`rerank=true` 时 LLM 按查询相关性重排 | 随 LLM 上线已完成（缓解短查询排序噪声） |
 | `filters` | search_memories / get_memories | 支持 `user_id` / `agent_id` / `run_id` | 扩展为 metadata 键值 / 时间范围过滤 |
 | `user_id` | 所有工具 | 已完整实现：只能等于当前身份，跨租户拒绝 | 多租户隔离底座，无需再扩展 |
 
@@ -329,9 +329,9 @@ npm run setup-keycloak
 
 #### P1 —— 体验增强
 
-**3. `rerank` 重排序生效**
+**3. `rerank` 重排序 ✅ 已生效**
 - **扩展前**：命中按 bm25 相关性排序，语义接近但关键词弱的排在后面
-- **扩展后**：向量召回后用 LLM/交叉编码器重排，"真正相关的"提到最前（跟随 P0 的 embedding 一起做）
+- **扩展后**：`search_memories` 传 `rerank=true` 时用 LLM 按查询相关性重排，"真正相关的"提到最前（缓解短查询排序噪声；LLM 不可用自动回退）
 
 **4. `threshold` 相似度阈值 ✅ 已生效**
 - **扩展前**：参数被忽略，无法控制"多像才算命中"

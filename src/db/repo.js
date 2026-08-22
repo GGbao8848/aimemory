@@ -259,7 +259,7 @@ function listMemories({ userId, page = 1, pageSize = 10, agentId, runId }) {
   return { results: rows.map(toObj), total, page, pageSize };
 }
 
-async function searchMemories({ userId, query, limit = 10, threshold = 0, agentId, runId }) {
+async function searchMemories({ userId, query, limit = 10, threshold = 0, agentId, runId, rerank = false }) {
   limit = clamp(limit, 1, 100, 10);
   const q = (query || '').trim();
   const words = q.split(/\s+/).filter(Boolean);
@@ -316,7 +316,53 @@ async function searchMemories({ userId, query, limit = 10, threshold = 0, agentI
   for (const m of ftsRows) push(m, m.score ?? 0);
   merged.sort((a, b) => (b.entityHit ? 1 : 0) - (a.entityHit ? 1 : 0) || b.score - a.score);
 
-  return merged.slice(0, limit).map(toObj);
+  // 6. rerank：可选，用 LLM 对 top 候选按查询相关性重排（缓解短查询排序噪声）
+  let results = merged.slice(0, limit);
+  if (rerank && merged.length > 1) {
+    results = await rerankResults(q, merged.slice(0, Math.max(limit * 3, 15)), limit) || results;
+  }
+
+  return results.map(toObj);
+}
+
+/**
+ * LLM 重排：把查询 + 候选记忆交给 LLM，让它按相关性输出排序后的 id 列表。
+ * 失败返回 null（调用方保持原排序）。只对候选子集重排以控制 token/延迟。
+ */
+async function rerankResults(query, candidates, limit) {
+  const cfg = require('../config').llm;
+  if (!cfg.enabled || !candidates.length) return null;
+  const top = candidates.slice(0, Math.min(candidates.length, 20));
+  const listText = top
+    .map((m, i) => `${i}. ${String(m.text).slice(0, 120)}`)
+    .join('\n');
+  const content = await complete([
+    {
+      role: 'system',
+      content: '你是记忆检索重排助手。根据查询，把候选记忆按与查询的相关性从高到低排序。只输出候选的序号（逗号分隔的数组），不要解释、不要其他内容。只保留相关的，明显不相关的不要列入。',
+    },
+    { role: 'user', content: `查询：${query}\n候选记忆：\n${listText}` },
+  ], { maxTokens: 2048, temperature: 0 });
+
+  if (!content) return null;
+  const order = content
+    .match(/\d+/g)
+    .map(Number)
+    .filter((n) => n >= 0 && n < top.length);
+  if (!order.length) return null;
+
+  const byId = new Map(top.map((m, i) => [i, m]));
+  const reranked = [];
+  const seenIds = new Set();
+  for (const idx of order) {
+    const m = byId.get(idx);
+    if (!m || seenIds.has(m.id)) continue;
+    seenIds.add(m.id);
+    reranked.push(m);
+  }
+  // 补上 LLM 未列的候选（按原分）
+  for (const m of top) if (!seenIds.has(m.id)) reranked.push(m);
+  return reranked.slice(0, limit);
 }
 
 /**

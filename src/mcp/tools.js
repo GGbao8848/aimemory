@@ -98,7 +98,7 @@ const tools = [
   {
     name: 'search_memories',
     description:
-      '语义+关键词混合检索：向量语义召回（同义/口语化可命中）+ FTS5 关键词召回（中文子串），threshold 过滤低相似度向量结果',
+      '语义+关键词+实体混合检索：向量语义召回 + FTS5 关键词召回 + 实体命中加权；rerank=true 时用 LLM 对结果按相关性重排（更精准，略增延迟）',
     inputSchema: {
       type: 'object',
       properties: {
@@ -117,12 +117,12 @@ const tools = [
         },
         rerank: {
           type: 'boolean',
-          description: '结果重排序（语义优先）；当前默认已按语义相关度排序，参数保留兼容',
+          description: '用 LLM 对结果按查询相关性重排（默认 false；true 时更精准但略增延迟）。LLM 不可用时自动回退原排序',
         },
       },
       required: ['query'],
     },
-    handler: async ({ query, limit, threshold, user_id, agent_id, run_id, filters = {} }, userId) => {
+    handler: async ({ query, limit, threshold, user_id, agent_id, run_id, rerank, filters = {} }, userId) => {
       if (!query || !String(query).trim()) {
         throw new McpError(ErrorCode.InvalidParams, 'query 不能为空');
       }
@@ -133,7 +133,7 @@ const tools = [
       // 作用域：顶层参数优先，其次 filters
       const agentId = agent_id || filters?.agent_id || undefined;
       const runId = run_id || filters?.run_id || undefined;
-      const results = await repo.searchMemories({ userId: uid, query: String(query), limit, threshold, agentId, runId });
+      const results = await repo.searchMemories({ userId: uid, query: String(query), limit, threshold, agentId, runId, rerank: rerank === true });
       return { content: [{ type: 'text', text: jsonText({ results }) }] };
     },
   },
