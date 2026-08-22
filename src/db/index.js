@@ -129,6 +129,10 @@ if (!memCols.includes('agent_id')) {
 if (!memCols.includes('run_id')) {
   db.exec('ALTER TABLE memories ADD COLUMN run_id TEXT');
 }
+// 老库兼容：memories 早期无 entities 列 → 补充（LLM 抽取的实体，JSON 字符串数组）
+if (!memCols.includes('entities')) {
+  db.exec("ALTER TABLE memories ADD COLUMN entities TEXT");
+}
 // 作用域检索索引（user + agent + run 组合过滤加速）
 db.exec('CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories(user_id, agent_id, run_id)');
 

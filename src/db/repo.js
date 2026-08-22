@@ -7,7 +7,7 @@ const { complete } = require('../llm/client');
 
 const now = () => new Date().toISOString();
 const uuid = () => crypto.randomUUID();
-const parseFacts = (s) => {
+const parseList = (s) => {
   try {
     const v = JSON.parse(s || '[]');
     return Array.isArray(v) ? v : [];
@@ -16,7 +16,7 @@ const parseFacts = (s) => {
 const toObj = (row) => {
   if (!row) return null;
   const { embedding, ...rest } = row; // embedding 为内部向量，不对外暴露
-  return { ...rest, metadata: JSON.parse(rest.metadata || '{}'), facts: parseFacts(rest.facts) };
+  return { ...rest, metadata: JSON.parse(rest.metadata || '{}'), facts: parseList(rest.facts), entities: parseList(rest.entities) };
 };
 
 function clamp(n, min, max, def) {
@@ -76,6 +76,12 @@ async function createMemory({ userId, text, messages, metadata = {}, infer = tru
     storeText = String(text || messages?.map((m) => m.content).filter(Boolean).join(' ')).slice(0, 8000);
   }
 
+  // auto-merge：与该用户已有记忆做语义相似度检测，高度重复则跳过写入（防脏库）
+  const dup = await findDuplicateMemory(userId, storeText, { agentId: agent, runId: run });
+  if (dup) {
+    return { ...toObj(dup), merged: true, duplicate_of: dup.id };
+  }
+
   db.prepare(
     'INSERT INTO memories (id, user_id, text, metadata, facts, agent_id, run_id, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)'
   ).run(id, userId, storeText, JSON.stringify(metadata || {}), agent, run, ts, ts);
@@ -83,6 +89,35 @@ async function createMemory({ userId, text, messages, metadata = {}, infer = tru
   if (infer) syncFacts(id, storeText); // 异步 LLM 抽取事实，抽取后再补一次向量
   const row = getMemoryRow(id, userId);
   return { ...toObj(row), extracted };
+}
+
+/**
+ * auto-merge 去重检测：新文本向量化后与该用户已有向量记忆做余弦相似度。
+ * 相似度 >= MERGE_THRESHOLD（0.92）判定为重复，返回已存在的记忆；否则返回 null。
+ * embedding 未启用/失败时返回 null（无法精确判断，走正常写入）。
+ */
+async function findDuplicateMemory(userId, text, { agentId = null, runId = null } = {}) {
+  const cfg = require('../config').embedding;
+  if (!cfg.enabled) return null;
+  const qVec = await embed(String(text).slice(0, 8000)).catch(() => null);
+  if (!qVec) return null;
+
+  const scope = scopeClause('m', { agentId, runId });
+  const rows = db
+    .prepare(
+      `SELECT m.id, m.text, m.metadata, m.facts, m.agent_id, m.run_id, m.created_at, m.updated_at, m.embedding
+       FROM memories m WHERE m.user_id = ? AND m.embedding IS NOT NULL${scope.sql}`
+    )
+    .all(userId, ...scope.params);
+
+  let best = null;
+  let bestSim = -1;
+  for (const r of rows) {
+    const sim = cosineSimilarity(qVec, r.embedding);
+    if (sim > bestSim) { bestSim = sim; best = r; }
+  }
+  if (best && bestSim >= 0.92) return best;
+  return null;
 }
 
 /** 多轮对话 → LLM 提炼成简洁记忆文本；失败返回 null（调用方回退原文） */
@@ -108,7 +143,7 @@ async function createMemoriesFromDialogue({ userId, messages, metadata = {}, inf
   const content = await complete([
     {
       role: 'system',
-      content: '你是记忆提炼助手。把下面的对话提炼成多条独立的、可复用的简短事实陈述，每条用一行输出，不要编号、不要前缀、不要解释。合并同主题，拆开不同主题，每条都是独立可检索的事实。只输出事实本身，无法提炼时输出空。',
+      content: '你是记忆提炼助手。把下面的对话提炼成多条独立的、可复用的完整事实陈述。要求：1) 每条必须是完整句子，自包含、带明确主语，不得省略主语（如"10.10.10.214 上运行 X 服务"而不是"上运行 X 服务"）；2) 每条用一行输出，不要编号、不要前缀、不要解释；3) 合并同主题，拆开不同主题，每条都是独立可检索的事实；4) 保留关键信息（IP、端口、地址、人名、数字、决策）。只输出事实本身，无法提炼时输出空。',
     },
     { role: 'user', content: `对话：\n${dialogue.slice(0, 6000)}` },
   ], { maxTokens: 2048, temperature: 0.1 });
@@ -131,6 +166,7 @@ async function createMemoriesFromDialogue({ userId, messages, metadata = {}, inf
   const created = [];
   for (const item of items) {
     const mem = await createMemory({ userId, text: item, metadata, infer, agentId, runId });
+    if (mem.merged) continue; // auto-merge：已有重复记忆，跳过不重复入库
     created.push({ id: mem.id, text: mem.text });
   }
   return created;
@@ -140,22 +176,38 @@ async function createMemoriesFromDialogue({ userId, messages, metadata = {}, inf
  * 异步 LLM 事实抽取：把自由文本提炼成结构化事实（字符串数组）存 facts 列。
  * 抽取成功后重算向量（text + facts），让事实参与语义召回。失败静默，原样保留。
  */
+/**
+ * 异步 LLM 抽取：从文本提炼 facts（事实）与 entities（实体），分别存 facts/entities 列。
+ * 一次 LLM 调用返回 JSON {facts:[], entities:[]}。抽取成功后重算向量（text+facts+entities）。
+ * 失败静默，原样保留。
+ */
 function syncFacts(id, text) {
-  const prompt = `请从下面的文本中提炼出独立的、可复用的简短事实陈述，每条用一行输出，不要编号、不要前缀、不要解释。只输出事实本身，无法提炼时输出空。\n\n文本：${String(text).slice(0, 4000)}`;
+  const prompt = `从下面的文本中提取 JSON（不要其他内容）：
+{"facts": ["独立可复用的简短事实，每条一个字符串"], "entities": ["专有名词实体：公司/组织/人名/地名/IP/端口/技术名等，每个一个字符串"]}
+无法提取的字段给空数组。\n\n文本：${String(text).slice(0, 4000)}`;
   complete([
-    { role: 'system', content: '你是信息抽取助手，只输出事实条目，每行一条，语言与输入一致。' },
+    { role: 'system', content: '你是信息抽取助手，只输出合法 JSON。' },
     { role: 'user', content: prompt },
   ], { maxTokens: 1024, temperature: 0.1 })
     .then((content) => {
       if (!content) return;
-      const facts = content
-        .split('\n')
-        .map((l) => l.replace(/^[-*•\d.\s]+/, '').trim())
-        .filter((l) => l.length >= 3);
-      if (!facts.length) return;
-      db.prepare('UPDATE memories SET facts = ? WHERE id = ?').run(JSON.stringify(facts), id);
-      // 事实就绪后重算向量（text + facts）
-      const vec = embed(semanticText(text, facts));
+      let facts = [], entities = [];
+      try {
+        const parsed = JSON.parse(content);
+        facts = Array.isArray(parsed.facts) ? parsed.facts.filter((f) => typeof f === 'string' && f.trim().length >= 3) : [];
+        entities = Array.isArray(parsed.entities) ? parsed.entities.filter((e) => typeof e === 'string' && e.trim().length >= 2) : [];
+      } catch {
+        // 非 JSON 回退：按行当 facts
+        facts = content
+          .split('\n')
+          .map((l) => l.replace(/^[-*•\d.\s]+/, '').trim())
+          .filter((l) => l.length >= 3);
+      }
+      if (!facts.length && !entities.length) return;
+      db.prepare('UPDATE memories SET facts = ?, entities = ? WHERE id = ?')
+        .run(facts.length ? JSON.stringify(facts) : null, entities.length ? JSON.stringify(entities) : null, id);
+      // 就绪后重算向量（text + facts + entities）
+      const vec = embed(semanticText(text, facts, entities));
       vec.then((v) => {
         if (v) db.prepare('UPDATE memories SET embedding = ? WHERE id = ?').run(v, id);
       }).catch(() => {});
@@ -163,9 +215,10 @@ function syncFacts(id, text) {
     .catch(() => {});
 }
 
-/** 语义向量文本源：原文 + 抽取事实（增强事实命中） */
-function semanticText(text, facts = []) {
-  return facts.length ? `${text}\n${facts.join('\n')}` : String(text).slice(0, 8000);
+/** 语义向量文本源：原文 + 抽取事实 + 实体（增强语义与实体命中） */
+function semanticText(text, facts = [], entities = []) {
+  const parts = [String(text).slice(0, 8000), ...facts, ...entities];
+  return parts.join('\n');
 }
 
 /** 异步为记忆补 embedding 向量（新增/更新后调用）；失败静默，搜索自动回退关键词 */
@@ -226,7 +279,7 @@ async function searchMemories({ userId, query, limit = 10, threshold = 0, agentI
     const match = ftsWords.map((w) => `"${w.replace(/"/g, '""')}"`).join(' AND ');
     ftsRows = db
       .prepare(
-        `SELECT m.id, m.text, m.metadata, m.facts, m.created_at, m.updated_at, bm25(memories_fts) AS score
+        `SELECT m.id, m.text, m.metadata, m.facts, m.entities, m.created_at, m.updated_at, bm25(memories_fts) AS score
          FROM memories_fts JOIN memories m ON m.rowid = memories_fts.rowid
          WHERE memories_fts MATCH ? AND m.user_id = ?${scope.sql} ORDER BY score LIMIT 500`
       )
@@ -237,27 +290,31 @@ async function searchMemories({ userId, query, limit = 10, threshold = 0, agentI
   if (!ftsRows.length) {
     ftsRows = db
       .prepare(
-        `SELECT m.id, m.text, m.metadata, m.facts, m.created_at, m.updated_at, 0 AS score
+        `SELECT m.id, m.text, m.metadata, m.facts, m.entities, m.created_at, m.updated_at, 0 AS score
          FROM memories m WHERE m.user_id = ?${scope.sql} ORDER BY m.updated_at DESC LIMIT 500`
       )
       .all(userId, ...scope.params);
   }
-  // 4. LIKE 二次过滤：每个词都必须出现在 text 或 facts 中（覆盖 2 字符中文词如"端口"，含 infer 事实命中）
+  // 4. LIKE 二次过滤：每个词都必须出现在 text / facts / entities 中（覆盖 2 字符中文词、事实与实体命中）
   ftsRows = ftsRows.filter((m) => {
-    const hay = `${m.text}\n${m.facts || ''}`;
+    const hay = `${m.text}\n${m.facts || ''}\n${m.entities || ''}`;
     return words.every((w) => hay.includes(w));
   });
 
-  // 5. 混合去重合并：向量召回优先（语义命中），再补关键词命中（保底字面命中）
+  // 5. 混合去重合并：向量召回优先（语义命中），再补关键词命中（保底字面命中）；
+  //    查询词命中记忆实体的，加权排前（实体链接增强）
   const seen = new Set();
   const merged = [];
   const push = (m, score) => {
     if (seen.has(m.id)) return;
     seen.add(m.id);
-    merged.push({ ...m, score: Number(score.toFixed(4)) });
+    const entities = parseList(m.entities);
+    const entityHit = entities.some((e) => words.some((w) => e.includes(w) || w.includes(e)));
+    merged.push({ ...m, score: Number((score + (entityHit ? 0.08 : 0)).toFixed(4)), entityHit: !!entityHit });
   };
   for (const m of vecCandidates) push(m, m.similarity);
   for (const m of ftsRows) push(m, m.score ?? 0);
+  merged.sort((a, b) => (b.entityHit ? 1 : 0) - (a.entityHit ? 1 : 0) || b.score - a.score);
 
   return merged.slice(0, limit).map(toObj);
 }
@@ -273,7 +330,7 @@ function getVecCandidates(userId, query, topN, threshold, scope = { sql: '', par
     if (!qVec) return [];
     const rows = db
       .prepare(
-        `SELECT m.id, m.text, m.metadata, m.created_at, m.updated_at, m.embedding FROM memories m WHERE m.user_id = ? AND m.embedding IS NOT NULL${scope.sql}`
+        `SELECT m.id, m.text, m.metadata, m.facts, m.entities, m.created_at, m.updated_at, m.embedding FROM memories m WHERE m.user_id = ? AND m.embedding IS NOT NULL${scope.sql}`
       )
       .all(userId, ...scope.params);
     const scored = [];
