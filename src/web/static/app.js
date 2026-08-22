@@ -162,10 +162,12 @@ function renderMemories(items, total) {
   } else {
     list.innerHTML = items.map((m) => `
       <div class="memory-item" data-id="${esc(m.id)}">
-        <div class="memory-text">${esc(m.text)}</div>
-        <div class="memory-meta">
-          <span class="stamp">${esc(new Date(m.updated_at).toLocaleString())}</span>
-          ${Object.keys(m.metadata || {}).length ? `<span class="meta-json">${esc(JSON.stringify(m.metadata))}</span>` : ''}
+        <div class="memory-body">
+          <div class="memory-text">${esc(m.text)}</div>
+          <div class="memory-meta">
+            <span class="stamp">${esc(new Date(m.updated_at).toLocaleString())}</span>
+            ${Object.keys(m.metadata || {}).length ? `<span class="meta-json">${esc(JSON.stringify(m.metadata))}</span>` : ''}
+          </div>
         </div>
         <div class="memory-actions">
           <button class="btn btn-ghost" data-act="edit">编辑</button>
