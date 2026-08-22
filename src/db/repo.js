@@ -849,10 +849,18 @@ async function processEvent(event) {
   return getEvent(id, userId);
 }
 
-/** 扫描并处理所有 pending 事件（串行，避免并发写冲突）。由服务启动定时调用。 */
+/** 扫描并处理所有 pending 事件（串行，避免并发写冲突）。由服务启动定时调用。
+ *  注意：只捞 pending，不捞 processing——处理中的事件若卡住不应被重复执行阻塞队列。
+ *  processing 超过 5 分钟视为卡死，重置为 pending 重试（带重试上限保护）。 */
 async function processPendingEvents() {
+  // 卡死保护：processing 超过 5 分钟 → 重置为 pending 重新处理
+  const stuckCutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  db.prepare(
+    "UPDATE events SET status='pending', updated_at=? WHERE status='processing' AND updated_at <= ?"
+  ).run(now(), stuckCutoff);
+
   const pendings = db
-    .prepare("SELECT * FROM events WHERE status IN ('pending','processing') ORDER BY created_at LIMIT 5")
+    .prepare("SELECT * FROM events WHERE status = 'pending' ORDER BY created_at LIMIT 5")
     .all();
   for (const ev of pendings) {
     await processEvent(ev);
