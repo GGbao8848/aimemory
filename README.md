@@ -117,6 +117,9 @@ pm2 restart aimemory-mcp        # 更新代码后重启
 | `get_memory` | 按 id 获取单条（含修改历史时间线） |
 | `update_memory` | 更新 text / metadata（旧值进历史） |
 | `delete_memory` | 删除（旧值进历史） |
+| `delete_all_memories` | 清空当前用户的全部记忆（用户与密钥保留） |
+| `list_entities` | 列出有记忆的用户实体（记忆数 + 最后活跃时间） |
+| `delete_entities` | 删除用户及其全部记忆、密钥、会话（不可恢复） |
 | `create_api_key` / `list_api_keys` / `revoke_api_key` | 密钥管理 |
 
 > 参数与 mem0 官方 MCP 同构（`user_id` / `filters` / `page_size` / `limit` 等）。

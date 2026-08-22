@@ -212,6 +212,62 @@ function deleteMemory(id, userId) {
   return true;
 }
 
+// ============ 实体/批量管理（对齐 mem0 工具面） ============
+
+/** 清空指定用户全部记忆（mem0 delete_all_memories 的 user 语义；不删用户本身） */
+function deleteAllMemories(userId) {
+  const total = db.prepare('SELECT COUNT(*) c FROM memories WHERE user_id = ?').get(userId).c;
+  if (!total) return { deleted: 0 };
+  const tx = db.transaction(() => {
+    const ts = now();
+    const rows = db.prepare('SELECT * FROM memories WHERE user_id = ?').all(userId);
+    const ins = db.prepare(
+      `INSERT INTO memories_history
+       (memory_id, user_id, event_type, prev_text, prev_metadata, prev_updated_at, created_at)
+       VALUES (?, ?, 'DELETE', ?, ?, ?, ?)`
+    );
+    const del = db.prepare('DELETE FROM memories WHERE id = ? AND user_id = ?');
+    for (const r of rows) {
+      ins.run(r.id, userId, r.text, r.metadata, r.updated_at, ts);
+      del.run(r.id, userId);
+    }
+  });
+  tx();
+  return { deleted: total };
+}
+
+/** 列出有记忆的实体（mem0 list_entities：当前仅 user 维度，返回各用户记忆数） */
+function listEntities() {
+  return db
+    .prepare(
+      `SELECT user_id, COUNT(*) AS memory_count, MAX(updated_at) AS last_active_at
+       FROM memories GROUP BY user_id ORDER BY last_active_at DESC`
+    )
+    .all();
+}
+
+/** 删除实体及其全部记忆（mem0 delete_entities；同时清理该用户的密钥与会话） */
+function deleteEntities(userId) {
+  const memCount = db.prepare('SELECT COUNT(*) c FROM memories WHERE user_id = ?').get(userId).c;
+  const tx = db.transaction(() => {
+    const ts = now();
+    const rows = db.prepare('SELECT * FROM memories WHERE user_id = ?').all(userId);
+    const ins = db.prepare(
+      `INSERT INTO memories_history
+       (memory_id, user_id, event_type, prev_text, prev_metadata, prev_updated_at, created_at)
+       VALUES (?, ?, 'DELETE', ?, ?, ?, ?)`
+    );
+    for (const r of rows) {
+      ins.run(r.id, userId, r.text, r.metadata, r.updated_at, ts);
+    }
+    db.prepare('DELETE FROM memories WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM api_keys WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
+  });
+  tx();
+  return { deleted: memCount };
+}
+
 // ============ API Key ============
 
 function createApiKey({ userId, name = 'default', tokenHash }) {
@@ -395,6 +451,9 @@ module.exports = {
   searchMemories,
   updateMemory,
   deleteMemory,
+  deleteAllMemories,
+  listEntities,
+  deleteEntities,
   createApiKey,
   listApiKeys,
   findUserIdByTokenHash,

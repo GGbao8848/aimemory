@@ -223,6 +223,55 @@ const tools = [
       return { content: [{ type: 'text', text: jsonText({ success: true }) }] };
     },
   },
+
+  // ============ 实体/批量管理（对齐 mem0 工具面） ============
+  // 本实例当前只有 user 维度（无 agent/app/run），故 user_id 只能等于当前身份，
+  // 跨用户删除一律拒绝——多租户隔离底线不变。
+
+  {
+    name: 'delete_all_memories',
+    description: '清空指定用户（默认当前身份）的全部记忆；用户本身与密钥保留',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        user_id: { type: 'string', description: '用户标识（可选，仅限当前身份）' },
+        agent_id: { type: 'string', description: '本实例无 agent 维度，保留兼容，忽略' },
+        app_id: { type: 'string', description: '本实例无 app 维度，保留兼容，忽略' },
+        run_id: { type: 'string', description: '本实例无 run 维度，保留兼容，忽略' },
+      },
+    },
+    handler: async ({ user_id }, userId) => {
+      const uid = resolveUserId(userId, user_id);
+      return { content: [{ type: 'text', text: jsonText(repo.deleteAllMemories(uid)) }] };
+    },
+  },
+
+  {
+    name: 'list_entities',
+    description: '列出有记忆的用户实体（含记忆数与最后活跃时间）',
+    inputSchema: { type: 'object', properties: {} },
+    handler: async () => {
+      return { content: [{ type: 'text', text: jsonText({ entities: repo.listEntities() }) }] };
+    },
+  },
+
+  {
+    name: 'delete_entities',
+    description: '删除指定用户（默认当前身份）及其全部记忆、密钥与 Web 会话（不可恢复）',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        user_id: { type: 'string', description: '用户标识（可选，仅限当前身份）' },
+        agent_id: { type: 'string', description: '本实例无 agent 维度，保留兼容，忽略' },
+        app_id: { type: 'string', description: '本实例无 app 维度，保留兼容，忽略' },
+        run_id: { type: 'string', description: '本实例无 run 维度，保留兼容，忽略' },
+      },
+    },
+    handler: async ({ user_id }, userId) => {
+      const uid = resolveUserId(userId, user_id);
+      return { content: [{ type: 'text', text: jsonText(repo.deleteEntities(uid)) }] };
+    },
+  },
 ];
 
 /** 为指定用户创建并注册工具的 MCP Server 实例（userId 闭包注入，天然租户隔离） */
