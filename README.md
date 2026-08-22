@@ -111,7 +111,7 @@ pm2 restart aimemory-mcp        # 更新代码后重启
 
 | 工具 | 说明 |
 |---|---|
-| `add_memory` | 写入记忆：`text` 单条 或 `messages` 多轮对话（LLM 自动提炼）；支持 `agent_id`/`run_id` 归属；`infer` 默认异步提炼事实存 `facts` |
+| `add_memory` | 写入记忆：`text` 单条 或 `messages` 多轮对话（LLM 自动提炼成**多条**独立记忆）；支持 `agent_id`/`run_id` 归属；`infer` 默认异步提炼事实存 `facts` |
 | `search_memories` | 语义 + 关键词混合检索（embedding 向量召回 + 中文子串；支持按 agent/run 过滤） |
 | `get_memories` | 分页列出自己的记忆（支持按 agent/run 过滤） |
 | `get_memory` | 按 id 获取单条（含修改历史时间线） |

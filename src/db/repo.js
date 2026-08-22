@@ -99,6 +99,44 @@ async function summarizeDialogue(dialogue) {
 }
 
 /**
+ * 多轮对话 → LLM 提炼成多条独立记忆并逐条入库（mem0 批量模式）。
+ * LLM 返回多行事实，每行一条独立记忆（独立向量 + facts）。失败/无事实时回退单条合并。
+ * 返回 [{id, text}]。
+ */
+async function createMemoriesFromDialogue({ userId, messages, metadata = {}, infer = true, agentId = null, runId = null }) {
+  const dialogue = messages.map((m) => `${m.role}: ${m.content}`).join('\n');
+  const content = await complete([
+    {
+      role: 'system',
+      content: '你是记忆提炼助手。把下面的对话提炼成多条独立的、可复用的简短事实陈述，每条用一行输出，不要编号、不要前缀、不要解释。合并同主题，拆开不同主题，每条都是独立可检索的事实。只输出事实本身，无法提炼时输出空。',
+    },
+    { role: 'user', content: `对话：\n${dialogue.slice(0, 6000)}` },
+  ], { maxTokens: 2048, temperature: 0.1 });
+
+  let facts = [];
+  if (content) {
+    facts = content
+      .split('\n')
+      .map((l) => l.replace(/^[-*•\d.\s]+/, '').trim())
+      .filter((l) => l.length >= 3);
+  }
+
+  // 提炼出多条 → 逐条入库；否则回退为单条合并（原 summarize 行为）
+  const items = facts.length ? facts : [await summarizeDialogue(dialogue)].filter(Boolean);
+  if (!items.length) {
+    const fallback = String(messages.map((m) => m.content).filter(Boolean).join(' ')).slice(0, 8000);
+    items.push(fallback);
+  }
+
+  const created = [];
+  for (const item of items) {
+    const mem = await createMemory({ userId, text: item, metadata, infer, agentId, runId });
+    created.push({ id: mem.id, text: mem.text });
+  }
+  return created;
+}
+
+/**
  * 异步 LLM 事实抽取：把自由文本提炼成结构化事实（字符串数组）存 facts 列。
  * 抽取成功后重算向量（text + facts），让事实参与语义召回。失败静默，原样保留。
  */
@@ -541,6 +579,7 @@ function uniqueApiKeyName(userId, base) {
 
 module.exports = {
   createMemory,
+  createMemoriesFromDialogue,
   getMemory,
   listMemories,
   searchMemories,

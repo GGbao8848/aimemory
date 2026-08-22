@@ -68,12 +68,26 @@ const tools = [
         throw new McpError(ErrorCode.InvalidParams, 'text 或 messages 至少提供一个');
       }
       const uid = resolveUserId(userId, user_id);
+      const inferFlag = infer !== false;
+
+      // messages 模式：提炼成多条独立记忆并逐条入库（mem0 批量）
+      if (messages && Array.isArray(messages) && messages.length) {
+        const created = await repo.createMemoriesFromDialogue({
+          userId: uid, messages, metadata, infer: inferFlag, agentId: agent_id, runId: run_id,
+        });
+        return {
+          content: [{
+            type: 'text',
+            text: jsonText({ count: created.length, memories: created, user_id: uid, agent_id: agent_id || null, run_id: run_id || null }),
+          }],
+        };
+      }
+
       const mem = await repo.createMemory({
         userId: uid,
-        text: text ? String(text) : undefined,
-        messages,
+        text: String(text),
         metadata,
-        infer: infer !== false,
+        infer: inferFlag,
         agentId: agent_id,
         runId: run_id,
       });
