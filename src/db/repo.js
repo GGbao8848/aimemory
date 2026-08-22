@@ -52,15 +52,50 @@ function getHistory(memoryId, userId) {
     }));
 }
 
-function createMemory({ userId, text, metadata = {}, infer = true }) {
+/**
+ * 创建记忆。支持两种输入：
+ * - text：单条文本（保留原行为）
+ * - messages：多轮对话 [{role, content}...]，LLM 提炼成记忆文本入库（mem0 兼容）
+ * agentId/runId：作用域隔离，null 表示全局（无 agent/run 归属）
+ */
+async function createMemory({ userId, text, messages, metadata = {}, infer = true, agentId = null, runId = null }) {
   const id = uuid();
   const ts = now();
+  const agent = agentId || null;
+  const run = runId || null;
+
+  // messages 模式：拼接对话 → LLM 提炼成单条记忆文本
+  let storeText = text;
+  let extracted = null;
+  if (messages && Array.isArray(messages) && messages.length) {
+    const dialogue = messages.map((m) => `${m.role}: ${m.content}`).join('\n');
+    storeText = await summarizeDialogue(dialogue); // 提炼失败时回退为原文截断
+    extracted = storeText;
+  }
+  if (!storeText || !String(storeText).trim()) {
+    storeText = String(text || messages?.map((m) => m.content).filter(Boolean).join(' ')).slice(0, 8000);
+  }
+
   db.prepare(
-    'INSERT INTO memories (id, user_id, text, metadata, facts, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, ?, ?)'
-  ).run(id, userId, text, JSON.stringify(metadata || {}), ts, ts);
-  syncEmbedding(id, text); // 异步补向量（facts 为空时），失败静默，不影响写入
-  if (infer) syncFacts(id, text); // 异步 LLM 抽取事实，抽取后再补一次向量
-  return toObj(getMemoryRow(id, userId));
+    'INSERT INTO memories (id, user_id, text, metadata, facts, agent_id, run_id, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)'
+  ).run(id, userId, storeText, JSON.stringify(metadata || {}), agent, run, ts, ts);
+  syncEmbedding(id, storeText); // 异步补向量，失败静默
+  if (infer) syncFacts(id, storeText); // 异步 LLM 抽取事实，抽取后再补一次向量
+  const row = getMemoryRow(id, userId);
+  return { ...toObj(row), extracted };
+}
+
+/** 多轮对话 → LLM 提炼成简洁记忆文本；失败返回 null（调用方回退原文） */
+async function summarizeDialogue(dialogue) {
+  const content = await complete([
+    {
+      role: 'system',
+      content: '你是记忆提炼助手。把下面的对话提炼成一条简洁、可复用的记忆陈述，保留关键事实（人名、数字、偏好、决策、命令等）。只输出提炼后的记忆本身，不要解释、不要编号、不要前缀。',
+    },
+    { role: 'user', content: `对话：\n${dialogue.slice(0, 6000)}` },
+  ], { maxTokens: 512, temperature: 0.1 });
+  const trimmed = content?.trim();
+  return trimmed && trimmed.length >= 3 ? trimmed : null;
 }
 
 /**
@@ -108,30 +143,43 @@ function getMemory(id, userId) {
   return { ...toObj(row), history: getHistory(id, userId) };
 }
 
-function listMemories({ userId, page = 1, pageSize = 10 }) {
+/** 作用域过滤 SQL：传入 agentId/runId 则精确匹配，未传则不限制（兼容全局/旧数据） */
+function scopeClause(alias, { agentId, runId }) {
+  const a = alias ? `${alias}.` : '';
+  const parts = [];
+  const params = [];
+  if (agentId) { parts.push(`${a}agent_id = ?`); params.push(agentId); }
+  if (runId) { parts.push(`${a}run_id = ?`); params.push(runId); }
+  return { sql: parts.length ? ` AND ${parts.join(' AND ')}` : '', params };
+}
+
+function listMemories({ userId, page = 1, pageSize = 10, agentId, runId }) {
   page = clamp(page, 1, 100000, 1);
   pageSize = clamp(pageSize, 1, 100, 10);
+  const scope = scopeClause('', { agentId, runId });
   const total = db
-    .prepare('SELECT COUNT(*) AS c FROM memories WHERE user_id = ?')
-    .get(userId).c;
+    .prepare(`SELECT COUNT(*) AS c FROM memories WHERE user_id = ?${scope.sql}`)
+    .get(userId, ...scope.params).c;
   const rows = db
     .prepare(
-      'SELECT * FROM memories WHERE user_id = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?'
+      `SELECT * FROM memories WHERE user_id = ?${scope.sql} ORDER BY updated_at DESC LIMIT ? OFFSET ?`
     )
-    .all(userId, pageSize, (page - 1) * pageSize);
+    .all(userId, ...scope.params, pageSize, (page - 1) * pageSize);
   return { results: rows.map(toObj), total, page, pageSize };
 }
 
-async function searchMemories({ userId, query, limit = 10, threshold = 0 }) {
+async function searchMemories({ userId, query, limit = 10, threshold = 0, agentId, runId }) {
   limit = clamp(limit, 1, 100, 10);
   const q = (query || '').trim();
   const words = q.split(/\s+/).filter(Boolean);
   if (!words.length) return [];
 
+  const scope = scopeClause('m', { agentId, runId });
+
   // 1. 向量语义召回：查询向量与所有带向量记忆做余弦相似度，取 topN 候选
   //    （embedding 未启用/失败/无向量数据时返回 []，自动走关键词路径）
   const topN = Math.max(limit * 4, 50);
-  const vecCandidates = await getVecCandidates(userId, q, topN, threshold);
+  const vecCandidates = await getVecCandidates(userId, q, topN, threshold, scope);
 
   // 2. FTS5 trigram 关键词候选：>=3 字符的词 AND 匹配（trigram 无法索引 1-2 字符片段）
   const ftsWords = words.filter((w) => w.length >= 3);
@@ -142,19 +190,19 @@ async function searchMemories({ userId, query, limit = 10, threshold = 0 }) {
       .prepare(
         `SELECT m.id, m.text, m.metadata, m.facts, m.created_at, m.updated_at, bm25(memories_fts) AS score
          FROM memories_fts JOIN memories m ON m.rowid = memories_fts.rowid
-         WHERE memories_fts MATCH ? AND m.user_id = ? ORDER BY score LIMIT 500`
+         WHERE memories_fts MATCH ? AND m.user_id = ?${scope.sql} ORDER BY score LIMIT 500`
       )
-      .all(match, userId);
+      .all(match, userId, ...scope.params);
   }
 
   // 3. 关键词全表兜底（FTS 无候选，全为短词）
   if (!ftsRows.length) {
     ftsRows = db
       .prepare(
-        `SELECT id, text, metadata, facts, created_at, updated_at, 0 AS score
-         FROM memories WHERE user_id = ? ORDER BY updated_at DESC LIMIT 500`
+        `SELECT m.id, m.text, m.metadata, m.facts, m.created_at, m.updated_at, 0 AS score
+         FROM memories m WHERE m.user_id = ?${scope.sql} ORDER BY m.updated_at DESC LIMIT 500`
       )
-      .all(userId);
+      .all(userId, ...scope.params);
   }
   // 4. LIKE 二次过滤：每个词都必须出现在 text 或 facts 中（覆盖 2 字符中文词如"端口"，含 infer 事实命中）
   ftsRows = ftsRows.filter((m) => {
@@ -180,16 +228,16 @@ async function searchMemories({ userId, query, limit = 10, threshold = 0 }) {
  * 向量候选：查询文本向量化后与该用户全部带向量记忆做余弦相似度。
  * embedding 未启用/失败/无向量数据时返回 []（调用方走关键词路径）。
  */
-function getVecCandidates(userId, query, topN, threshold) {
+function getVecCandidates(userId, query, topN, threshold, scope = { sql: '', params: [] }) {
   const cfg = require('../config').embedding;
   if (!cfg.enabled) return [];
   return embed(query).then((qVec) => {
     if (!qVec) return [];
     const rows = db
       .prepare(
-        'SELECT id, text, metadata, created_at, updated_at, embedding FROM memories WHERE user_id = ? AND embedding IS NOT NULL'
+        `SELECT m.id, m.text, m.metadata, m.created_at, m.updated_at, m.embedding FROM memories m WHERE m.user_id = ? AND m.embedding IS NOT NULL${scope.sql}`
       )
-      .all(userId);
+      .all(userId, ...scope.params);
     const scored = [];
     for (const r of rows) {
       const sim = cosineSimilarity(qVec, r.embedding);

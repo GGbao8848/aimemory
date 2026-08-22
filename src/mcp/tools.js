@@ -31,12 +31,28 @@ function jsonText(obj) {
 const tools = [
   {
     name: 'add_memory',
-    description: '添加一条新记忆（写入记忆库，用户隔离）。infer=true 时异步用 LLM 提炼事实存 facts（增强语义召回），失败不影响原样入库',
+    description:
+      '添加记忆。支持两种输入：text（单条文本）或 messages（多轮对话，LLM 自动提炼成记忆）。' +
+      'agent_id/run_id 标记记忆归属（多 agent 隔离）。infer=true 时异步 LLM 提炼事实存 facts（增强语义召回），失败不影响原样入库',
     inputSchema: {
       type: 'object',
       properties: {
-        text: { type: 'string', description: '要记住的内容（非空）' },
+        text: { type: 'string', description: '要记住的内容（与 messages 二选一）' },
+        messages: {
+          type: 'array',
+          description: '多轮对话 [{role, content}, ...]，LLM 提炼成记忆（与 text 二选一，优先于 text）',
+          items: {
+            type: 'object',
+            properties: {
+              role: { type: 'string', description: 'speaker，如 user/assistant' },
+              content: { type: 'string', description: '发言内容' },
+            },
+            required: ['role', 'content'],
+          },
+        },
         user_id: { type: 'string', description: '用户标识（可选，仅限当前身份）' },
+        agent_id: { type: 'string', description: 'agent 标识（可选，记忆归属此 agent）' },
+        run_id: { type: 'string', description: '会话/运行标识（可选，记忆归属此次 run）' },
         metadata: {
           type: 'object',
           description: '附加元数据（如 {source: "claude-code"}），可含任意键',
@@ -46,15 +62,22 @@ const tools = [
           description: '是否 LLM 事实抽取，默认 true；false 时原样入库不抽取',
         },
       },
-      required: ['text'],
     },
-    handler: async ({ text, metadata, infer, user_id }, userId) => {
-      if (!text || !String(text).trim()) {
-        throw new McpError(ErrorCode.InvalidParams, 'text 不能为空');
+    handler: async ({ text, messages, metadata, infer, user_id, agent_id, run_id }, userId) => {
+      if ((!text || !String(text).trim()) && !(Array.isArray(messages) && messages.length)) {
+        throw new McpError(ErrorCode.InvalidParams, 'text 或 messages 至少提供一个');
       }
       const uid = resolveUserId(userId, user_id);
-      const mem = repo.createMemory({ userId: uid, text: String(text), metadata, infer: infer !== false });
-      return { content: [{ type: 'text', text: jsonText({ id: mem.id, user_id: uid, text: mem.text }) }] };
+      const mem = await repo.createMemory({
+        userId: uid,
+        text: text ? String(text) : undefined,
+        messages,
+        metadata,
+        infer: infer !== false,
+        agentId: agent_id,
+        runId: run_id,
+      });
+      return { content: [{ type: 'text', text: jsonText({ id: mem.id, user_id: uid, text: mem.text, agent_id: agent_id || null, run_id: run_id || null }) }] };
     },
   },
 
@@ -67,6 +90,8 @@ const tools = [
       properties: {
         query: { type: 'string', description: '检索关键词' },
         user_id: { type: 'string', description: '用户标识（可选，仅限当前身份）' },
+        agent_id: { type: 'string', description: '仅检索该 agent 的记忆（可选）' },
+        run_id: { type: 'string', description: '仅检索该 run 的记忆（可选）' },
         limit: { type: 'integer', minimum: 1, maximum: 100, description: '返回条数，默认 10' },
         threshold: {
           type: 'number',
@@ -74,7 +99,7 @@ const tools = [
         },
         filters: {
           type: 'object',
-          description: '额外过滤条件；本实例仅支持 user_id 过滤',
+          description: '过滤条件：支持 user_id（仅当前身份）、agent_id、run_id',
         },
         rerank: {
           type: 'boolean',
@@ -83,7 +108,7 @@ const tools = [
       },
       required: ['query'],
     },
-    handler: async ({ query, limit, threshold, user_id, filters = {} }, userId) => {
+    handler: async ({ query, limit, threshold, user_id, agent_id, run_id, filters = {} }, userId) => {
       if (!query || !String(query).trim()) {
         throw new McpError(ErrorCode.InvalidParams, 'query 不能为空');
       }
@@ -91,29 +116,36 @@ const tools = [
       if (filters && filters.user_id !== undefined && filters.user_id !== null) {
         resolveUserId(uid, filters.user_id);
       }
-      const results = await repo.searchMemories({ userId: uid, query: String(query), limit, threshold });
+      // 作用域：顶层参数优先，其次 filters
+      const agentId = agent_id || filters?.agent_id || undefined;
+      const runId = run_id || filters?.run_id || undefined;
+      const results = await repo.searchMemories({ userId: uid, query: String(query), limit, threshold, agentId, runId });
       return { content: [{ type: 'text', text: jsonText({ results }) }] };
     },
   },
 
   {
     name: 'get_memories',
-    description: '分页列出当前用户的记忆（按更新时间倒序）',
+    description: '分页列出当前用户的记忆（按更新时间倒序；支持按 agent/run 过滤）',
     inputSchema: {
       type: 'object',
       properties: {
         user_id: { type: 'string', description: '用户标识（可选，仅限当前身份）' },
-        filters: { type: 'object', description: '过滤条件；本实例仅支持 user_id' },
+        agent_id: { type: 'string', description: '仅列出该 agent 的记忆（可选）' },
+        run_id: { type: 'string', description: '仅列出该 run 的记忆（可选）' },
+        filters: { type: 'object', description: '过滤条件：支持 user_id / agent_id / run_id' },
         page: { type: 'integer', minimum: 1, description: '页码，默认 1' },
         page_size: { type: 'integer', minimum: 1, maximum: 100, description: '每页条数，默认 10' },
       },
     },
-    handler: async ({ page, page_size, user_id, filters = {} }, userId) => {
+    handler: async ({ page, page_size, user_id, agent_id, run_id, filters = {} }, userId) => {
       const uid = resolveUserId(userId, user_id);
       if (filters && filters.user_id !== undefined && filters.user_id !== null) {
         resolveUserId(uid, filters.user_id);
       }
-      const res = repo.listMemories({ userId: uid, page, pageSize: page_size });
+      const agentId = agent_id || filters?.agent_id || undefined;
+      const runId = run_id || filters?.run_id || undefined;
+      const res = repo.listMemories({ userId: uid, page, pageSize: page_size, agentId, runId });
       return { content: [{ type: 'text', text: jsonText({ results: res.results, total: res.total, page: res.page, page_size: res.page_size }) }] };
     },
   },

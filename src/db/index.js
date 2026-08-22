@@ -122,5 +122,14 @@ if (!memCols.includes('embedding')) {
 if (!memCols.includes('facts')) {
   db.exec("ALTER TABLE memories ADD COLUMN facts TEXT");
 }
+// 老库兼容：memories 早期无 agent_id / run_id 列 → 补充（多作用域隔离，可为空）
+if (!memCols.includes('agent_id')) {
+  db.exec('ALTER TABLE memories ADD COLUMN agent_id TEXT');
+}
+if (!memCols.includes('run_id')) {
+  db.exec('ALTER TABLE memories ADD COLUMN run_id TEXT');
+}
+// 作用域检索索引（user + agent + run 组合过滤加速）
+db.exec('CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories(user_id, agent_id, run_id)');
 
 module.exports = db;

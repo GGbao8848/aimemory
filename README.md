@@ -111,9 +111,9 @@ pm2 restart aimemory-mcp        # 更新代码后重启
 
 | 工具 | 说明 |
 |---|---|
-| `add_memory` | 写入一条记忆（text + metadata；`infer=true` 默认异步 LLM 提炼事实存 `facts`） |
-| `search_memories` | 语义 + 关键词混合检索（embedding 向量召回 + 中文子串） |
-| `get_memories` | 分页列出自己的记忆 |
+| `add_memory` | 写入记忆：`text` 单条 或 `messages` 多轮对话（LLM 自动提炼）；支持 `agent_id`/`run_id` 归属；`infer` 默认异步提炼事实存 `facts` |
+| `search_memories` | 语义 + 关键词混合检索（embedding 向量召回 + 中文子串；支持按 agent/run 过滤） |
+| `get_memories` | 分页列出自己的记忆（支持按 agent/run 过滤） |
 | `get_memory` | 按 id 获取单条（含修改历史时间线） |
 | `update_memory` | 更新 text / metadata（旧值进历史） |
 | `delete_memory` | 删除（旧值进历史） |
@@ -122,7 +122,9 @@ pm2 restart aimemory-mcp        # 更新代码后重启
 | `delete_entities` | 删除用户及其全部记忆、密钥、会话（不可恢复） |
 | `create_api_key` / `list_api_keys` / `revoke_api_key` | 密钥管理 |
 
-> 参数与 mem0 官方 MCP 同构（`user_id` / `filters` / `page_size` / `limit` 等）。
+> 参数与 mem0 官方 MCP 同构（`user_id` / `agent_id` / `run_id` / `messages` / `filters` / `page_size` / `limit` 等）。
+> `messages` 已生效：多轮对话自动提炼成记忆（mem0 核心模式）。
+> `agent_id`/`run_id` 已生效：记忆按 agent/run 隔离，搜索/列出可过滤。
 > `threshold` 已生效：过滤低于相似度阈值的向量召回结果（0~1，默认 0 不过滤）。
 > `infer` 已生效：`add_memory` 默认异步 LLM 提炼事实存 `facts`（增强语义召回，失败降级原样入库）。
 > `rerank` 为兼容保留：本实例已按语义相关度排序。
@@ -288,9 +290,11 @@ npm run setup-keycloak
 | 字段 | 所在工具 | 当前行为 | 保留用途 |
 |---|---|---|---|
 | `infer` | add_memory | **已生效**：默认异步 LLM 提炼事实存 `facts`（失败降级原样入库） | 随 P0-2 LLM 上线已完成 |
+| `messages` | add_memory | **已生效**：多轮对话自动提炼成记忆（mem0 核心模式） | 随 messages 批量上线已完成 |
+| `agent_id`/`run_id` | add_memory / search_memories / get_memories | **已生效**：记忆按 agent/run 隔离，可过滤 | 多作用域已完成 |
 | `threshold` | search_memories | **已生效**：过滤低于相似度阈值的向量召回 | 随 embedding 上线已完成 |
 | `rerank` | search_memories | 忽略（结果已按语义相关度排序） | 接入交叉编码器后：更精细的重排序 |
-| `filters` | search_memories / get_memories | 仅支持 `user_id`（已强制隔离） | 扩展为 metadata 键值 / 时间范围 / 命名空间过滤 |
+| `filters` | search_memories / get_memories | 支持 `user_id` / `agent_id` / `run_id` | 扩展为 metadata 键值 / 时间范围过滤 |
 | `user_id` | 所有工具 | 已完整实现：只能等于当前身份，跨租户拒绝 | 多租户隔离底座，无需再扩展 |
 
 ### 三、扩展路线图（按重要程度）
