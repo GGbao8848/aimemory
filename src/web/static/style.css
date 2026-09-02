@@ -198,12 +198,12 @@ input[type="text"], input[type="search"], textarea,
 .nav-ico { width: 16px; height: 16px; flex: none; opacity: .9; }
 
 /* 侧边栏底部：主题切换 + 用户 + 退出 */
-.sidebar-foot { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 12px; }
+.sidebar-foot { border-top: 1px solid var(--border); padding-top: 12px; margin-top: auto; }
 
 .theme-toggle {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 8px;
   width: 100%;
   padding: 8px 10px;
