@@ -600,9 +600,13 @@ function createApiKey({ userId, name = 'default', tokenHash }) {
     created_at: now(),
     revoked_at: null,
   };
-  db.prepare(
-    'INSERT INTO api_keys (id, user_id, name, token_hash, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(row.id, row.user_id, row.name, row.token_hash, row.created_at, row.revoked_at);
+  db.transaction(() => {
+    // 单 key 策略：签发新密钥前吊销该用户所有未吊销旧密钥（换设备/换客户端 = 旧 key 立即失效）
+    db.prepare('UPDATE api_keys SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL').run(now(), userId);
+    db.prepare(
+      'INSERT INTO api_keys (id, user_id, name, token_hash, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(row.id, row.user_id, row.name, row.token_hash, row.created_at, row.revoked_at);
+  })();
   return row;
 }
 
@@ -687,7 +691,12 @@ function consumeConnectCode(code) {
   if (!row) return null;
   if (row.consumed_at) return null;
   if (row.expires_at <= now()) return null;
-  db.prepare('UPDATE connect_codes SET consumed_at = ? WHERE code = ?').run(now(), code);
+  const ts = now();
+  db.transaction(() => {
+    db.prepare('UPDATE connect_codes SET consumed_at = ? WHERE code = ?').run(ts, code);
+    // 单 key 策略：连接码对应的密钥被消费后即成为该用户"旧 key"，立即吊销，避免一人多 key
+    db.prepare('UPDATE api_keys SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL').run(ts, row.user_id);
+  })();
   return { user_id: row.user_id, api_key: row.token_plain, api_key_id: row.api_key_id };
 }
 
@@ -705,15 +714,27 @@ function generateRequestId() {
   return crypto.randomBytes(24).toString('hex');
 }
 
-/** 创建设备流连接请求（匿名 pending，不建 key）；返回 { request_id } */
-function createConnectRequest() {
+/** 创建设备流连接请求（匿名 pending，不建 key）；返回 { request_id }
+ *  confirmToken（可选）：agent 侧随机令牌，拼进 authorize_url；/connect 页校验匹配后免按钮自动授权。
+ */
+function createConnectRequest(confirmToken = null) {
   const requestId = generateRequestId();
   const ts = now();
   db.prepare(
-    `INSERT INTO connect_requests (request_id, user_id, status, created_at, expires_at)
-     VALUES (?, NULL, 'pending', ?, ?)`
-  ).run(requestId, ts, new Date(Date.now() + REQ_TTL_MS).toISOString());
+    `INSERT INTO connect_requests (request_id, user_id, status, created_at, expires_at, confirm_token)
+     VALUES (?, NULL, 'pending', ?, ?, ?)`
+  ).run(requestId, ts, new Date(Date.now() + REQ_TTL_MS).toISOString(), confirmToken || null);
   return { request_id: requestId };
+}
+
+/** 校验某请求是否允许「免按钮自动授权」：request 存在、pending、未过期、confirm_token 匹配 */
+function canAutoConfirm(requestId, confirmToken) {
+  if (!requestId || !confirmToken) return false;
+  const row = db.prepare('SELECT * FROM connect_requests WHERE request_id = ?').get(requestId);
+  if (!row) return false;
+  if (row.status !== 'pending') return false;
+  if (row.expires_at <= now()) return false;
+  return !!row.confirm_token && row.confirm_token === confirmToken;
 }
 
 /** 确认授权：绑定当前登录用户 + 生成 API Key（命名自动去重）；返回 { token, key_name } */
@@ -726,8 +747,10 @@ function confirmConnectRequest(requestId, userId, name) {
     db.prepare("UPDATE connect_requests SET status='expired' WHERE request_id=?").run(requestId);
     return null;
   }
+  // 单 key 策略：授权即签发新密钥，旧密钥由 createApiKey 自动吊销（轮换）；命名不再去重，
+  // 重名（含历史重名）由签发前"吊销旧 key"清掉，名字直接可用
   const safeName = (name || '').trim().slice(0, 50) || 'zcode';
-  const keyName = uniqueApiKeyName(userId, safeName);
+  const keyName = safeName;
   const { token, id: keyId } = require('../auth/tokens').createApiKey(userId, keyName);
   db.prepare(
     `UPDATE connect_requests SET status='authorized', user_id=?, key_name=?, api_key_id=?, token_plain=?, confirmed_at=? WHERE request_id=?`
@@ -754,15 +777,9 @@ function cleanupConnectRequests() {
   db.prepare("DELETE FROM connect_requests WHERE status != 'pending' OR expires_at <= ?").run(now());
 }
 
-/** 唯一化 API Key 名称（重名自动加 -2/-3…），解决"token 重名" */
+/** 唯一化 API Key 名称（重名自动加 -2/-3…）。单 key 策略下吊销即清名，已无重名场景，保留以防外部直连 repo 调用 */
 function uniqueApiKeyName(userId, base) {
-  const exists = db
-    .prepare("SELECT name FROM api_keys WHERE user_id=? AND revoked_at IS NULL AND name=?")
-    .get(userId, base);
-  if (!exists) return base;
-  let i = 2;
-  while (db.prepare("SELECT 1 FROM api_keys WHERE user_id=? AND revoked_at IS NULL AND name=?").get(userId, `${base}-${i}`)) i++;
-  return `${base}-${i}`;
+  return base;
 }
 
 // ============ 异步事件（mem0 兼容：add/import 立即受理返回 event_id，后台提炼） ============
@@ -935,8 +952,9 @@ module.exports = {
   consumeConnectCode,
   cleanupConnectCodes,
   createConnectRequest,
+  canAutoConfirm,
   confirmConnectRequest,
   pollConnectRequest,
   cleanupConnectRequests,
-  uniqueApiKeyName,
+  uniqueApiKeyName, // 单 key 策略下吊销即清名，已无重名场景，保留以防外部直连 repo 调用
 };

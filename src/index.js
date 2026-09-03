@@ -7,6 +7,7 @@ const config = require('./config');
 const repo = require('./db/repo');
 const { handleMcpRequest } = require('./mcp/server');
 const keycloak = require('./auth/keycloak');
+const tokens = require('./auth/tokens');
 const web = require('./web/routes');
 
 const app = express();
@@ -54,6 +55,12 @@ app.get('/auth/callback', async (req, res) => {
     // 建立本地会话
     const sid = require('crypto').randomBytes(24).toString('hex');
     repo.createSession(sid, user.id, config.sessionTtlMs, user.username);
+    // 单 key 策略 + 「进来自动有密钥」：登录即确保该用户存在一条生效密钥。
+    // 新用户/密钥曾被吊销 → 自动签发；已有一条生效密钥 → 保持不变（避免每次登录都轮换）。
+    const existing = repo.listApiKeys(user.id);
+    if (existing.length === 0) {
+      tokens.createApiKey(user.id, 'default');
+    }
     res.cookie('aim_session', sid, {
       httpOnly: true, sameSite: 'lax', maxAge: config.sessionTtlMs,
     });
@@ -94,6 +101,15 @@ app.get('/connect', (req, res) => {
   const id = web.resolveIdentity(req);
   if (!id) return res.redirect('/auth/login?next=/connect');
   const requestId = typeof req.query.request_id === 'string' ? req.query.request_id : '';
+  const confirmToken = typeof req.query.confirm_token === 'string' ? req.query.confirm_token : '';
+  // 免按钮自动授权：agent 发起时带 confirm_token（随机、只存在于其 authorize_url）→
+  // 有登录会话且 token 匹配即直接确认并关窗（无任何页面文字，用户无感）。
+  // 无 confirm_token 或校验不过 → 回退下方手动确认页（安全兜底，防 CSRF 诱导换发）。
+  if (requestId && confirmToken && repo.canAutoConfirm(requestId, confirmToken)) {
+    const r = repo.confirmConnectRequest(requestId, id.userId, 'zcode');
+    res.type('html').send('<!DOCTYPE html><html><head><meta charset="UTF-8" /><script>try{window.close()}catch(e){};setTimeout(function(){location.replace("about:blank")},200);<\/script></head><body></body></html>');
+    return;
+  }
   const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   res.type('html').send(`<!DOCTYPE html>
 <html lang="zh-CN">
@@ -140,15 +156,15 @@ app.get('/connect', (req, res) => {
     <div id="form-area">
       <label>连接请求</label>
       <div class="reqbox" id="reqbox">${requestId ? esc(requestId.slice(0,8)) + '…' : '（缺少请求标识，请从 agent 端重新发起）'}</div>
-      <label>密钥名称（可选，重名自动加后缀）</label>
+      <label>密钥名称（可选；重置密钥会自动吊销你名下其他生效密钥）</label>
       <input type="text" id="key-name" placeholder="如 zcode / claude-code" maxlength="50" />
-      <button class="btn" id="confirm-btn" ${requestId ? '' : 'disabled'}>确认授权</button>
+      <button class="btn" id="confirm-btn" ${requestId ? '' : 'disabled'}>确认并重置密钥</button>
       <p class="err" id="err"></p>
     </div>
 
     <div class="done" id="done">
       <div class="ok">✓ 已授权，可回到 agent 继续</div>
-      <div class="hint">密钥已自动发送到你的 agent，无需复制粘贴。本页可关闭。</div>
+      <div class="hint">密钥已自动发送到你的 agent，无需复制粘贴。你名下其他生效密钥已被自动吊销。本页可关闭。</div>
     </div>
   </div>
   <script>

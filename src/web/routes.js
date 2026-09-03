@@ -93,16 +93,13 @@ apiRouter.delete('/memories/:id', requireAuth, wrap(async (req, res) => {
   res.json({ success: true });
 }));
 
-// ===== API Key =====
+// ===== API Key（单 key 策略：一个用户只有一条生效密钥，生成新 key 自动吊销旧的） =====
 
 apiRouter.post('/keys', requireAuth, wrap(async (req, res) => {
   const name = String((req.body || {}).name || 'default').trim().slice(0, 50);
-  // 限制重名：同一用户未吊销的密钥名称唯一（吊销后可复用）
-  const exists = repo.listApiKeys(req.identity.userId).some((k) => k.name === name);
-  if (exists) {
-    return res.status(400).json({ error: `密钥名称「${name}」已存在，请换一个名称或先吊销旧密钥` });
-  }
-  res.status(201).json(tokens.createApiKey(req.identity.userId, name));
+  // 重名但已吊销的旧密钥可直接覆盖（系统本就只保留一条生效密钥），无需用户先手动吊销
+  const key = tokens.createApiKey(req.identity.userId, name);
+  res.status(201).json(key);
 }));
 
 apiRouter.get('/keys', requireAuth, wrap(async (req, res) => {
@@ -137,11 +134,17 @@ apiRouter.post('/connect/claim', wrap(async (req, res) => {
 // ===== 设备流连接（零粘贴：发起 → 授权页确认 → 轮询拿 key）=====
 
 // agent 端发起连接请求（匿名，不绑定用户）→ 返回 request_id 供浏览器授权页 + 轮询
+// body 可带 confirm_token（agent 侧随机，拼进 authorize_url）→ /connect 校验匹配后免按钮自动授权
 apiRouter.post('/connect/start', wrap(async (req, res) => {
-  const { request_id } = repo.createConnectRequest();
+  const confirmToken = (req.body && typeof req.body.confirm_token === 'string' && req.body.confirm_token) || null;
+  const { request_id } = repo.createConnectRequest(confirmToken);
+  const base = config.publicBaseUrl || `http://${req.get('host')}`;
+  const authorizeUrl = confirmToken
+    ? `${base}/connect?request_id=${request_id}&confirm_token=${encodeURIComponent(confirmToken)}`
+    : `${base}/connect?request_id=${request_id}`;
   res.status(201).json({
     request_id,
-    authorize_url: `${config.publicBaseUrl || `http://${req.get('host')}`}/connect?request_id=${request_id}`,
+    authorize_url: authorizeUrl,
     expires_in: 600,
   });
 }));

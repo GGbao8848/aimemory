@@ -68,6 +68,10 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
 -- 硬约束：同一用户未吊销的密钥名称必须唯一（重名创建直接报错；吊销后可复用）
 CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_user_name ON api_keys(user_id, name) WHERE revoked_at IS NULL;
 
+-- 单 key 策略：每个用户同时最多一条生效密钥。旧 key 由 repo.createApiKey 自动吊销（轮换），
+-- 此唯一索引兜底防并发双写，防止历史数据/旁路插入出现一人多 key。
+CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_user_active ON api_keys(user_id) WHERE revoked_at IS NULL;
+
 -- Web 登录会话（Keycloak 登录成功后建立，HttpOnly cookie 引用 sid）
 CREATE TABLE IF NOT EXISTS sessions (
   id         TEXT PRIMARY KEY,
@@ -161,5 +165,12 @@ if (!memCols.includes('archived')) {
 db.exec('CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories(user_id, agent_id, run_id)');
 // 活跃度索引（归档排除 + 按访问时间排序加速）
 db.exec('CREATE INDEX IF NOT EXISTS idx_memories_active ON memories(user_id, archived, last_access_at)');
+
+// 老库兼容：connect_requests 早期无 confirm_token 列 → 补充（自动确认用：agent 侧随机令牌，
+// 拼进 authorize_url，/connect 页校验匹配后免按钮自动授权；无该令牌的请求回退到手动确认页）
+const crCols = db.prepare('PRAGMA table_info(connect_requests)').all().map((c) => c.name);
+if (!crCols.includes('confirm_token')) {
+  db.exec('ALTER TABLE connect_requests ADD COLUMN confirm_token TEXT');
+}
 
 module.exports = db;
