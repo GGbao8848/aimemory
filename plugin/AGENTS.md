@@ -33,11 +33,13 @@
 
 ## 关键工具
 
-- `mcp__aimemory__search_memories` — 语义检索（核心）
-- `mcp__aimemory__add_memory` — 写入（支持 messages 批量提炼）
-- `mcp__aimemory__get_memories` / `get_memory` — 列出/查看
-- `mcp__aimemory__update_memory` / `delete_memory` — 修改/删除
-- `mcp__aimemory__delete_all_memories` / `list_entities` / `delete_entities` — 批量管理
+> 工具实际注册名为 `mcp__<server名>__<工具名>`（插件安装时 server 带前缀，如 `mcp__plugin_aimemory_aimemory__search_memories`），下表用裸工具名表示，按 `__` 后工具名匹配即可。
+
+- `search_memories` — 语义检索（核心）
+- `add_memory` — 写入（支持 messages 批量提炼）
+- `get_memories` / `get_memory` — 列出/查看
+- `update_memory` / `delete_memory` — 修改/删除
+- `delete_all_memories` / `list_entities` / `delete_entities` — 批量管理
 
 ## 注意
 

@@ -9,9 +9,9 @@ user-invocable: true
 
 # aimemory-recall（记忆上下文加载）
 
-从 aimemory 记忆库检索与当前任务相关的记忆，注入上下文。核心逻辑由 MCP 服务提供（`mcp__aimemory__search_memories`），本 skill 只描述编排。
+从 aimemory 记忆库检索与当前任务相关的记忆，注入上下文。核心逻辑由 MCP 服务提供（`search_memories`），本 skill 只描述编排。
 
-> ⚠️ 依赖已连接的 MCP 服务 `aimemory`（`http://<内网IP>:18543/mcp`，工具前缀 `mcp__aimemory__`）。
+> ⚠️ 依赖已连接的 MCP 服务 `aimemory`（`http://<内网IP>:18543/mcp`，工具名前缀见下方「工具名匹配」说明）。
 > ⚠️ 本 skill 是**只读**的——只检索，不修改、不删除任何记忆。
 
 ## 何时使用
@@ -26,7 +26,7 @@ user-invocable: true
 
 1. **提取主题**：从当前用户消息/任务中提取关键词——文件名、模块名、功能领域、技术栈、人名、项目代号。
 
-2. **并行检索**：按 2-4 个角度调用 `mcp__aimemory__search_memories`（尽量并行，各取 top 5）：
+2. **并行检索**：按 2-4 个角度调用 `search_memories`（尽量并行，各取 top 5）：
 
    | 查询角度 | 示例查询 | 目的 |
    |---|---|---|

@@ -9,9 +9,9 @@ user-invocable: true
 
 # aimemory-remember（记忆沉淀）
 
-把对话中的关键信息存入 aimemory，让未来会话能检索到。核心逻辑由 MCP 服务提供（`mcp__aimemory__add_memory`），本 skill 只描述编排。
+把对话中的关键信息存入 aimemory，让未来会话能检索到。核心逻辑由 MCP 服务提供（`add_memory`），本 skill 只描述编排。
 
-> ⚠️ 依赖已连接的 MCP 服务 `aimemory`（`http://<内网IP>:18543/mcp`，工具前缀 `mcp__aimemory__`）。
+> ⚠️ 依赖已连接的 MCP 服务 `aimemory`（`http://<内网IP>:18543/mcp`，工具名前缀见下方「工具名匹配」说明）。
 
 ## 何时使用
 
@@ -24,7 +24,7 @@ user-invocable: true
 
 1. **收集内容**：把用户想记住的内容整理成 `messages` 数组（多轮对话）或 `text`（单条事实）。优先用 `messages`——LLM 会自动提炼成多条结构化记忆。
 
-2. **调用 `mcp__aimemory__add_memory`**：
+2. **调用 `add_memory`**：
 
    ```json
    {
