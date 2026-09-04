@@ -112,20 +112,22 @@ pm2 restart aimemory-mcp        # 更新代码后重启
 
 ## MCP 工具一览
 
+> 服务端默认只暴露 **7 个核心工具**（下方无 ✱ 项），避免 agent 工具清单过载；设置环境变量 `MCP_TOOL_PROFILE=full` 后恢复 mem0 兼容的完整工具面（含 ✱ 项）。
+
 | 工具 | 说明 |
 |---|---|
 | `add_memory` | 写入记忆：`text` 单条 或 `messages` 多轮对话（**异步受理**：messages 模式立即返回 `event_id`，后台 LLM 提炼成多条）；支持 `agent_id`/`run_id` 归属；`infer` 默认异步提炼事实存 `facts` |
-| `import_memories` | **批量导入**（异步）：`groups` 多段对话一次沉淀成记忆，立即返回 `event_id`，后台逐段提炼，auto-merge 自动去重 |
 | `get_event_status` | 查询异步任务状态（pending/processing/done/failed，done 含提炼结果） |
-| `list_events` | 列出当前用户的记忆操作事件 |
 | `search_memories` | 语义 + 关键词 + 实体混合检索（支持 `rerank=true` LLM 重排；支持按 agent/run 过滤） |
 | `get_memories` | 分页列出自己的记忆（支持按 agent/run 过滤） |
 | `get_memory` | 按 id 获取单条（含修改历史时间线） |
 | `update_memory` | 更新 text / metadata（旧值进历史） |
 | `delete_memory` | 删除（旧值进历史） |
-| `delete_all_memories` | 清空当前用户的全部记忆（用户与密钥保留） |
-| `list_entities` | 列出有记忆的用户实体（记忆数 + 最后活跃时间） |
-| `delete_entities` | 删除用户及其全部记忆、密钥、会话（不可恢复） |
+| ✱ `import_memories` | **批量导入**（异步）：`groups` 多段对话一次沉淀成记忆，立即返回 `event_id`，后台逐段提炼，auto-merge 自动去重 |
+| ✱ `list_events` | 列出当前用户的记忆操作事件 |
+| ✱ `delete_all_memories` | 清空当前用户的全部记忆（用户与密钥保留） |
+| ✱ `list_entities` | 列出有记忆的用户实体（记忆数 + 最后活跃时间） |
+| ✱ `delete_entities` | 删除用户及其全部记忆、密钥、会话（不可恢复） |
 
 > **API Key 管理不暴露为 MCP 工具**——由 Web 平台 REST 端点提供（`POST/GET /api/keys`、`POST /api/keys/:id/revoke`），接入走人工/Web 生成，避免 agent 用 MCP 自助管理密钥。
 

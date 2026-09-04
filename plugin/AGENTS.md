@@ -34,12 +34,16 @@
 ## 关键工具
 
 > 工具实际注册名为 `mcp__<server名>__<工具名>`（插件安装时 server 带前缀，如 `mcp__plugin_aimemory_aimemory__search_memories`），下表用裸工具名表示，按 `__` 后工具名匹配即可。
+> 服务端默认只暴露**核心工具**（避免清单过载）：增删改查/检索 + 事件状态。批量导入/整库/实体管理类工具不默认暴露（见下）。
 
 - `search_memories` — 语义检索（核心）
 - `add_memory` — 写入（支持 messages 批量提炼）
+- `get_event_status` — 查询异步写入（messages/import）的处理状态
 - `get_memories` / `get_memory` — 列出/查看
 - `update_memory` / `delete_memory` — 修改/删除
-- `delete_all_memories` / `list_entities` / `delete_entities` — 批量管理
+
+> 批量导入（`import_memories`）与整库/实体管理（`delete_all_memories` / `list_entities` / `delete_entities`）
+> 需服务端设置 `MCP_TOOL_PROFILE=full` 才暴露；日常沉淀用 `add_memory(messages)` 即可，不需要批量工具。
 
 ## 注意
 

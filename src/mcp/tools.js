@@ -2,15 +2,29 @@
 
 /**
  * MCP 工具定义与处理器。
- * 行为对齐 mem0 官方 MCP server 的同类工具（add / search / get_all / get / update / delete /
- * delete_all / list_entities / delete_entities / list_events / get_event_status），另加批量导入
- * import_memories。所有数据访问强制 user_id 隔离。
+ * 行为对齐 mem0 官方 MCP server 的同类工具（add / search / get_all / get / update / delete），
+ * 另支持批量导入 import_memories。默认只暴露核心增删改查/检索工具（避免 agent 工具清单过载），
+ * 批量/事件与整库/实体管理类工具在 MCP_TOOL_PROFILE=full 下完整暴露（见 visibleTools 过滤）。
+ * 所有数据访问强制 user_id 隔离。
  * 注：API Key 管理不暴露为 MCP 工具，由 Web 平台 REST（/api/keys）提供。
  */
 const { McpError, ErrorCode, ListToolsRequestSchema, CallToolRequestSchema } =
   require('@modelcontextprotocol/sdk/types.js');
 const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
+const config = require('../config');
 const repo = require('../db/repo');
+
+// ===== 工具暴露面（tool profile）=====
+// 默认只暴露日常增删改查/search/异步状态查询必要的核心工具，避免 agent 工具清单过载：
+// 批量导入（import_memories / list_events）与整库/实体管理（delete_all_memories /
+// list_entities / delete_entities）按需隐藏——前者可用 add_memory(messages) 替代，
+// 后者属于低频、高破坏性操作，必要时通过 Web 平台处理。
+// 设置 MCP_TOOL_PROFILE=full 可恢复 mem0 兼容的完整工具面。
+const FULL = process.env.MCP_TOOL_PROFILE === 'full';
+// 各工具在完整面中的分类（full 下仍全部暴露，用于清单可读性）
+const CORE = 'core'; // 日常核心：常驻暴露
+const BATCH = 'batch'; // 批量导入/事件列表：默认隐藏
+const ADMIN = 'admin'; // 整库/实体管理：默认隐藏
 
 /** 把调用方的 user_id 解析出来；user_id 参数只能等于当前身份，否则拒绝（防跨租户） */
 function resolveUserId(userId, paramsUserId) {
@@ -32,6 +46,7 @@ function jsonText(obj) {
 const tools = [
   {
     name: 'add_memory',
+    kind: CORE,
     description:
       '添加记忆。支持两种输入：text（单条文本）或 messages（多轮对话，LLM 自动提炼成记忆）。' +
       'agent_id/run_id 标记记忆归属（多 agent 隔离）。infer=true 时异步 LLM 提炼事实存 facts（增强语义召回），失败不影响原样入库',
@@ -101,6 +116,7 @@ const tools = [
 
   {
     name: 'import_memories',
+    kind: BATCH,
     description:
       '批量导入多段对话成记忆：groups 为多段 messages 的数组，每段自动 LLM 提炼成多条记忆入库。' +
       '适合一次性把历史会话/聊天记录批量沉淀。auto-merge 自动去重（重复跳过）。返回汇总统计。',
@@ -153,6 +169,7 @@ const tools = [
 
   {
     name: 'get_event_status',
+    kind: CORE,
     description: '查询异步记忆操作的状态（add_memory/import_memories 返回的 event_id）。status: pending | processing | done | failed；done 含提炼结果',
     inputSchema: {
       type: 'object',
@@ -174,6 +191,7 @@ const tools = [
 
   {
     name: 'list_events',
+    kind: BATCH,
     description: '列出当前用户的记忆操作事件（异步任务，按时间倒序）',
     inputSchema: {
       type: 'object',
@@ -192,6 +210,7 @@ const tools = [
 
   {
     name: 'search_memories',
+    kind: CORE,
     description:
       '语义+关键词+实体混合检索：向量语义召回 + FTS5 关键词召回 + 实体命中加权；rerank=true 时用 LLM 对结果按相关性重排（更精准，略增延迟）',
     inputSchema: {
@@ -238,6 +257,7 @@ const tools = [
 
   {
     name: 'get_memories',
+    kind: CORE,
     description: '分页列出当前用户的记忆（按更新时间倒序；支持按 agent/run 过滤）',
     inputSchema: {
       type: 'object',
@@ -266,6 +286,7 @@ const tools = [
 
   {
     name: 'get_memory',
+    kind: CORE,
     description: '按 id 获取一条记忆，包含修改历史时间线',
     inputSchema: {
       type: 'object',
@@ -287,6 +308,7 @@ const tools = [
 
   {
     name: 'update_memory',
+    kind: CORE,
     description: '更新一条记忆的 text / metadata（旧值快照进历史）',
     inputSchema: {
       type: 'object',
@@ -310,6 +332,7 @@ const tools = [
 
   {
     name: 'delete_memory',
+    kind: CORE,
     description: '删除一条记忆（旧值快照进历史）',
     inputSchema: {
       type: 'object',
@@ -336,6 +359,7 @@ const tools = [
 
   {
     name: 'delete_all_memories',
+    kind: ADMIN,
     description: '清空指定用户（默认当前身份）的全部记忆；用户本身与密钥保留',
     inputSchema: {
       type: 'object',
@@ -354,6 +378,7 @@ const tools = [
 
   {
     name: 'list_entities',
+    kind: ADMIN,
     description: '列出有记忆的用户实体（含记忆数与最后活跃时间）',
     inputSchema: { type: 'object', properties: {} },
     handler: async () => {
@@ -363,6 +388,7 @@ const tools = [
 
   {
     name: 'delete_entities',
+    kind: ADMIN,
     description: '删除指定用户（默认当前身份）及其全部记忆、密钥与 Web 会话（不可恢复）',
     inputSchema: {
       type: 'object',
@@ -380,6 +406,9 @@ const tools = [
   },
 ];
 
+/** 当前暴露面下可见的工具（按 kind 过滤；FULL 模式全部暴露） */
+const visibleTools = FULL ? tools : tools.filter((t) => t.kind === CORE);
+
 /** 为指定用户创建并注册工具的 MCP Server 实例（userId 闭包注入，天然租户隔离） */
 function buildServer() {
   const server = new Server(
@@ -391,17 +420,19 @@ function buildServer() {
     {
       capabilities: { tools: {} },
       instructions:
-        '对每个工具调用，实现均按当前连接用户隔离数据；user_id 参数只能等于当前登录身份。',
+        `对每个工具调用，实现均按当前连接用户隔离数据；user_id 参数只能等于当前登录身份。` +
+        (FULL ? '' : ` 当前只暴露核心工具；如需批量导入/整库管理工具，请服务端设置 MCP_TOOL_PROFILE=full 后重启。`),
     }
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })),
+    tools: visibleTools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })),
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args = {} } = request.params;
-    const tool = tools.find((t) => t.name === name);
+    // 隐藏工具不参与调用（防越权直达）；错误信息不暴露工具名以外的细节
+    const tool = visibleTools.find((t) => t.name === name);
     if (!tool) {
       throw new McpError(ErrorCode.MethodNotFound, `未知工具: ${name}`);
     }
@@ -416,4 +447,4 @@ function buildServer() {
   return server;
 }
 
-module.exports = { tools, buildServer };
+module.exports = { tools, visibleTools, buildServer };

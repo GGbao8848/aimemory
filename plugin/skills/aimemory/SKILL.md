@@ -19,6 +19,9 @@ aimemory 是自托管的 AI 记忆库（mem0 兼容 MCP），多租户隔离、�
 > 下表统一用**裸工具名**（`search_memories` 等）表示，调用时按 `__` 后的工具名匹配实际注册名即可，无需关心 server 前缀。
 ## 意图 → 工具映射
 
+> 服务端默认只暴露**核心工具**（增删改查/检索 + `get_event_status`），批量导入/整库/实体管理类工具
+> 需服务端设置 `MCP_TOOL_PROFILE=full` 才注册。下表标记 ✱ 的工具仅在 full 模式下可用。
+
 | 用户说 | 调用 | 说明 |
 |---|---|---|
 | "搜/查记忆" + 关键词 | `search_memories` | 语义+关键词混合检索，`threshold` 可过滤低置信 |
@@ -26,9 +29,9 @@ aimemory 是自托管的 AI 记忆库（mem0 兼容 MCP），多租户隔离、�
 | "看某条记忆" | `get_memory` | 按 id 取单条（含修改历史） |
 | "改某条记忆" | `get_memory` 确认 id → `update_memory` | 更新前先读原文确认 |
 | "删某条记忆" | `delete_memory` | 按 id 删除 |
-| "清空记忆" | `delete_all_memories` | 清空当前用户全部记忆（需用户明确确认） |
-| "有哪些用户/实体" | `list_entities` | 列出有记忆的实体 |
-| "删用户/实体" | `delete_entities` | 删用户及其记忆（需用户明确确认，不可恢复） |
+| "清空记忆" | ✱ `delete_all_memories` | 清空当前用户全部记忆（需用户明确确认） |
+| "有哪些用户/实体" | ✱ `list_entities` | 列出有记忆的实体 |
+| "删用户/实体" | ✱ `delete_entities` | 删用户及其记忆（需用户明确确认，不可恢复） |
 | 记忆键管理 | 引导用户到 Web 平台（REST `/api/keys`）生成/管理密钥 | API Key 管理（MCP 不暴露） |
 
 ## 核心规则
@@ -38,6 +41,7 @@ aimemory 是自托管的 AI 记忆库（mem0 兼容 MCP），多租户隔离、�
 - **隔离边界**：涉及 `user_id` 参数时只能传当前身份；跨用户查询/删除会被服务端拒绝，向用户解释这是多租户隔离
 - **结果汇报**：检索结果用紧凑列表呈现（内容 + 相似度/时间），不吐原始 JSON
 - **agent/run 过滤**：用户提到"某 agent 的记忆"时，用 `agent_id`/`run_id` 参数过滤
+- **工具缺失时**：需要 ✱ 工具但清单里没有（full 未开启），用 `add_memory`/`delete_memory` 等核心工具代替，或引导用户在服务端开启 `MCP_TOOL_PROFILE=full`
 
 ## 相关 skill
 
