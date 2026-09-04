@@ -112,17 +112,9 @@
       <section id="view-keys" class="view">
         <div class="card">
           <h2>🔑 接入密钥</h2>
-          <p class="muted">生成密钥后，把它填进 MCP 配置 JSON 供其他 agent 使用。明文只显示一次。</p>
-          <form id="key-form" class="key-form">
-            <input id="key-name" type="text" placeholder="密钥名称（如 claude-code）" />
-            <button class="btn btn-primary" type="submit">生成密钥</button>
-          </form>
-          <div id="new-key" class="new-key hidden">
-            <p>请立即复制保存：</p>
-            <code id="new-key-value" class="key-value"></code>
-            <button id="copy-new-key" class="btn btn-ghost" type="button">复制</button>
-          </div>
+          <p class="muted">这是你当前的接入密钥，登录后自动生成、全程唯一。明文会在页面直接展示，复制填入 MCP 客户端即可；换设备时点「显示密钥」重新生成，旧密钥自动作废。</p>
           <ul id="key-list" class="key-list"></ul>
+          <button id="copy-visible-key" class="btn btn-primary" type="button">复制当前密钥</button>
         </div>
 
         <div class="card">
@@ -164,12 +156,12 @@
         <div class="card">
           <h2>🔌 MCP 接入步骤</h2>
           <ol class="steps">
-            <li><b>生成接入密钥</b>：切到「接入密钥」→ 填名称（如 <code>claude-code</code>）→ 生成，复制一次性的 <code>m0-xxx</code> 明文</li>
+            <li><b>查看接入密钥</b>：登录后切到「接入密钥」，密钥已自动生成并在页面展示（<code>m0-xxx</code> 明文），复制即可。<b>换设备时点「显示密钥」重新生成，旧密钥自动作废</b></li>
             <li><b>复制配置</b>：「MCP 配置」里复制完整 JSON（含密钥），或切「手动模式」按字段复制</li>
             <li><b>填入客户端</b>：把 JSON 或字段粘贴到你的 agent 的 MCP 客户端配置（Claude Code / Codex / BR-Agent 自定义连接器…）</li>
             <li><b>验证</b>：agent 调用 <code>add_memory</code> 写一条测试记忆，再到本平台「我的记忆」确认</li>
           </ol>
-          <p class="muted small">每个员工密钥互不可见、数据互相隔离；密钥吊销后立即失效。MCP 端点：<code>http://&lt;服务器内网IP&gt;:18543/mcp</code></p>
+          <p class="muted small">每个员工密钥互不可见、数据互相隔离；一个账号同一时间只有一条生效密钥，新生成即吊销旧的。MCP 端点：<code>http://&lt;服务器内网IP&gt;:18543/mcp</code></p>
         </div>
 
         <div class="card">
