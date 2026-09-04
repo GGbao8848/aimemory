@@ -46,8 +46,10 @@ async function complete(messages, { maxTokens = 512, temperature = 0 } = {}) {
     const reasoning = msg.reasoning;
     if (typeof reasoning === 'string' && reasoning.trim()) {
       const lines = reasoning.split('\n').filter((l) => l.trim());
-      // 取最后一段非空内容（通常包含最终答案/序号），截断保护长度
-      content = lines.length ? lines[lines.length - 1].trim() : reasoning.trim();
+      // 取最后一段非空内容。长度门槛过滤截断碎片（如"需要一条""重构计划阶段 0"）——
+      // 过短残句不足以成为可复用记忆，返回 null 让调用方走原文降级，而不是存垃圾。
+      const last = lines.length ? lines[lines.length - 1].trim() : reasoning.trim();
+      if (last.length >= 10) content = last;
     }
   }
   if (typeof content !== 'string' || !content.trim()) {
