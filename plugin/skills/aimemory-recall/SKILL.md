@@ -49,7 +49,7 @@ user-invocable: true
 
 ## 约束
 
-- **只读**：绝不调用 `add_memory`/`update_memory`/`delete_memory`/`delete_all_memories`/`delete_entities`
+- **只读**：绝不调用 `add_memory`/`update_memory`/`delete_memory`
 - **最多 10 条**：只保留最相关的，避免污染上下文
 - **静默于空**：无相关记忆时不打扰用户
 - **融合不引用**：把记忆内容融入回答，除非用户要求，不逐条罗列来源

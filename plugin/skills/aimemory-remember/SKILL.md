@@ -1,6 +1,6 @@
 ---
 name: aimemory-remember
-description: 把当前对话中的关键信息存入 aimemory 记忆库，供未来会话检索。适用时机：用户明确说"记住/别忘了/记一下"、用户表达持久偏好/事实/配置/账号信息、对话中出现重要决策或踩坑教训、完成一个有价值的结论时。记忆自动经 LLM 提炼（messages 批量模式），支持按 agent 归属隔离。
+description: 把当前对话中的关键信息存入 aimemory 记忆库，供未来会话检索。适用时机：用户明确说"记住/别忘了/记一下"、用户表达持久偏好/事实/配置/账号信息、对话中出现重要决策或踩坑教训、完成一个有价值的结论时。记忆自动经 LLM 提炼（messages 批量模式），归属当前登录员工账本。
 metadata:
   cli_version: ">=0.2.14"
   category: memory
@@ -22,24 +22,25 @@ user-invocable: true
 
 ## 执行步骤
 
-1. **收集内容**：把用户想记住的内容整理成 `messages` 数组（多轮对话）或 `text`（单条事实）。优先用 `messages`——LLM 会自动提炼成多条结构化记忆。
+1. **收集内容**：把用户想记住的内容整理成 `messages` 数组（多轮对话）或 `text`（单条素材/要点）。优先用 `messages`——LLM 会自动提炼成多条结构化记忆。
 
-2. **调用 `add_memory`**：
+2. **调用 `add_memory`**（提交素材，**不存原文**，由 aimemory 内部 LLM 提炼后入库）：
 
    ```json
    {
-     "messages": [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}],
-     "agent_id": "<当前agent名，如 zcode>"   // 可选，标记记忆归属
+     "messages": [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
    }
    ```
    或单条：`{ "text": "要记住的内容" }`
 
-3. **确认结果**：向用户简短确认记忆已保存（`count` 条 / id），或提炼后的内容预览。
+3. **确认结果（务必轮询，勿谎报）**：`add_memory` 一律**异步受理**——返回 `{event_id, status:"pending"}`，后台 LLM 提炼入库（本地 LLM 慢，数秒到十几秒）。用 `get_event_status` 轮询（最多等 ~30s）直到：
+   - `done`：拿到提炼出的记忆列表，向用户展示/确认已保存；
+   - `failed`：提炼失败（LLM 无有效产出或不可用），**素材未入库**——如实告知用户失败，可稍后重试，不要声称已保存。
 
 ## 约束
 
 - **不存敏感明文**：账号密码等凭据谨慎——默认不存完整密码，可存"存在哪/用户名"，除非用户明确要求
 - **不存临时信息**：一次性对话（如"今天天气"）不存
 - **提炼优先**：能丢 messages 就丢 messages（LLM 提炼更结构化），避免存口语化原文
-- **尊重 infer**：默认开启事实抽取（infer=true），无需手动设置
+- **不传 agent_id/run_id**：记忆归属当前登录员工账本，全端共享（多个 agent 写同一账本），无需标记来源
 - 保存失败时如实告知用户，不谎报成功

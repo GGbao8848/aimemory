@@ -6,7 +6,7 @@
 
 - 跨会话持久：上一个会话存的内容，本会话能检索到
 - 语义检索：搜"怎么连数据库"能命中"用 psql 连接 PostgreSQL"这类同义表达
-- 多租户隔离：只能访问当前用户自己的记忆
+- 员工维度隔离：你读写的是**当前登录员工**自己的记忆账本；同一员工的多个 agent 共享这份记忆，互相补充、互不隔离（要分账本属于不同员工账号的职责）
 - 自动提炼：写入时会经 LLM 提炼成结构化事实（facts），增强召回
 
 ## 何时应该查记忆（recall）
@@ -34,16 +34,17 @@
 ## 关键工具
 
 > 工具实际注册名为 `mcp__<server名>__<工具名>`（插件安装时 server 带前缀，如 `mcp__plugin_aimemory_aimemory__search_memories`），下表用裸工具名表示，按 `__` 后工具名匹配即可。
-> 服务端默认只暴露**核心工具**（避免清单过载）：增删改查/检索 + 事件状态。批量导入/整库/实体管理类工具不默认暴露（见下）。
+> 只暴露 7 个核心工具（增删改查/检索/异步状态），刻意不提供批量导入、整库/实体管理、agent/run 维度——写入用 `add_memory` 提交素材即可。
 
-- `search_memories` — 语义检索（核心）
-- `add_memory` — 写入（支持 messages 批量提炼）
-- `get_event_status` — 查询异步写入（messages/import）的处理状态
-- `get_memories` / `get_memory` — 列出/查看
-- `update_memory` / `delete_memory` — 修改/删除
+- `add_memory` — 提交记忆**素材**（`text` 单条或 `messages` 多轮对话）。一律**异步受理**（返回 `event_id`），由 aimemory 内部 LLM 提炼成结构化记忆后入库；**不存原文**
+- `get_event_status` — 查询素材提炼状态（pending→done/failed；done 含提炼出的记忆，failed 含原因）
+- `search_memories` — 语义+关键词混合检索（核心）
+- `get_memories` / `get_memory` — 列出 / 查看单条
+- `update_memory` / `delete_memory` — 修改 / 删除
 
-> 批量导入（`import_memories`）与整库/实体管理（`delete_all_memories` / `list_entities` / `delete_entities`）
-> 需服务端设置 `MCP_TOOL_PROFILE=full` 才暴露；日常沉淀用 `add_memory(messages)` 即可，不需要批量工具。
+> **素材写入注意**：`add_memory` 只入队立即返回，实际提炼入库在后台上完成（本地 LLM 慢，一次约数秒）。
+> 需要确认落库时轮询 `get_event_status`（拿到 `event_id`），别在返回后立刻搜索假设已存在。
+> **失败语义**：LLM 提炼不出有效记忆（或 LLM 服务不可用）→ 事件 `failed`，素材**不落库**——调用方看到 failed 应告知用户重试，不要以为存上了。
 
 ## 注意
 
