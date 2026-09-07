@@ -1,19 +1,18 @@
 # aimemory —— 企业级 AI 记忆库（MCP 服务）
 
 > 自托管、mem0 兼容的 **AI 记忆服务**：供全公司的 agent（Claude Code、Codex、自研 agent…）通过 **MCP（Streamable HTTP）** 读写记忆。
-> 登录走公司统一 **Keycloak**，多租户**完整用户隔离**；Web 平台可自助管理记忆、生成接入密钥。
+> 登录走公司统一 **Keycloak**，按**员工**完整隔离（一个员工一个记忆账本，多 agent 共享）；Web 平台可自助管理记忆、生成接入密钥。
 
 ## 特性
 
-- **mem0 兼容的 MCP 工具集**：`add_memory` / `search_memories` / `get_memories` / `get_memory` / `update_memory` / `delete_memory` + `create_api_key` / `list_api_keys` / `revoke_api_key`
-- **内网单端口 18543**：`/mcp`（MCP 端点）+ `/api/*`（REST）+ `/`（Web 管理平台）
-- **多租户隔离**：所有数据按用户隔离，跨用户访问直接拒绝（MCP 与 REST 均验证）
+- **mem0 核心 MCP 工具集（7 个，少即是多）**：`add_memory` / `get_event_status` / `search_memories` / `get_memories` / `get_memory` / `update_memory` / `delete_memory`——刻意不提供批量导入、整库/实体管理、agent/run 维度
+- **素材提炼型写入**：`add_memory` 的输入一律视为"素材"（text/messages），**不直接落库**——后台内部 LLM 提炼成多条结构化记忆后入库；异步受理 + 队列串行，本地 LLM 低并发不阻塞调用；提炼失败不落库（不存原文）
+- **内网单端口 18543**：`/mcp`（MCP 端点）+ `/api/*`（REST）+ `/`（Web 管理平台）+ `/healthz`（健康检查）
+- **多租户隔离**：数据按员工隔离，跨用户访问直接拒绝（MCP 与 REST 均验证）
 - **语义 + 关键词混合检索**：embedding 向量召回（同义/口语化可命中）+ SQLite FTS5 trigram 关键词召回（中文子串）；embedding 不可用时自动回退纯关键词，完全离线可用
-- **自动去重（auto-merge）**：写入时与已有记忆做语义相似度检测，高度重复自动跳过（≥0.92），防止记忆库变脏
-- **实体抽取与链接**：LLM 自动抽取实体（公司/人名/IP/端口等）存 `entities`，检索时实体命中加权排前（对标 mem0 entity linking）
-- **TTL / 遗忘**：追踪记忆活跃度（访问次数/时间），活跃记忆检索微加权；超过 `MEMORY_TTL_DAYS`（默认 30）未访问的记忆自动归档，默认不参与检索（可用 `include_archived` 召回）
-- **记忆历史**：每次修改/删除保留旧值快照，可追溯时间线
-- **密钥管理**：Web 平台生成 `m0-xxx` 密钥（仅存 sha256 哈希），一键复制 MCP 配置 JSON
+- **LLM 提炼与实体抽取**：`messages` 写入后台队列异步提炼成结构化记忆（服务端轮询处理，低并发 LLM 环境下不阻塞 MCP 调用）；facts/entities 异步抽取存库并参与语义召回（对标 mem0 核心）
+- **接入密钥**：Web 平台生成 `m0-xxx` 密钥（仅存 sha256 哈希）+ 设备流浏览器免粘贴授权，一键复制 MCP 配置 JSON
+- **半熔断容错**：LLM/embedding 服务抖动自动熔断降级、恢复自动探测回补，无需重启
 - **pm2 部署**：单进程即可服务全公司
 
 ## 架构
@@ -28,12 +27,14 @@
 │  /api/*    REST（Bearer Token 或 Web 会话 cookie）     │
 │  /         管理 Web 页面（Keycloak 授权码+PKCE 登录）   │
 │  /auth/*   Keycloak 登录 / 回调 / 登出                 │
+│  /healthz  健康检查（DB / embedding / LLM / Keycloak） │
 └────────────┬─────────────────────────────────────────┘
              ▼
 ┌─ auth/ ──────────────────────┐   ┌─ db/ ────────────────────┐
 │ keycloak.js  OIDC+JWKS 验签   │   │ SQLite: memories          │
 │ tokens.js    API key 签发校验 │   │ memories_fts (FTS5)       │
-└──────────────────────────────┘   │ memories_history / keys   │
+└──────────────────────────────┘   │ api_keys / sessions       │
+                                   │ connect_requests(设备流)   │
                                    └──────────┬────────────────┘
                                               ▼
                           ┌─ embeddings/client.js ─────────┐
@@ -112,31 +113,23 @@ pm2 restart aimemory-mcp        # 更新代码后重启
 
 ## MCP 工具一览
 
-> 服务端默认只暴露 **7 个核心工具**（下方无 ✱ 项），避免 agent 工具清单过载；设置环境变量 `MCP_TOOL_PROFILE=full` 后恢复 mem0 兼容的完整工具面（含 ✱ 项）。
+> 暴露 **7 个工具**（mem0 最小核心面：写入 / 状态查询 / 检索 / 列表 / CRUD）。刻意不提供批量导入、整库/实体管理、agent/run 维度——员工记忆是一个账本，日常沉淀用 `add_memory` 即可。
 
 | 工具 | 说明 |
 |---|---|
-| `add_memory` | 写入记忆：`text` 单条 或 `messages` 多轮对话（**异步受理**：messages 模式立即返回 `event_id`，后台 LLM 提炼成多条）；支持 `agent_id`/`run_id` 归属；`infer` 默认异步提炼事实存 `facts` |
-| `get_event_status` | 查询异步任务状态（pending/processing/done/failed，done 含提炼结果） |
-| `search_memories` | 语义 + 关键词 + 实体混合检索（支持 `rerank=true` LLM 重排；支持按 agent/run 过滤） |
-| `get_memories` | 分页列出自己的记忆（支持按 agent/run 过滤） |
-| `get_memory` | 按 id 获取单条（含修改历史时间线） |
-| `update_memory` | 更新 text / metadata（旧值进历史） |
-| `delete_memory` | 删除（旧值进历史） |
-| ✱ `import_memories` | **批量导入**（异步）：`groups` 多段对话一次沉淀成记忆，立即返回 `event_id`，后台逐段提炼，auto-merge 自动去重 |
-| ✱ `list_events` | 列出当前用户的记忆操作事件 |
-| ✱ `delete_all_memories` | 清空当前用户的全部记忆（用户与密钥保留） |
-| ✱ `list_entities` | 列出有记忆的用户实体（记忆数 + 最后活跃时间） |
-| ✱ `delete_entities` | 删除用户及其全部记忆、密钥、会话（不可恢复） |
+| `add_memory` | 提交记忆**素材**（`text` 单条 / `messages` 多轮对话）：一律**异步受理**返回 `event_id`，后台由 aimemory 内部 LLM 提炼成多条自包含记忆后入库——**库内只存提炼产物，不存原文** |
+| `get_event_status` | 查询异步提炼任务状态（pending/processing/done/failed；done 含提炼结果，failed 含原因） |
+| `search_memories` | 语义（向量）+ 关键词（FTS）+ 实体混合检索；支持 `threshold`、`filters`（metadata/时间） |
+| `get_memories` | 分页列出当前员工的记忆 |
+| `get_memory` | 按 id 获取单条 |
+| `update_memory` | 更新 text / metadata（文本变化自动重抽 facts 并补向量） |
+| `delete_memory` | 按 id 删除 |
 
-> **API Key 管理不暴露为 MCP 工具**——由 Web 平台 REST 端点提供（`POST/GET /api/keys`、`POST /api/keys/:id/revoke`），接入走人工/Web 生成，避免 agent 用 MCP 自助管理密钥。
+> **API Key 管理不暴露为 MCP 工具**——由 Web 平台 REST 端点（`POST/GET /api/keys`、`POST /api/keys/:id/revoke`）与设备流接入提供。
 
-> 参数与 mem0 官方 MCP 同构（`user_id` / `agent_id` / `run_id` / `messages` / `filters` / `page_size` / `limit` 等）。
-> `messages` 已生效：多轮对话自动提炼成记忆（mem0 核心模式）。
-> `agent_id`/`run_id` 已生效：记忆按 agent/run 隔离，搜索/列出可过滤。
-> `threshold` 已生效：过滤低于相似度阈值的向量召回结果（0~1，默认 0 不过滤）。
-> `infer` 已生效：`add_memory` 默认异步 LLM 提炼事实存 `facts`（增强语义召回，失败降级原样入库）。
-> `rerank` 已生效：`search_memories` 传 `rerank=true` 时用 LLM 按查询相关性重排（更精准，略增延迟；LLM 不可用自动回退）。
+> 参数保留 mem0 同构子集：`user_id`（只能等于当前身份）/ `text` / `messages` / `metadata` / `filters` / `page_size` / `limit` / `threshold`。
+> **写入语义**：`text` / `messages` 都是"素材"——异步受理后由内部 LLM 提炼成结构化记忆入库（不存原文）；提炼失败/无有效产出 → 事件 failed，素材不落库（调用方可见错误后重试）。LLM 未启用时写入直接拒绝。
+> facts/entities：写入产物本身即结构化记忆（无需再抽 facts）；仅 `update_memory` 手动编辑文本后异步重抽 facts 供语义召回（失败静默，不影响保存）。
 
 ## 测试用户（隔离验证）
 
@@ -176,9 +169,8 @@ pm2 restart aimemory-mcp        # 更新代码后重启
 | `EMBEDDING_BASE_URL` / `EMBEDDING_MODEL` / `EMBEDDING_API_KEY` | OpenAI 兼容 embeddings 服务（vLLM 等） |
 | `EMBEDDING_TIMEOUT_MS` | 单次 embedding 调用超时（默认 15000） |
 | `LLM_ENABLED` | 置 `1` 启用 infer 事实抽取；`0` 关闭（可选） |
-| `LLM_BASE_URL` / `LLM_MODEL` / `LLM_API_KEY` | OpenAI 兼容 chat/completions 服务（infer 用） |
+| `LLM_BASE_URL` / `LLM_MODEL` / `LLM_API_KEY` | OpenAI 兼容 chat/completions 服务（提炼/infer 用） |
 | `LLM_TIMEOUT_MS` | 单次 LLM 调用超时（默认 30000） |
-| `MEMORY_TTL_DAYS` | 记忆未访问自动归档天数（默认 30；0 则启动即归档全部） |
 
 ## 对接其他主机的 Keycloak（迁移部署）
 
@@ -286,111 +278,32 @@ npm run setup-keycloak
 3. 扩实例命令：`pm2 scale aimemory-mcp 2`（WAL 支持多进程共享同一库文件，无需改任何代码），详见 [docs/pm2-deploy.md](docs/pm2-deploy.md) 第 9 节
 4. **真正的写瓶颈信号**：日志出现 `SQLITE_BUSY` 或写 QPS 持续 >1000 → 才需要考虑 PG 或分库（详见上节"为什么暂不换 PostgreSQL"）
 
-## 工具字段与扩展指南（Roadmap）
+## 工具参数与检索能力（当前实现）
 
-### 一、为什么保留完整字段
+### 已生效的参数
 
-工具 schema 与 **mem0 官方 MCP 完全同构**，其中 `infer` / `rerank` / `threshold` 等参数为 LLM 能力预留。当前 `threshold` / `infer` / `rerank` 均已生效（随 embedding / LLM 上线）。这样做的价值：
-
-- **下游零改动**：agent 端早已按 mem0 的完整参数写调用，将来服务端升级能力时客户端无需任何变更
-- **平滑升级**：扩展全部为增量，不破坏现有调用
-
-### 二、当前保留字段一览
-
-| 字段 | 所在工具 | 当前行为 | 保留用途 |
-|---|---|---|---|
-| `infer` | add_memory | **已生效**：默认异步 LLM 提炼事实存 `facts`（失败降级原样入库） | 随 P0-2 LLM 上线已完成 |
-| `messages` | add_memory | **已生效**：多轮对话自动提炼成记忆（mem0 核心模式） | 随 messages 批量上线已完成 |
-| `agent_id`/`run_id` | add_memory / search_memories / get_memories | **已生效**：记忆按 agent/run 隔离，可过滤 | 多作用域已完成 |
-| `threshold` | search_memories | **已生效**：过滤低于相似度阈值的向量召回 | 随 embedding 上线已完成 |
-| `rerank` | search_memories | **已生效**：`rerank=true` 时 LLM 按查询相关性重排 | 随 LLM 上线已完成（缓解短查询排序噪声） |
-| `filters` | search_memories / get_memories | **已生效**：`user_id` / `agent_id` / `run_id` / `metadata` 键值 / `created_at`、`updated_at` 时间范围 | 随 filters 上线已完成 |
-| `user_id` | 所有工具 | 已完整实现：只能等于当前身份，跨租户拒绝 | 多租户隔离底座，无需再扩展 |
-
-### 三、扩展路线图（按重要程度）
-
-#### P0 —— 核心竞争力（建议优先，做完才是"AI 记忆库"而非"普通 CRUD"）
-
-**1. 向量语义检索（embedding 召回）✅ 已完成**
-- 接入 OpenAI 兼容 embedding 服务（vLLM `/v1/embeddings`），记忆表增加向量列，`search_memories` 升级为「向量语义 + 关键词混合召回」
-- 降级：embedding 服务不可用/失败时自动回退纯关键词，不影响现有调用；`EMBEDDING_ENABLED=0` 可关闭
-- 相关实现：`src/embeddings/client.js`、`src/db/repo.js`（`getVecCandidates` / `cosineSimilarity`）、`memories.embedding` 列
-
-**升级前后实测对比**（同一批记忆、同一组查询，`limit=3`）：
-
-| 查询 | 之前（纯关键词） | 现在（语义 + 关键词） |
+| 参数 | 所在工具 | 行为 |
 |---|---|---|
-| 「怎么连数据库」 | 无结果 | 「用 psql 命令连接 PostgreSQL 数据库进行数据查询」（0.65） |
-| 「前端怎么做界面」 | 无结果 | 「前端页面用 React 组件构建交互界面」（0.77） |
-| 「几点上班」 | 无结果 | 「每天 9 点打卡，考勤异常要手动补报工时」（0.77） |
-| 「公司在哪」 | 无结果 | 「公司地址是南京市鼓楼区中山北路 100 号」（0.61） |
-| 「上次部署踩了什么坑」 | 无结果 | 「部署踩过的坑：pm2 环境变量读不到 .env…」（0.65） |
+| `text` / `messages` | add_memory | **记忆素材**：异步受理返回 `event_id`，后台 LLM 提炼成结构化记忆入库（不存原文）；提炼失败 → 事件 failed，素材不落库 |
+| `metadata` | add_memory | 附加元数据（如 `{source:"zcode"}`），透传给每条提炼产物，可参与过滤 |
+| `user_id` | 所有工具 | 只能等于当前身份，跨租户拒绝（多租户隔离底座） |
+| `event_id` | get_event_status | 查异步提炼任务状态（done 含产物列表；failed 含原因） |
+| `limit` / `page` / `page_size` | search_memories / get_memories | 分页与条数控制 |
+| `threshold` | search_memories | 过滤低于相似度阈值的向量召回结果（0~1，默认 0 不过滤） |
+| `filters` | search_memories / get_memories | `user_id` / `metadata` 键值 / `created_at`、`updated_at` 时间范围 |
 
-> 原理：查询与记忆都转成向量做余弦相似度，语义相近即可命中，不再要求查询与记忆出现相同字词；关键词路径作为兜底仍保留（如搜「BIP」）。
+> 刻意**不提供**的参数/维度（瘦身决策）：`infer`（写入即自动抽取，无需开关）、`rerank`（成本高、收益边际）、`agent_id`/`run_id`（员工账本单一维度）。
 
-**2. LLM 事实抽取（`infer` 生效）✅ 已完成**
-- `add_memory` 时把自由文本交给 LLM，提炼成结构化事实存 `memories.facts`；向量对「原文 + facts」生成，事实参与语义召回
-- **效果**：agent 问"用的是什么服务器系统"能命中原本只说"部署服务器是 Windows Server 2022"的记忆
-- **降级**：LLM 不可用/失败时静默，原样入库；`infer=false` 保持原样不抽取
-- 相关实现：`src/llm/client.js`、`syncFacts` / `semanticText`（`src/db/repo.js`）、`memories.facts` 列
-- 依赖：`LLM_ENABLED=1` + OpenAI 兼容 chat/completions（`10.10.10.146:8001`，`qwen3.8-27b`）
+### 检索实现说明
 
-#### P1 —— 体验增强
-
-**3. `rerank` 重排序 ✅ 已生效**
-- **扩展前**：命中按 bm25 相关性排序，语义接近但关键词弱的排在后面
-- **扩展后**：`search_memories` 传 `rerank=true` 时用 LLM 按查询相关性重排，"真正相关的"提到最前（缓解短查询排序噪声；LLM 不可用自动回退）
-
-**4. `threshold` 相似度阈值 ✅ 已生效**
-- **扩展前**：参数被忽略，无法控制"多像才算命中"
-- **扩展后**：调用方可设阈值过滤低置信结果，减少噪音（随 P0-1 embedding 一起上线）
-
-**5. `filters` 多维过滤 ✅ 已生效**
-- **扩展前**：仅 `user_id`
-- **扩展后**：支持 `metadata` 键值过滤（如 `{"source":"claude-code"}`）、时间范围（`created_at`/`updated_at` 的 `gte`/`lte`）、命名空间（`agent_id`/`run_id`）
-- 影响：纯增量，随 filters 上线已完成
-
-**6. 遗忘与记忆衰减（TTL / 主动 forget）**
-- 扩展内容：记忆带优先级/衰减曲线，低频旧记忆自动降级归档，检索默认召回"活跃"记忆
-- **扩展前**：所有记忆平权，旧记忆可能淹没新记忆
-- **扩展后**：近期高频使用的记忆优先（类似人脑遗忘曲线）
-- 影响：需新增存储字段，向后兼容
-
-#### P2 —— 企业治理与高级能力
-
-**7. 时序知识图（实体随时间演变）**
-- **扩展前**：单条记忆扁平存储，事实更新靠 `update_memory` 手工改
-- **扩展后**：能回答"这个配置什么时候改过、演变过程"——事实级时间线成为一等公民
-- 工作量最大，建议 P0/P1 跑稳后做
-
-**8. 审计日志 / 管理员视图**
-- **扩展前**：无管理员概念（当前为用户自助精简版）
-- **扩展后**：管理员跨租户查看/导出/审计，配合"被遗忘权"
-
-**9. 文件附件**
-- **扩展前**：`metadata` 只能存任意 JSON 引用，附件本体需独立 blob 存储 + 下载接口
-
-### 四、扩展前后效果对比
-
-| 能力 | 当前（关键词版） | 扩展后（LLM 版） | 重要程度 |
-|---|---|---|---|
-| 检索 | 仅字面/子串命中 | 语义命中（同义、口语化） | **P0** |
-| 写入 | 原样存文本 | 自动抽事实/实体、可合并去重 | **P0** |
-| 排序 | bm25 相关性 | 语义重排 | P1 |
-| 过滤 | 仅用户 | metadata / 时间 / 命名空间 | P1 |
-| 生命周期 | 永不过期 | 遗忘曲线 / TTL | P1 |
-| 时间线 | 单条修改历史 | 事实级时序图 | P2 |
-| 治理 | 用户自助 | 审计 / 管理员 | P2 |
-
-### 五、扩展的通用原则
-
-1. **schema 已全部预留** → 所有扩展向后兼容，现有 agent 零改动
-2. **先做 P0 两项**（embedding 检索 + infer 抽取），它们是"AI 记忆库"区别于"普通 CRUD"的关键，也是 mem0 的核心卖点
-3. 实现方式：加一层外部 LLM 适配（OpenAI 兼容），存储层保持不变；本机无 ollama，接 DeepSeek/通义等任意 OpenAI 兼容 API 即可
-4. 每一档扩展都建议单独验证（如新增 `search_memories` 语义召回对比用例）后再并入主线
+- **语义召回**：查询与记忆都转成向量做余弦相似度（`memories.embedding` 列，float32 BLOB），语义相近即可命中；embedding 服务不可用时半熔断降级纯关键词。
+- **关键词召回**：SQLite FTS5 trigram（中文子串），作为字面命中的兜底。
+- **实体参与召回**：LLM 抽取的 facts/entities 存 `memories.facts`/`entities`，向量对「原文 + facts + entities」生成，实体名命中即可被语义召回。
 
 ## 开发提示
 
+- **测试**：`npm test`（核心回归：CRUD / 多租户隔离 / 关键词检索 / schema 精简），用独立临时库不碰生产数据。
+- **健康检查**：`curl http://<内网IP>:18543/healthz`（DB / embedding / LLM / Keycloak 状态）。
 - **推 GitHub 需走代理**（本机未配置全局 git 代理时）：`git -c http.proxy=http://127.0.0.1:7890 push origin main`（单次生效，不改全局配置）
 
 ## 参考
