@@ -53,6 +53,18 @@ apiRouter.get('/me', wrap(async (req, res) => {
   res.json({ userId: id.userId, username: id.username, via: id.via });
 }));
 
+// 当前用户记忆统计（页面展示：记忆数 / 生效密钥数）
+apiRouter.get('/stats', requireAuth, wrap(async (req, res) => {
+  res.json(repo.stats(req.identity.userId));
+}));
+
+// 查询素材提炼事件状态（Web 新增记忆异步受理后轮询用；与 MCP get_event_status 同源）
+apiRouter.get('/events/:id', requireAuth, wrap(async (req, res) => {
+  const ev = repo.getEvent(req.params.id, req.identity.userId);
+  if (!ev) return res.status(404).json({ error: '事件不存在' });
+  res.json({ event: ev });
+}));
+
 // ===== 记忆 CRUD =====
 
 apiRouter.get('/memories', requireAuth, wrap(async (req, res) => {
@@ -67,10 +79,34 @@ apiRouter.get('/memories', requireAuth, wrap(async (req, res) => {
 }));
 
 apiRouter.post('/memories', requireAuth, wrap(async (req, res) => {
+  // 素材写入：与 MCP 一致的语义——异步受理，后台 LLM 提炼后入库（不存原文）。
+  // 返回 202 + event_id，前端轮询 get_event_status / 刷新列表。
   const { text, metadata } = req.body || {};
   if (!text || !String(text).trim()) return res.status(400).json({ error: 'text 不能为空' });
-  const mem = repo.createMemory({ userId: req.identity.userId, text: String(text), metadata });
-  res.status(201).json(mem);
+  let result;
+  try {
+    result = repo.createMemory({ userId: req.identity.userId, text: String(text), metadata });
+  } catch (e) {
+    // LLM 未启用等原因 → 无法提炼，明确拒绝（不让素材"收了但不处理"）
+    return res.status(503).json({ error: e.message });
+  }
+  res.status(202).json(result);
+}));
+
+apiRouter.get('/memories/export', requireAuth, wrap(async (req, res) => {
+  // 导出当前员工全部记忆（JSON 附件下载；数据可携带性 / 备份）
+  const memories = repo.exportMemories(req.identity.userId);
+  const payload = {
+    exported_at: new Date().toISOString(),
+    user_id: req.identity.userId,
+    username: req.identity.username || null,
+    count: memories.length,
+    memories,
+  };
+  const filename = `aimemory-memories-${new Date().toISOString().slice(0, 10)}.json`;
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.send(JSON.stringify(payload, null, 2));
 }));
 
 apiRouter.get('/memories/:id', requireAuth, wrap(async (req, res) => {
@@ -111,24 +147,6 @@ apiRouter.post('/keys/:id/revoke', requireAuth, wrap(async (req, res) => {
     return res.status(404).json({ error: '密钥不存在或已吊销' });
   }
   res.json({ success: true });
-}));
-
-// ===== 连接码兑换（半自动连接）=====
-// 码即凭据：浏览器授权后页面展示短码 → agent 端带码调用本接口换取密钥。
-// 码一次性、10 分钟 TTL，兑换后即失效；明文密钥仅在 TTL 窗口内存在于码表。
-
-apiRouter.post('/connect/claim', wrap(async (req, res) => {
-  const code = String((req.body || {}).code || '').trim().toUpperCase();
-  if (!code) return res.status(400).json({ error: '缺少连接码' });
-  const result = repo.consumeConnectCode(code);
-  if (!result) {
-    return res.status(400).json({ error: '连接码无效、已使用或已过期，请重新打开授权页获取新码' });
-  }
-  res.json({
-    user_id: result.user_id,
-    api_key: result.api_key,
-    mcp_url: `${config.publicBaseUrl || `http://${req.get('host')}`}/mcp`,
-  });
 }));
 
 // ===== 设备流连接（零粘贴：发起 → 授权页确认 → 轮询拿 key）=====

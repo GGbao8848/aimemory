@@ -218,18 +218,42 @@ app.get('/slo-logout', (req, res) => {
   res.status(200).type('text/plain').send('ok');
 });
 
+// ===== 健康检查（运维：DB 可读 + 模型服务连通性 + Keycloak 可达） =====
+app.get('/healthz', async (_req, res) => {
+  const probe = async (url, { key } = {}) => {
+    try {
+      const r = await fetch(url, {
+        headers: key ? { Authorization: `Bearer ${key}` } : {},
+        signal: AbortSignal.timeout(4000),
+      });
+      return r.ok;
+    } catch { return false; }
+  };
+  const cfg = require('./config');
+  const [dbOk, embOk, llmOk, kcOk] = await Promise.all([
+    Promise.resolve(true).then(() => { repo.stats('__probe__'); return true; }).catch(() => false),
+    cfg.embedding.enabled ? probe(`${cfg.embedding.baseUrl}/models`, { key: cfg.embedding.apiKey }) : null,
+    cfg.llm.enabled ? probe(`${cfg.llm.baseUrl}/models`, { key: cfg.llm.apiKey }) : null,
+    probe(`${cfg.keycloak.url}/realms/${cfg.keycloak.realm}/.well-known/openid-configuration`),
+  ]);
+  const healthy = dbOk && (embOk !== false) && (llmOk !== false) && kcOk;
+  res.status(healthy ? 200 : 503).json({
+    status: healthy ? 'ok' : 'degraded',
+    db: dbOk,
+    embedding: embOk === null ? 'disabled' : embOk,
+    llm: llmOk === null ? 'disabled' : llmOk,
+    keycloak: kcOk,
+    time: new Date().toISOString(),
+  });
+});
+
 // ===== 启动 =====
 repo.cleanupSessions();
-repo.cleanupConnectCodes();
 repo.cleanupConnectRequests();
 repo.cleanupEvents();
-// TTL 遗忘：启动时 + 每天归档超过 MEMORY_TTL_DAYS（默认 30）未访问的记忆
-repo.archiveStaleMemories(parseInt(process.env.MEMORY_TTL_DAYS || '30', 10));
-setInterval(() => repo.archiveStaleMemories(parseInt(process.env.MEMORY_TTL_DAYS || '30', 10)), 24 * 3600_000).unref();
 setInterval(() => repo.cleanupSessions(), 3600_000).unref();
-setInterval(() => repo.cleanupConnectCodes(), 600_000).unref();
 setInterval(() => repo.cleanupConnectRequests(), 600_000).unref();
-// 异步记忆事件后台处理：启动处理一次 + 每 2 秒轮询 pending（add_memory(messages)/import 提炼）
+// 异步任务后台处理：启动处理一次 + 每 2s 轮询 pending（add_memory(messages) 提炼）
 repo.processPendingEvents();
 setInterval(() => repo.processPendingEvents(), 2000).unref();
 setInterval(() => repo.cleanupEvents(), 3600_000).unref();

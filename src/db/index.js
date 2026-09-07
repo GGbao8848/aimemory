@@ -110,11 +110,12 @@ CREATE TABLE IF NOT EXISTS connect_requests (
 CREATE INDEX IF NOT EXISTS idx_connect_requests_user ON connect_requests(user_id);
 CREATE INDEX IF NOT EXISTS idx_connect_requests_expiry ON connect_requests(expires_at);
 
--- 异步任务事件（mem0 兼容：add_memory(messages)/import_memories 立即受理返回 event_id，后台提炼）
+-- 异步任务（add_memory(messages) 异步受理：立即返回 event_id，后台串行提炼入库）
+-- 本地 LLM 并发低，messages 提炼不可阻塞 MCP 调用，故走任务队列（默认 2s 轮询处理）
 CREATE TABLE IF NOT EXISTS events (
   id          TEXT PRIMARY KEY,
   user_id     TEXT NOT NULL,
-  event_type  TEXT NOT NULL,            -- add_memory | import_memories
+  event_type  TEXT NOT NULL DEFAULT 'add_memory',
   status      TEXT NOT NULL DEFAULT 'pending',  -- pending | processing | done | failed
   payload     TEXT NOT NULL,            -- JSON：请求内容（后台执行用）
   result      TEXT,                     -- JSON：成功结果（记忆 id 列表）
@@ -131,46 +132,44 @@ if (!sessionCols.includes('username')) {
   db.exec('ALTER TABLE sessions ADD COLUMN username TEXT');
 }
 
-// 老库兼容：memories 早期无 embedding 列 → 补充（float32 BLOB，可为空，空则无向量）
+// 老库兼容：memories 早期无 embedding / facts / entities 列 → 补充
+// （float32 BLOB 向量 / infer 抽取的结构化事实 / LLM 抽取的实体，均为可空列）
 const memCols = db.prepare("PRAGMA table_info(memories)").all().map((c) => c.name);
 if (!memCols.includes('embedding')) {
   db.exec('ALTER TABLE memories ADD COLUMN embedding BLOB');
 }
-// 老库兼容：memories 早期无 facts 列 → 补充（infer 抽取的结构化事实，JSON 字符串数组）
 if (!memCols.includes('facts')) {
   db.exec("ALTER TABLE memories ADD COLUMN facts TEXT");
 }
-// 老库兼容：memories 早期无 agent_id / run_id 列 → 补充（多作用域隔离，可为空）
-if (!memCols.includes('agent_id')) {
-  db.exec('ALTER TABLE memories ADD COLUMN agent_id TEXT');
-}
-if (!memCols.includes('run_id')) {
-  db.exec('ALTER TABLE memories ADD COLUMN run_id TEXT');
-}
-// 老库兼容：memories 早期无 entities 列 → 补充（LLM 抽取的实体，JSON 字符串数组）
 if (!memCols.includes('entities')) {
   db.exec("ALTER TABLE memories ADD COLUMN entities TEXT");
 }
-// TTL/遗忘字段：活跃度追踪 + 归档（低频旧记忆自动降级，默认 30 天未访问可归档）
-if (!memCols.includes('last_access_at')) {
-  db.exec('ALTER TABLE memories ADD COLUMN last_access_at TEXT');
-}
-if (!memCols.includes('access_count')) {
-  db.exec('ALTER TABLE memories ADD COLUMN access_count INTEGER DEFAULT 0');
-}
-if (!memCols.includes('archived')) {
-  db.exec('ALTER TABLE memories ADD COLUMN archived INTEGER DEFAULT 0');
-}
-// 作用域检索索引（user + agent + run 组合过滤加速）
-db.exec('CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories(user_id, agent_id, run_id)');
-// 活跃度索引（归档排除 + 按访问时间排序加速）
-db.exec('CREATE INDEX IF NOT EXISTS idx_memories_active ON memories(user_id, archived, last_access_at)');
 
-// 老库兼容：connect_requests 早期无 confirm_token 列 → 补充（自动确认用：agent 侧随机令牌，
+// 老库兼容：connect_requests 早期无 confirm_token 列 → 补充（设备流自动确认用：agent 侧随机令牌，
 // 拼进 authorize_url，/connect 页校验匹配后免按钮自动授权；无该令牌的请求回退到手动确认页）
 const crCols = db.prepare('PRAGMA table_info(connect_requests)').all().map((c) => c.name);
 if (!crCols.includes('confirm_token')) {
   db.exec('ALTER TABLE connect_requests ADD COLUMN confirm_token TEXT');
+}
+
+// ===== 瘦身迁移（v0.2：对标 mem0 核心，去掉冗余机制）=====
+// 删除项：connect_codes（半自动连接旧方案，已被设备流取代）、memories_history（修改时间线，非核心）、
+// agent_id/run_id 作用域（只留员工维度）、archived/last_access_at/access_count（TTL 归档与活跃度加权）。
+// events 表保留复用：作为 messages 异步提炼的任务队列（本地 LLM 并发低，add_memory(messages) 异步受理）。
+// 老库若仍带上述列（v0.1 曾建）直接 DROP 对应列即可；数据在部署前已通过快照备份（data/backup-*.db），
+// 此处幂等、可重复执行。
+db.exec(`
+  DROP TABLE IF EXISTS connect_codes;
+  DROP TABLE IF EXISTS memories_history;
+  DROP INDEX IF EXISTS idx_memories_scope;
+  DROP INDEX IF EXISTS idx_memories_active;
+`);
+
+const memCols2 = db.prepare('PRAGMA table_info(memories)').all().map((c) => c.name);
+for (const col of ['agent_id', 'run_id', 'archived', 'last_access_at', 'access_count']) {
+  if (memCols2.includes(col)) {
+    db.exec(`ALTER TABLE memories DROP COLUMN ${col}`);
+  }
 }
 
 module.exports = db;

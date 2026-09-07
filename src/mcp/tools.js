@@ -2,29 +2,17 @@
 
 /**
  * MCP 工具定义与处理器。
- * 行为对齐 mem0 官方 MCP server 的同类工具（add / search / get_all / get / update / delete），
- * 另支持批量导入 import_memories。默认只暴露核心增删改查/检索工具（避免 agent 工具清单过载），
- * 批量/事件与整库/实体管理类工具在 MCP_TOOL_PROFILE=full 下完整暴露（见 visibleTools 过滤）。
- * 所有数据访问强制 user_id 隔离。
- * 注：API Key 管理不暴露为 MCP 工具，由 Web 平台 REST（/api/keys）提供。
+ * 核心 7 工具：add_memory / get_event_status / search_memories / get_memories / get_memory /
+ * update_memory / delete_memory。
+ * - 写入语义：所有 add_memory 输入都是"素材"（text/messages），一律异步受理返回 event_id，
+ *   后台内部 LLM 提炼成结构化记忆入库（不存原文）；get_event_status 查进度。
+ * - 已裁剪：批量导入、整库/实体管理、agent/run 作用域。所有数据访问强制 user_id 隔离（员工维度）。
+ * 注：API Key 管理不暴露为 MCP 工具，由 Web 平台 REST（/api/keys）+ 设备流接入提供。
  */
 const { McpError, ErrorCode, ListToolsRequestSchema, CallToolRequestSchema } =
   require('@modelcontextprotocol/sdk/types.js');
 const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
-const config = require('../config');
 const repo = require('../db/repo');
-
-// ===== 工具暴露面（tool profile）=====
-// 默认只暴露日常增删改查/search/异步状态查询必要的核心工具，避免 agent 工具清单过载：
-// 批量导入（import_memories / list_events）与整库/实体管理（delete_all_memories /
-// list_entities / delete_entities）按需隐藏——前者可用 add_memory(messages) 替代，
-// 后者属于低频、高破坏性操作，必要时通过 Web 平台处理。
-// 设置 MCP_TOOL_PROFILE=full 可恢复 mem0 兼容的完整工具面。
-const FULL = process.env.MCP_TOOL_PROFILE === 'full';
-// 各工具在完整面中的分类（full 下仍全部暴露，用于清单可读性）
-const CORE = 'core'; // 日常核心：常驻暴露
-const BATCH = 'batch'; // 批量导入/事件列表：默认隐藏
-const ADMIN = 'admin'; // 整库/实体管理：默认隐藏
 
 /** 把调用方的 user_id 解析出来；user_id 参数只能等于当前身份，否则拒绝（防跨租户） */
 function resolveUserId(userId, paramsUserId) {
@@ -46,17 +34,18 @@ function jsonText(obj) {
 const tools = [
   {
     name: 'add_memory',
-    kind: CORE,
     description:
-      '添加记忆。支持两种输入：text（单条文本）或 messages（多轮对话，LLM 自动提炼成记忆）。' +
-      'agent_id/run_id 标记记忆归属（多 agent 隔离）。infer=true 时异步 LLM 提炼事实存 facts（增强语义召回），失败不影响原样入库',
+      '提交记忆素材（员工维度）。text：单条素材文本；messages：多轮对话 [{role, content}]。' +
+      '素材一律**异步受理**：立即返回 {event_id, status:"pending"}，后台由 aimemory 内部 LLM 提炼成多条' +
+      '自包含的结构化记忆后入库（库内只存提炼产物，不存原文），再用 get_event_status 查询提炼进度。' +
+      '提炼失败（LLM 不可用/无有效产出）→ 事件 failed，素材不落库。',
     inputSchema: {
       type: 'object',
       properties: {
-        text: { type: 'string', description: '要记住的内容（与 messages 二选一）' },
+        text: { type: 'string', description: '记忆素材：单条文本（与 messages 二选一），后台 LLM 提炼成结构化记忆后入库' },
         messages: {
           type: 'array',
-          description: '多轮对话 [{role, content}, ...]，LLM 提炼成记忆（与 text 二选一，优先于 text）',
+          description: '记忆素材：多轮对话 [{role, content}, ...]（与 text 二选一，优先于 text），后台 LLM 提炼成多条记忆',
           items: {
             type: 'object',
             properties: {
@@ -67,114 +56,33 @@ const tools = [
           },
         },
         user_id: { type: 'string', description: '用户标识（可选，仅限当前身份）' },
-        agent_id: { type: 'string', description: 'agent 标识（可选，记忆归属此 agent）' },
-        run_id: { type: 'string', description: '会话/运行标识（可选，记忆归属此次 run）' },
-        metadata: {
-          type: 'object',
-          description: '附加元数据（如 {source: "claude-code"}），可含任意键',
-        },
-        infer: {
-          type: 'boolean',
-          description: '是否 LLM 事实抽取，默认 true；false 时原样入库不抽取',
-        },
+        metadata: { type: 'object', description: '附加元数据（如 {source: "zcode"}），会透传给提炼出的每条记忆' },
       },
     },
-    handler: async ({ text, messages, metadata, infer, user_id, agent_id, run_id }, userId) => {
+    handler: async ({ text, messages, metadata, user_id }, userId) => {
+      const uid = resolveUserId(userId, user_id);
       if ((!text || !String(text).trim()) && !(Array.isArray(messages) && messages.length)) {
         throw new McpError(ErrorCode.InvalidParams, 'text 或 messages 至少提供一个');
       }
-      const uid = resolveUserId(userId, user_id);
-      const inferFlag = infer !== false;
-
-      // messages 模式：异步受理——立即返回 event_id，后台 LLM 提炼入库（避免大段对话超时）
-      if (messages && Array.isArray(messages) && messages.length) {
-        const eventId = repo.createEvent({
-          userId: uid,
-          eventType: 'add_memory',
-          payload: { messages, metadata: metadata || {}, infer: inferFlag, agent_id: agent_id, run_id: run_id },
-        });
-        repo.processPendingEvents(); // 触发后台处理（不 await，立即返回）
-        return {
-          content: [{
-            type: 'text',
-            text: jsonText({ event_id: eventId, status: 'pending', user_id: uid, agent_id: agent_id || null, run_id: run_id || null }),
-          }],
-        };
-      }
-
-      const mem = await repo.createMemory({
+      const res = repo.createMemory({
         userId: uid,
-        text: String(text),
+        text: text ? String(text).slice(0, 8000) : undefined,
+        messages: Array.isArray(messages) ? messages : undefined,
         metadata,
-        infer: inferFlag,
-        agentId: agent_id,
-        runId: run_id,
       });
-      return { content: [{ type: 'text', text: jsonText({ id: mem.id, user_id: uid, text: mem.text, agent_id: agent_id || null, run_id: run_id || null }) }] };
-    },
-  },
-
-  {
-    name: 'import_memories',
-    kind: BATCH,
-    description:
-      '批量导入多段对话成记忆：groups 为多段 messages 的数组，每段自动 LLM 提炼成多条记忆入库。' +
-      '适合一次性把历史会话/聊天记录批量沉淀。auto-merge 自动去重（重复跳过）。返回汇总统计。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        groups: {
-          type: 'array',
-          description: '多段对话数组，每段是 [{role, content}, ...]',
-          items: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                role: { type: 'string', description: 'speaker，如 user/assistant' },
-                content: { type: 'string', description: '发言内容' },
-              },
-              required: ['role', 'content'],
-            },
-          },
-        },
-        user_id: { type: 'string', description: '用户标识（可选，仅限当前身份）' },
-        agent_id: { type: 'string', description: 'agent 标识（可选，记忆归属此 agent）' },
-        run_id: { type: 'string', description: '会话/运行标识（可选）' },
-        metadata: { type: 'object', description: '附加元数据（可含任意键）' },
-        infer: { type: 'boolean', description: '是否 LLM 事实抽取，默认 true' },
-      },
-      required: ['groups'],
-    },
-    handler: async ({ groups, metadata, infer, user_id, agent_id, run_id }, userId) => {
-      if (!Array.isArray(groups) || !groups.length) {
-        throw new McpError(ErrorCode.InvalidParams, 'groups 至少提供一段对话');
-      }
-      const uid = resolveUserId(userId, user_id);
-      // 异步受理：立即返回 event_id，后台逐段提炼（避免多段 LLM 超时）
-      const eventId = repo.createEvent({
-        userId: uid,
-        eventType: 'import_memories',
-        payload: { groups, metadata: metadata || {}, infer: infer !== false, agent_id: agent_id, run_id: run_id },
-      });
-      repo.processPendingEvents(); // 触发后台处理（不 await，立即返回）
-      return {
-        content: [{
-          type: 'text',
-          text: jsonText({ event_id: eventId, status: 'pending', user_id: uid, agent_id: agent_id || null, run_id: run_id || null }),
-        }],
-      };
+      return { content: [{ type: 'text', text: jsonText(res) }] };
     },
   },
 
   {
     name: 'get_event_status',
-    kind: CORE,
-    description: '查询异步记忆操作的状态（add_memory/import_memories 返回的 event_id）。status: pending | processing | done | failed；done 含提炼结果',
+    description:
+      '查询异步写入任务的状态（add_memory(messages) 返回的 event_id）。status: pending | processing | done | failed；' +
+      'done 含提炼结果（count + 记忆列表），failed 含 error。',
     inputSchema: {
       type: 'object',
       properties: {
-        event_id: { type: 'string', description: '异步事件 id（add_memory/import_memories 返回）' },
+        event_id: { type: 'string', description: '异步任务 id（add_memory(messages) 返回）' },
         user_id: { type: 'string', description: '用户标识（可选，仅限当前身份）' },
       },
       required: ['event_id'],
@@ -190,36 +98,15 @@ const tools = [
   },
 
   {
-    name: 'list_events',
-    kind: BATCH,
-    description: '列出当前用户的记忆操作事件（异步任务，按时间倒序）',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        user_id: { type: 'string', description: '用户标识（可选，仅限当前身份）' },
-        page: { type: 'integer', minimum: 1, description: '页码，默认 1' },
-        page_size: { type: 'integer', minimum: 1, maximum: 100, description: '每页条数，默认 20' },
-      },
-    },
-    handler: async ({ page, page_size, user_id }, userId) => {
-      const uid = resolveUserId(userId, user_id);
-      const res = repo.listEvents({ userId: uid, page, pageSize: page_size });
-      return { content: [{ type: 'text', text: jsonText({ results: res.results, total: res.total, page: res.page, page_size: res.page_size }) }] };
-    },
-  },
-
-  {
     name: 'search_memories',
-    kind: CORE,
     description:
-      '语义+关键词+实体混合检索：向量语义召回 + FTS5 关键词召回 + 实体命中加权；rerank=true 时用 LLM 对结果按相关性重排（更精准，略增延迟）',
+      '语义 + 关键词 + 实体混合检索：向量语义召回 + FTS 关键词召回合并去重。' +
+      'threshold 过滤低相似度向量命中（0~1，默认 0 不过滤）；filters 支持 metadata 键值 / created_at、updated_at 时间范围。',
     inputSchema: {
       type: 'object',
       properties: {
         query: { type: 'string', description: '检索关键词' },
         user_id: { type: 'string', description: '用户标识（可选，仅限当前身份）' },
-        agent_id: { type: 'string', description: '仅检索该 agent 的记忆（可选）' },
-        run_id: { type: 'string', description: '仅检索该 run 的记忆（可选）' },
         limit: { type: 'integer', minimum: 1, maximum: 100, description: '返回条数，默认 10' },
         threshold: {
           type: 'number',
@@ -227,67 +114,45 @@ const tools = [
         },
         filters: {
           type: 'object',
-          description: '过滤条件：支持 user_id（仅当前身份）、agent_id、run_id、metadata（键值，如 {"source":"claude-code"}）、created_at/updated_at（时间范围，如 {"gte":"2026-08-01","lte":"2026-08-31"}）',
-        },
-        rerank: {
-          type: 'boolean',
-          description: '用 LLM 对结果按查询相关性重排（默认 false；true 时更精准但略增延迟）。LLM 不可用时自动回退原排序',
+          description: '过滤条件：user_id（仅当前身份）、metadata（键值，如 {"source":"zcode"}）、created_at/updated_at（时间范围，如 {"gte":"2026-08-01","lte":"2026-08-31"}）',
         },
       },
       required: ['query'],
     },
-    handler: async ({ query, limit, threshold, user_id, agent_id, run_id, rerank, filters = {} }, userId) => {
+    handler: async ({ query, limit, threshold, user_id, filters = {} }, userId) => {
       if (!query || !String(query).trim()) {
         throw new McpError(ErrorCode.InvalidParams, 'query 不能为空');
       }
       const uid = resolveUserId(userId, user_id);
-      if (filters && filters.user_id !== undefined && filters.user_id !== null) {
-        resolveUserId(uid, filters.user_id);
-      }
-      // 作用域：顶层参数优先，其次 filters
-      const agentId = agent_id || filters?.agent_id || undefined;
-      const runId = run_id || filters?.run_id || undefined;
-      const includeArchived = filters?.include_archived === true;
-      // 透传剩余 filters（metadata/created_at/updated_at）给 repo
-      const { user_id: _fuid, agent_id: _faid, run_id: _frid, include_archived: _finc, ...restFilters } = filters || {};
-      const results = await repo.searchMemories({ userId: uid, query: String(query), limit, threshold, agentId, runId, rerank: rerank === true, filters: restFilters, includeArchived });
+      const { user_id: _fuid, ...restFilters } = filters || {};
+      const results = await repo.searchMemories({ userId: uid, query: String(query), limit, threshold, filters: restFilters });
       return { content: [{ type: 'text', text: jsonText({ results }) }] };
     },
   },
 
   {
     name: 'get_memories',
-    kind: CORE,
-    description: '分页列出当前用户的记忆（按更新时间倒序；支持按 agent/run 过滤）',
+    description: '分页列出当前用户的记忆（按更新时间倒序）',
     inputSchema: {
       type: 'object',
       properties: {
         user_id: { type: 'string', description: '用户标识（可选，仅限当前身份）' },
-        agent_id: { type: 'string', description: '仅列出该 agent 的记忆（可选）' },
-        run_id: { type: 'string', description: '仅列出该 run 的记忆（可选）' },
-        filters: { type: 'object', description: '过滤条件：支持 user_id / agent_id / run_id / metadata（键值）/ created_at、updated_at（时间范围）' },
+        filters: { type: 'object', description: '过滤条件：user_id / metadata（键值）/ created_at、updated_at（时间范围）' },
         page: { type: 'integer', minimum: 1, description: '页码，默认 1' },
         page_size: { type: 'integer', minimum: 1, maximum: 100, description: '每页条数，默认 10' },
       },
     },
-    handler: async ({ page, page_size, user_id, agent_id, run_id, filters = {} }, userId) => {
+    handler: async ({ page, page_size, user_id, filters = {} }, userId) => {
       const uid = resolveUserId(userId, user_id);
-      if (filters && filters.user_id !== undefined && filters.user_id !== null) {
-        resolveUserId(uid, filters.user_id);
-      }
-      const agentId = agent_id || filters?.agent_id || undefined;
-      const runId = run_id || filters?.run_id || undefined;
-      const includeArchived = filters?.include_archived === true;
-      const { user_id: _fuid, agent_id: _faid, run_id: _frid, include_archived: _finc, ...restFilters } = filters || {};
-      const res = repo.listMemories({ userId: uid, page, pageSize: page_size, agentId, runId, filters: restFilters, includeArchived });
+      const { user_id: _fuid, ...restFilters } = filters || {};
+      const res = repo.listMemories({ userId: uid, page, pageSize: page_size, filters: restFilters });
       return { content: [{ type: 'text', text: jsonText({ results: res.results, total: res.total, page: res.page, page_size: res.page_size }) }] };
     },
   },
 
   {
     name: 'get_memory',
-    kind: CORE,
-    description: '按 id 获取一条记忆，包含修改历史时间线',
+    description: '按 id 获取一条记忆',
     inputSchema: {
       type: 'object',
       properties: {
@@ -308,8 +173,7 @@ const tools = [
 
   {
     name: 'update_memory',
-    kind: CORE,
-    description: '更新一条记忆的 text / metadata（旧值快照进历史）',
+    description: '更新一条记忆的 text / metadata（文本变化后自动重新抽取 facts 并补向量）',
     inputSchema: {
       type: 'object',
       properties: {
@@ -332,8 +196,7 @@ const tools = [
 
   {
     name: 'delete_memory',
-    kind: CORE,
-    description: '删除一条记忆（旧值快照进历史）',
+    description: '删除一条记忆',
     inputSchema: {
       type: 'object',
       properties: {
@@ -350,89 +213,30 @@ const tools = [
       return { content: [{ type: 'text', text: jsonText({ success: true }) }] };
     },
   },
-
-  // ============ 实体/批量管理（对齐 mem0 工具面） ============
-  // 本实例当前只有 user 维度（无 agent/app/run），故 user_id 只能等于当前身份，
-  // 跨用户删除一律拒绝——多租户隔离底线不变。
-  // 注：API Key 管理（create/list/revoke）不暴露为 MCP 工具——由 Web 平台 REST 端点
-  //     （/api/keys）提供，避免 agent 用 MCP 自助管理密钥，保持接入走人工/Web。
-
-  {
-    name: 'delete_all_memories',
-    kind: ADMIN,
-    description: '清空指定用户（默认当前身份）的全部记忆；用户本身与密钥保留',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        user_id: { type: 'string', description: '用户标识（可选，仅限当前身份）' },
-        agent_id: { type: 'string', description: '本实例无 agent 维度，保留兼容，忽略' },
-        app_id: { type: 'string', description: '本实例无 app 维度，保留兼容，忽略' },
-        run_id: { type: 'string', description: '本实例无 run 维度，保留兼容，忽略' },
-      },
-    },
-    handler: async ({ user_id }, userId) => {
-      const uid = resolveUserId(userId, user_id);
-      return { content: [{ type: 'text', text: jsonText(repo.deleteAllMemories(uid)) }] };
-    },
-  },
-
-  {
-    name: 'list_entities',
-    kind: ADMIN,
-    description: '列出有记忆的用户实体（含记忆数与最后活跃时间）',
-    inputSchema: { type: 'object', properties: {} },
-    handler: async () => {
-      return { content: [{ type: 'text', text: jsonText({ entities: repo.listEntities() }) }] };
-    },
-  },
-
-  {
-    name: 'delete_entities',
-    kind: ADMIN,
-    description: '删除指定用户（默认当前身份）及其全部记忆、密钥与 Web 会话（不可恢复）',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        user_id: { type: 'string', description: '用户标识（可选，仅限当前身份）' },
-        agent_id: { type: 'string', description: '本实例无 agent 维度，保留兼容，忽略' },
-        app_id: { type: 'string', description: '本实例无 app 维度，保留兼容，忽略' },
-        run_id: { type: 'string', description: '本实例无 run 维度，保留兼容，忽略' },
-      },
-    },
-    handler: async ({ user_id }, userId) => {
-      const uid = resolveUserId(userId, user_id);
-      return { content: [{ type: 'text', text: jsonText(repo.deleteEntities(uid)) }] };
-    },
-  },
 ];
-
-/** 当前暴露面下可见的工具（按 kind 过滤；FULL 模式全部暴露） */
-const visibleTools = FULL ? tools : tools.filter((t) => t.kind === CORE);
 
 /** 为指定用户创建并注册工具的 MCP Server 实例（userId 闭包注入，天然租户隔离） */
 function buildServer() {
   const server = new Server(
     {
       name: 'aimemory',
-      version: '0.1.0',
+      version: '0.2.0',
       description: '企业级自托管 AI 记忆库（mem0 兼容 MCP）',
     },
     {
       capabilities: { tools: {} },
       instructions:
-        `对每个工具调用，实现均按当前连接用户隔离数据；user_id 参数只能等于当前登录身份。` +
-        (FULL ? '' : ` 当前只暴露核心工具；如需批量导入/整库管理工具，请服务端设置 MCP_TOOL_PROFILE=full 后重启。`),
+        '对每个工具调用，实现均按当前连接用户隔离数据；user_id 参数只能等于当前登录身份。',
     }
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: visibleTools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })),
+    tools: tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })),
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args = {} } = request.params;
-    // 隐藏工具不参与调用（防越权直达）；错误信息不暴露工具名以外的细节
-    const tool = visibleTools.find((t) => t.name === name);
+    const tool = tools.find((t) => t.name === name);
     if (!tool) {
       throw new McpError(ErrorCode.MethodNotFound, `未知工具: ${name}`);
     }
@@ -447,4 +251,4 @@ function buildServer() {
   return server;
 }
 
-module.exports = { tools, visibleTools, buildServer };
+module.exports = { tools, buildServer };

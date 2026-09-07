@@ -62,10 +62,13 @@ const llm = {
   timeoutMs: parseInt(process.env.LLM_TIMEOUT_MS || '30000', 10),
 };
 
+// AIMEMORY_DB 可覆盖数据库路径（测试用独立临时库，避免污染生产数据）
+const dbPath = process.env.AIMEMORY_DB || path.join(root, 'data', 'aimemory.db');
+
 module.exports = {
   root,
-  dataDir: path.join(root, 'data'),
-  dbPath: path.join(root, 'data', 'aimemory.db'),
+  dataDir: path.dirname(dbPath),
+  dbPath,
   port: parseInt(process.env.PORT || '18543', 10),
   publicBaseUrl: (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, ''),
   keycloak: {

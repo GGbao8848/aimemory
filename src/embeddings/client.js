@@ -4,16 +4,48 @@
  * OpenAI 兼容的 Embedding 适配层。
  * 指向任意提供 /v1/embeddings 的服务（vLLM / llama.cpp / OpenAI 兼容网关）。
  * 服务不可用/调用失败时返回 null，由调用方降级为关键词检索，保证不影响现有功能。
+ * 半熔断：连续失败后熔断（不请求），每 CIRCUIT_RETRY_MS 探测一次自动恢复
+ * （早期"失败一次永久降级"需重启进程才恢复，embedding 服务短暂抖动会造成整进程语义检索失效）。
  */
 
 const config = require('../config');
 
-let failed = false; // 一旦失败，本次进程内标记不可用，避免每次搜索都撞一次超时
+const CIRCUIT_BREAK_THRESHOLD = 3; // 连续失败 3 次 → 熔断
+const CIRCUIT_RETRY_MS = 60_000; // 熔断后每 60s 放行一次探测
+
+let failures = 0;
+let circuitOpen = false;
+let circuitUntil = 0;
+
+function blocked() {
+  if (!circuitOpen) return false;
+  if (Date.now() >= circuitUntil) {
+    circuitOpen = false;
+    failures = 0;
+    return false;
+  }
+  return true;
+}
+
+function recordFailure(ctx) {
+  failures++;
+  if (failures >= CIRCUIT_BREAK_THRESHOLD && !circuitOpen) {
+    circuitOpen = true;
+    circuitUntil = Date.now() + CIRCUIT_RETRY_MS;
+    console.error(`[embeddings] 连续失败 ${CIRCUIT_BREAK_THRESHOLD} 次，进入熔断 ${CIRCUIT_RETRY_MS / 1000}s（自动探测恢复），期间降级关键词检索`);
+  } else if (ctx) {
+    console.error(`[embeddings] ${ctx}，降级为关键词检索`);
+  }
+}
+
+function recordSuccess() {
+  failures = 0;
+}
 
 /** 单个文本 → float32 向量（Buffer）。失败返回 null，不会抛错。 */
 async function embed(text) {
   const cfg = config.embedding;
-  if (!cfg.enabled || failed) return null;
+  if (!cfg.enabled || blocked()) return null;
 
   const url = `${cfg.baseUrl}/embeddings`;
   let res;
@@ -28,70 +60,21 @@ async function embed(text) {
       signal: AbortSignal.timeout(cfg.timeoutMs),
     });
   } catch (e) {
-    failed = true;
-    console.error(`[embeddings] 请求失败，本次进程降级为关键词检索: ${e.message}`);
+    recordFailure(`请求失败: ${e.message}`);
     return null;
   }
   if (!res.ok) {
-    failed = true;
-    console.error(`[embeddings] HTTP ${res.status}: ${(await res.text()).slice(0, 300)}，降级为关键词检索`);
+    recordFailure(`HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
     return null;
   }
   const data = await res.json();
   const vec = data?.data?.[0]?.embedding;
   if (!Array.isArray(vec) || !vec.length) {
-    failed = true;
-    console.error('[embeddings] 响应缺少 embedding 向量，降级为关键词检索');
+    recordFailure('响应缺少 embedding 向量');
     return null;
   }
+  recordSuccess();
   return float32Buffer(vec);
-}
-
-/** 批量文本 → Buffer 数组（对应入参顺序）。任一条失败则整体返回 null。 */
-async function embedBatch(texts) {
-  const cfg = config.embedding;
-  if (!cfg.enabled || failed || !texts.length) return null;
-
-  const url = `${cfg.baseUrl}/embeddings`;
-  let res;
-  try {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {}),
-      },
-      body: JSON.stringify({ model: cfg.model, input: texts }),
-      signal: AbortSignal.timeout(cfg.timeoutMs),
-    });
-  } catch (e) {
-    failed = true;
-    console.error(`[embeddings] 批量请求失败，本次进程降级为关键词检索: ${e.message}`);
-    return null;
-  }
-  if (!res.ok) {
-    failed = true;
-    console.error(`[embeddings] HTTP ${res.status}: ${(await res.text()).slice(0, 300)}，降级为关键词检索`);
-    return null;
-  }
-  const data = await res.json();
-  const byIndex = new Map((data?.data || []).map((d) => [d.index, d.embedding]));
-  if (!byIndex.size) {
-    failed = true;
-    console.error('[embeddings] 批量响应缺少 embedding 向量，降级为关键词检索');
-    return null;
-  }
-  const out = [];
-  for (let i = 0; i < texts.length; i++) {
-    const vec = byIndex.get(i);
-    if (!Array.isArray(vec) || !vec.length) {
-      failed = true;
-      console.error('[embeddings] 批量响应缺失条目，降级为关键词检索');
-      return null;
-    }
-    out.push(float32Buffer(vec));
-  }
-  return out;
 }
 
 /** number[] → float32 Buffer（内存紧凑，SQLite BLOB 存储） */
@@ -99,6 +82,18 @@ function float32Buffer(vec) {
   const buf = Buffer.alloc(vec.length * 4);
   for (let i = 0; i < vec.length; i++) buf.writeFloatLE(vec[i], i * 4);
   return buf;
+}
+
+/** 批量文本 → Buffer 数组（对应入参顺序）。供脚本（backfill-embeddings）批量回填历史向量。 */
+async function embedBatch(texts) {
+  if (!config.embedding.enabled || blocked() || !texts.length) return null;
+  const out = [];
+  for (const t of texts) {
+    const v = await embed(t);
+    if (!v) return null; // 任一条失败 → 整体失败（脚本据此停止）
+    out.push(v);
+  }
+  return out;
 }
 
 module.exports = { embed, embedBatch, float32Buffer };
