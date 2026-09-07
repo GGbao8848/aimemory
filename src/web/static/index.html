@@ -78,7 +78,7 @@
     <main class="main">
       <header class="main-head">
         <h1 id="view-title">我的记忆</h1>
-        <p id="view-sub" class="sub">管理 agent 为你沉淀的记忆，跨会话复用</p>
+        <p id="view-sub" class="sub">提交工作素材，AI 提炼成你的记忆；跨设备、跨会话复用</p>
       </header>
 
       <!-- 视图：我的记忆 -->
@@ -86,21 +86,19 @@
         <div class="card">
           <div class="card-head">
             <h2>记忆列表</h2>
+            <button id="export-btn" class="btn btn-ghost" type="button" title="把全部记忆导出为 JSON 文件（备份 / 迁移）">↓ 导出</button>
+          </div>
+          <div class="toolbar">
             <form id="search-form" class="search-form" role="search">
-              <input id="search-input" type="search" placeholder="搜索记忆…（关键词，支持中文子串）" />
+              <input id="search-input" type="search" placeholder="搜索记忆…（语义 + 关键词，支持中文子串）" />
               <button class="btn btn-ghost" type="submit">搜索</button>
               <button id="search-clear" class="btn btn-ghost" type="button" hidden>清除</button>
             </form>
           </div>
           <form id="add-form" class="add-form">
-            <div class="seg" role="tablist" aria-label="添加内容类型">
-              <button type="button" class="seg-btn active" data-seg="text" role="tab" aria-selected="true">明文</button>
-              <button type="button" class="seg-btn" data-seg="metadata" role="tab" aria-selected="false">元数据</button>
-            </div>
             <div class="add-main">
-              <textarea id="add-text" rows="2" placeholder="添加一条新记忆，例如：生产环境 Keycloak 部署在 18443 端口，管理密码在 mykeycloak/.env 中…"></textarea>
-              <input id="add-metadata" type="text" class="hidden" placeholder='元数据（JSON），如 {"source":"manual"}；内容仍必填' />
-              <button class="btn btn-primary" type="submit">添加记忆</button>
+              <textarea id="add-text" rows="3" placeholder="把要沉淀的内容贴进来（会议纪要 / 工作要点 / 一段对话），AI 会自动提炼成结构化记忆入库，原文不保留。&#10;&#10;例如：每月第一个周二下午在 302 会议室开预算评审会，由财务部牵头，各部门需提前一天把预算表发到部门群。"></textarea>
+              <button class="btn btn-primary" type="submit">提交提炼</button>
             </div>
           </form>
           <div id="memory-list" class="memory-list"></div>
@@ -159,7 +157,7 @@
             <li><b>查看接入密钥</b>：登录后切到「接入密钥」，密钥已自动生成并在页面展示（<code>m0-xxx</code> 明文），复制即可。<b>换设备时点「显示密钥」重新生成，旧密钥自动作废</b></li>
             <li><b>复制配置</b>：「MCP 配置」里复制完整 JSON（含密钥），或切「手动模式」按字段复制</li>
             <li><b>填入客户端</b>：把 JSON 或字段粘贴到你的 agent 的 MCP 客户端配置（Claude Code / Codex / BR-Agent 自定义连接器…）</li>
-            <li><b>验证</b>：agent 调用 <code>add_memory</code> 写一条测试记忆，再到本平台「我的记忆」确认</li>
+            <li><b>验证</b>：agent 调用 <code>add_memory</code> 提交一条素材（等 AI 提炼完成后），再到本平台「我的记忆」确认</li>
           </ol>
           <p class="muted small">每个员工密钥互不可见、数据互相隔离；一个账号同一时间只有一条生效密钥，新生成即吊销旧的。MCP 端点：<code>http://&lt;服务器内网IP&gt;:18543/mcp</code></p>
         </div>
@@ -167,12 +165,13 @@
         <div class="card">
           <h2>🧰 MCP 工具一览</h2>
           <ul class="tool-list">
-            <li><code>add_memory</code> — 写入一条记忆</li>
-            <li><code>search_memories</code> — 关键词检索（支持中文子串）</li>
-            <li><code>get_memories</code> / <code>get_memory</code> — 列出 / 单条（含修改历史）</li>
+            <li><code>add_memory</code> — 提交素材（text / messages），AI 提炼成记忆后入库</li>
+            <li><code>get_event_status</code> — 查询素材提炼状态（提炼需数秒）</li>
+            <li><code>search_memories</code> — 语义 + 关键词混合检索（支持中文子串）</li>
+            <li><code>get_memories</code> / <code>get_memory</code> — 列出 / 查看单条</li>
             <li><code>update_memory</code> / <code>delete_memory</code> — 修正 / 删除</li>
           </ul>
-          <p class="muted small">与 mem0 官方 MCP 参数同构；<code>infer</code> / <code>rerank</code> / <code>threshold</code> 为兼容保留字段（本实例为关键词检索）。</p>
+          <p class="muted small">只暴露这 7 个核心工具；写入自动抽取事实（facts）增强召回。每个员工的记忆互相隔离，同一员工多个 agent 共享一份账本。</p>
         </div>
       </section>
     </main>

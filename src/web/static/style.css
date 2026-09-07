@@ -307,7 +307,9 @@ input[type="text"], input[type="search"], textarea,
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
+  margin-bottom: 12px;
 }
+.card-head h2 { margin: 0; } /* 标题行内不额外下沉（全局 .card h2 的 12px 底部间距只用于无 head 场景） */
 
 .login-wrap {
   display: flex;
@@ -368,15 +370,18 @@ input:focus, textarea:focus {
   box-shadow: 0 0 0 3px var(--accent-dim);
 }
 
-.search-form { display: flex; gap: 8px; }
-.search-form input { width: 250px; }
-.add-form { margin-top: 10px; }
-/* 输入与按钮横向并列：textarea/元数据输入占满剩余宽，按钮沉底右侧 */
-.add-main { display: flex; gap: 8px; align-items: flex-end; }
-.add-main textarea, .add-main input { flex: 1; min-width: 0; }
-.add-main .btn { flex-shrink: 0; }
+/* 工具行：搜索框弹性占满剩余宽，按钮组靠右不换行挤压；窄容器时整体可换行 */
+.toolbar { margin-bottom: 4px; }
+.search-form { display: flex; gap: 8px; flex-wrap: wrap; }
+.search-form input { flex: 1 1 180px; min-width: 140px; width: auto; }
+.search-form .btn { flex-shrink: 0; }
+/* 素材输入：textarea 全宽占满，按钮右下对齐（编辑区不挤占宽度） */
+.add-form { margin-top: 12px; }
+.add-main { display: flex; flex-direction: column; gap: 10px; }
+.add-main textarea { width: 100%; min-height: 46px; resize: vertical; line-height: 1.55; }
+.add-main .btn { align-self: flex-end; padding: 10px 18px; }
 
-/* 分段切换（明文 / 元数据） */
+/* 分段切换（MCP 配置页：JSON 配置 / 手动模式） */
 .seg {
   display: inline-flex;
   gap: 2px;
@@ -407,7 +412,7 @@ input:focus, textarea:focus {
 .seg-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* ============================================================
-   记忆列表（signature：档案条目 —— mono 元数据 + 左竖线）
+   记忆列表（signature：档案条目 —— mono 时间戳 + 左竖线）
    ============================================================ */
 .memory-list { margin-top: 10px; }
 .memory-item {
@@ -435,12 +440,6 @@ input:focus, textarea:focus {
   color: var(--muted);
   letter-spacing: .01em;
   flex-wrap: wrap;
-}
-.meta-json {
-  color: var(--accent);
-  background: var(--accent-dim);
-  border-radius: 4px;
-  padding: 1px 6px;
 }
 .memory-actions {
   display: flex;
@@ -627,11 +626,14 @@ input:focus, textarea:focus {
   .user-chip { padding: 8px; margin-bottom: 0; }
   .theme-toggle { padding: 9px 0; margin-bottom: 0; }
   .main { margin-left: 64px; padding: 20px 18px 40px; }
-  .search-form input { width: 150px; }
+  .search-form input { flex-basis: 150px; }
 }
 
-/* 超窄屏：记忆卡片回到纵向（内容上、按钮下横向），添加表单按钮折到下一行 */
+/* 超窄屏：记忆卡片回到纵向（内容上、按钮下横向），搜索/添加表单按钮折到下一行 */
 @media (max-width: 560px) {
+  .card-head { align-items: flex-start; }
+  .search-form { flex-direction: column; align-items: stretch; }
+  .search-form input { flex-basis: auto; }
   .memory-item { flex-direction: column; gap: 8px; }
   .memory-actions {
     flex-direction: row;
@@ -639,5 +641,4 @@ input:focus, textarea:focus {
     width: 100%;
     padding-top: 0;
   }
-  .add-main { flex-direction: column; align-items: stretch; }
 }

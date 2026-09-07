@@ -166,7 +166,6 @@ function renderMemories(items, total) {
           <div class="memory-text">${esc(m.text)}</div>
           <div class="memory-meta">
             <span class="stamp">${esc(new Date(m.updated_at).toLocaleString())}</span>
-            ${Object.keys(m.metadata || {}).length ? `<span class="meta-json">${esc(JSON.stringify(m.metadata))}</span>` : ''}
           </div>
         </div>
         <div class="memory-actions">
@@ -187,39 +186,41 @@ function renderMemories(items, total) {
 
 // ===== 事件绑定 =====
 
-// 明文 / 元数据 切换（一次只显示一个输入框）
-function setAddMode(mode) {
-  document.querySelectorAll('.seg-btn').forEach((b) => {
-    const active = b.dataset.seg === mode;
-    b.classList.toggle('active', active);
-    b.setAttribute('aria-selected', active ? 'true' : 'false');
-  });
-  $('#add-text').classList.toggle('hidden', mode !== 'text');
-  $('#add-metadata').classList.toggle('hidden', mode !== 'metadata');
-}
-document.querySelectorAll('.seg-btn').forEach((btn) => {
-  btn.addEventListener('click', () => setAddMode(btn.dataset.seg));
-});
-
 $('#add-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const text = $('#add-text').value.trim();
   if (!text) return toast('内容不能为空');
-  let metadata = {};
-  const metaStr = $('#add-metadata').value.trim();
-  if (metaStr) {
-    try { metadata = JSON.parse(metaStr); }
-    catch { return toast('元数据不是合法 JSON'); }
-  }
   try {
-    await api('/api/memories', { method: 'POST', body: JSON.stringify({ text, metadata }) });
+    // 异步受理：素材提交后由后台 LLM 提炼入库（不存原文），202 + event_id
+    const r = await api('/api/memories', { method: 'POST', body: JSON.stringify({ text }) });
     $('#add-text').value = '';
-    $('#add-metadata').value = '';
-    setAddMode('text'); // 重置回明文模式
-    toast('已添加');
-    loadMemories();
+    toast('素材已提交，AI 提炼入库中（本地模型较慢，稍后刷新可见）…');
+    // 轮询等待提炼完成：done → 刷新列表；failed → 提示失败原因
+    if (r && r.event_id) {
+      pollAddResult(r.event_id);
+    } else {
+      loadMemories();
+    }
   } catch (e2) { toast(e2.message); }
 });
+
+// 轮询素材提炼事件直到 done/failed，完成后刷新记忆列表
+async function pollAddResult(eventId, tries = 0) {
+  try {
+    const st = await api(`/api/events/${eventId}`);
+    if (st && st.event && st.event.status === 'done') {
+      toast(`提炼完成，新增 ${st.event.result ? st.event.result.count : ''} 条记忆`);
+      loadMemories();
+    } else if (st && st.event && st.event.status === 'failed') {
+      toast(`提炼失败：${st.event.error || '无有效产出，素材未入库'}`);
+      loadMemories();
+    } else if (tries < 40) { // 最多等 ~40s
+      setTimeout(() => pollAddResult(eventId, tries + 1), 1000);
+    } else {
+      loadMemories();
+    }
+  } catch (e) { loadMemories(); }
+}
 
 $('#search-form').addEventListener('submit', (e) => {
   e.preventDefault();
@@ -237,13 +238,45 @@ $('#search-clear').addEventListener('click', () => {
   loadMemories();
 });
 
+// ===== 导出记忆（JSON 附件下载；数据备份 / 迁移）=====
+$('#export-btn').addEventListener('click', async () => {
+  const btn = $('#export-btn');
+  try {
+    btn.disabled = true;
+    const res = await fetch('/api/memories/export', { headers: { Accept: 'application/json' } });
+    if (res.status === 401) { showLogin(); throw new Error('未登录'); }
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      throw new Error(d.error || `导出失败 (${res.status})`);
+    }
+    const blob = await res.blob();
+    // 从 Content-Disposition 取文件名，取不到则用默认
+    const cd = res.headers.get('Content-Disposition') || '';
+    const m = cd.match(/filename="?([^";]+)"?/i);
+    const filename = m ? m[1] : `aimemory-memories-${new Date().toISOString().slice(0, 10)}.json`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast('已导出记忆文件');
+  } catch (e) {
+    toast(e.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 $('#memory-list').addEventListener('click', async (e) => {
   const btn = e.target.closest('button[data-act]');
   if (!btn) return;
   const item = btn.closest('.memory-item');
   const id = item.dataset.id;
   if (btn.dataset.act === 'del') {
-    if (!confirm('确定删除这条记忆？旧值会保留在历史中。')) return;
+    if (!confirm('确定删除这条记忆？')) return;
     try {
       await api(`/api/memories/${id}`, { method: 'DELETE' });
       toast('已删除');
