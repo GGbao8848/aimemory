@@ -1,7 +1,9 @@
 'use strict';
 
 const path = require('path');
+const fs = require('fs');
 const express = require('express');
+const AdmZip = require('adm-zip');
 const cookieParser = require('cookie-parser');
 const config = require('./config');
 const repo = require('./db/repo');
@@ -14,6 +16,40 @@ const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
+
+// ===== 配套技能（下载/预览，公开）=====
+// 三个记忆 skill 源目录（plugin/skills）：aimemory（管理）/ aimemory-recall（召回）/ aimemory-remember（沉淀）
+const SKILLS_DIR = path.join(config.root, 'plugin', 'skills');
+const SKILL_NAMES = ['aimemory', 'aimemory-recall', 'aimemory-remember'];
+const MAIN_SKILL_MD = path.join(SKILLS_DIR, 'aimemory', 'SKILL.md');
+
+// 技能 zip 包下载：aimemory-skills.zip（zip 内为三个 skill 目录，解压后放入 skills/ 或上传安装）
+app.get('/skill/download', (_req, res) => {
+  if (!fs.existsSync(MAIN_SKILL_MD)) {
+    res.status(404).send('配套技能 plugin/skills 不存在（请检查服务器部署目录）');
+    return;
+  }
+  const zip = new AdmZip();
+  for (const name of SKILL_NAMES) {
+    const dir = path.join(SKILLS_DIR, name);
+    if (fs.existsSync(dir)) zip.addLocalFolder(dir, name);
+  }
+  const buf = zip.toBuffer();
+  const zipFileName = 'aimemory-skills.zip';
+  res
+    .set('Content-Type', 'application/zip')
+    .set('Content-Disposition', `attachment; filename="aimemory-skills.zip"; filename*=UTF-8''${encodeURIComponent(zipFileName)}`)
+    .send(buf);
+});
+
+// 单文件预览/另存：主管理技能（aimemory/SKILL.md）
+app.get('/skill/SKILL.md', (_req, res) => {
+  if (!fs.existsSync(MAIN_SKILL_MD)) {
+    res.status(404).send('配套技能 plugin/skills/aimemory/SKILL.md 不存在（请检查服务器部署目录）');
+    return;
+  }
+  res.type('text/markdown; charset=utf-8').sendFile(MAIN_SKILL_MD);
+});
 
 // ===== 静态管理页面 =====
 app.use(express.static(path.join(__dirname, 'web', 'static')));

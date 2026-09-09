@@ -475,6 +475,8 @@ input:focus, textarea:focus {
    ============================================================ */
 .key-form { display: flex; gap: 8px; margin-bottom: 14px; }
 .key-form input { flex: 1; }
+.skill-dl-actions { display: flex; gap: 10px; margin-top: 4px; flex-wrap: wrap; }
+.skill-dl-actions .btn { text-decoration: none; }
 .new-key {
   background: var(--ok-dim);
   border: 1px solid var(--ok-dim);
