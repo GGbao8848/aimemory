@@ -33,7 +33,7 @@ const SYSTEM_PROMPT = [
   '[{"kind":"constraints","text":"完整的一句话","supersedes":null,"confidence":0.8}]',
 ].join('\n');
 
-function buildPrompt({ summaries, entries }) {
+function buildPrompt({ summaries, entries, facts = [] }) {
   const lines = ['近期会话摘要：'];
   summaries.forEach((s, i) => {
     const decisions = parseList(s.decisions).slice(0, 3).map((d) => clip(d, 100)).join('；');
@@ -44,6 +44,11 @@ function buildPrompt({ summaries, entries }) {
     lines.push(line);
   });
   lines.push('');
+  if (facts.length) {
+    lines.push('近期 L2 事实（仅作背景参考，帮助理解语境；不要直接抄进条目）：');
+    facts.forEach((f, i) => lines.push(`[B${i + 1}] ${clip(typeof f === 'string' ? f : f.text, L3.factClip)}`));
+    lines.push('');
+  }
   if (entries.length) {
     lines.push('已有长期条目：');
     entries.forEach((e) => lines.push(`[E:${e.id}] (${e.kind}) ${clip(e.text, L3.entryClip)}`));
@@ -51,7 +56,7 @@ function buildPrompt({ summaries, entries }) {
     lines.push('已有长期条目：（无）');
   }
   return [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: SYSTEM_PROMPT + (facts.length ? '\n输入里的「近期 L2 事实」只是背景语境：条目仍须来自会话摘要、自包含，不得照抄事实原文。' : '') },
     { role: 'user', content: lines.join('\n') },
   ];
 }

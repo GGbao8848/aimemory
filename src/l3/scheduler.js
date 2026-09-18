@@ -44,8 +44,9 @@ function pendingCount() {
 // ============ 输入采集 ============
 
 /**
- * @returns {{summaries:Array, entries:Array, maxSeen:string|null}}
- *   summaries：带正文的会话摘要；maxSeen：本轮实际消费到的最大 updated_at（新游标）
+ * @returns {{summaries:Array, entries:Array, facts:string[], maxSeen:string|null}}
+ *   summaries：带正文的会话摘要；facts：L2 事实采样（近更新优先，仅作凝练背景）；
+ *   maxSeen：本轮实际消费到的最大 updated_at（新游标）
  */
 function collectInput({ force = false } = {}) {
   const userId = config.userId;
@@ -73,9 +74,12 @@ function collectInput({ force = false } = {}) {
     })
     .filter(Boolean);
 
+  // L2 事实采样：近更新优先、直读 SQLite（零 LLM），只作凝练背景不进条目
+  const facts = l2store.recentFacts(userId, L3.maxFactsSample).map((f) => f.text);
+
   const maxSeen = rows.reduce((m, r) => (m && m > r.updated_at ? m : r.updated_at), null);
   const entries = store.listEntries({ includeSuperseded: false }).slice(0, L3.maxEntries);
-  return { summaries, entries, maxSeen };
+  return { summaries, entries, facts, maxSeen };
 }
 
 // ============ 一轮凝练 ============
@@ -91,10 +95,10 @@ async function tick({ force = false } = {}) {
   const pending = pendingCount();
   if (!force && pending < L3.batchNew) return { skipped: `新会话不足（${pending}/${L3.batchNew}）`, pending };
 
-  const { summaries, entries, maxSeen } = collectInput({ force });
+  const { summaries, entries, facts, maxSeen } = collectInput({ force });
   if (!summaries.length) return { skipped: '无可凝练的会话', pending };
 
-  const out = await llm.complete(buildPrompt({ summaries, entries }), {
+  const out = await llm.complete(buildPrompt({ summaries, entries, facts }), {
     maxTokens: L3.maxTokens,
     temperature: 0,
   });

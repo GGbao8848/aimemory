@@ -102,6 +102,8 @@ const l3 = {
   batchNew: parseInt(process.env.L3_BATCH_NEW || '5', 10),               // 攒够几个新会话才跑一轮
   maxSummaries: parseInt(process.env.L3_MAX_SUMMARIES || '8', 10),       // 单轮最多带几个摘要
   maxEntries: parseInt(process.env.L3_MAX_ENTRIES || '20', 10),          // 单轮最多带几条现有条目
+  maxFactsSample: parseInt(process.env.L3_MAX_FACTS_SAMPLE || '10', 10), // L2 事实采样条数（仅作凝练背景）
+  factClip: parseInt(process.env.L3_FACT_CLIP || '80', 10),              // 采样事实单条裁剪
   clip: parseInt(process.env.L3_CLIP || '300', 10),                      // 摘要单条裁剪
   entryClip: parseInt(process.env.L3_ENTRY_CLIP || '120', 10),           // 现有条目单条裁剪
   maxTokens: parseInt(process.env.L3_MAX_TOKENS || '600', 10),           // 凝练输出上限

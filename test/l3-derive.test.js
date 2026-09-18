@@ -60,7 +60,7 @@ after(() => {
 });
 
 beforeEach(() => {
-  for (const t of ['l1_summaries', 'l2_sources', 'l3_state']) db.prepare(`DELETE FROM ${t}`).run();
+  for (const t of ['l1_summaries', 'l2_sources', 'l3_state', 'memories']) db.prepare(`DELETE FROM ${t}`).run();
   try { fs.rmSync(config.l3Dir, { recursive: true, force: true }); } catch {}
 });
 
@@ -169,6 +169,16 @@ test('tick：supersedes 让旧条目被取代（跨轮演化）', async () => {
   assert.equal(active[0].text, '端口改为 18544');
 });
 
+test('collectInput：L2 事实采样近更新优先、直读库（零 LLM）', () => {
+  const u = config.userId;
+  l2store.insertFact({ userId: u, text: '采样背景事实 A', metadata: {} });
+  l2store.insertFact({ userId: u, text: '采样背景事实 B', metadata: {} });
+  const { facts } = scheduler.collectInput({ force: true });
+  assert.ok(Array.isArray(facts) && facts.length >= 2);
+  assert.ok(facts.some((f) => f.includes('采样背景事实')));
+  assert.ok(facts.length <= config.l3.maxFactsSample, '不超过采样上限');
+});
+
 test('手动 force：无新增也取最近会话跑（便于验收/演示）', async () => {
   mkConsumed({ sessionId: 'only-1' });
   stubLlmSeq(['[{"kind":"lessons","text":"force 触发的教训"}]']);
@@ -186,4 +196,20 @@ test('buildPrompt：包含摘要与已有条目，且带「宁缺毋滥」约束
   assert.ok(text.includes('[S1]'), '摘要应编号进入 prompt');
   assert.ok(text.includes('[E:e1]'), '已有条目应进入 prompt 供取代判定');
   assert.ok(text.includes('宁缺毋滥'));
+});
+
+test('buildPrompt：L2 事实采样作为背景进入 prompt，且带「不得照抄」约束与裁剪', () => {
+  const long = '这是一条非常长的 L2 事实，用来验证单条裁剪是否生效，后面全是填充内容'.repeat(3);
+  const msgs = buildPrompt({
+    summaries: [{ agent: 'zcode', session_id: 'abc', overview: '目标', decisions: '[]', artifacts: '[]' }],
+    entries: [],
+    facts: ['背景事实甲', long],
+  });
+  const user = msgs[1].content;
+  assert.ok(user.includes('[B1] 背景事实甲'), '事实采样应编号进入 prompt');
+  assert.ok(user.includes('不要直接抄进条目'), '必须声明仅作背景');
+  assert.ok(!user.includes(long), '超长事实应被裁剪');
+  assert.ok(msgs[0].content.includes('不得照抄事实原文'), 'system 侧也要约束');
+  const noFacts = buildPrompt({ summaries: [], entries: [], facts: [] });
+  assert.ok(!noFacts[1].content.includes('[B1]'), '无采样时不出现事实段');
 });
