@@ -6,6 +6,7 @@
  * - 所有数据访问强制 user_id 隔离
  */
 const express = require('express');
+const path = require('path');
 const repo = require('../db/repo');
 const tokens = require('../auth/tokens');
 const l0Store = require('../l0/store');
@@ -49,6 +50,11 @@ apiRouter.get('/me', wrap(async (req, res) => {
 }));
 
 // 当前用户记忆统计（页面展示：记忆数 / 生效密钥数）
+// REST 契约直出（公开）：文档即代码，路径/方法集由 test/api-contract.test.js 守护与实现同步
+apiRouter.get('/openapi.json', (_req, res) => {
+  res.type('application/json').sendFile(path.join(config.root, 'docs', 'api', 'openapi.json'));
+});
+
 apiRouter.get('/stats', requireAuth, wrap(async (req, res) => {
   res.json(repo.stats(req.identity.userId));
 }));
