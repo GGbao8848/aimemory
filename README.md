@@ -8,7 +8,7 @@
 - **素材提炼型写入（核心）**：`add_memory` 的输入一律视为素材（`text` / `messages`），**不直接落库**——后台内部 LLM 提炼成多条自包含结构化记忆后入库；异步受理 + 队列串行，本地低并发 LLM 下不阻塞调用；提炼失败不落库
 - **语义 + 关键词混合检索**：embedding 向量召回（同义/口语化可命中）+ SQLite FTS5 trigram 关键词召回（中文子串）；embedding 不可用时自动回退纯关键词
 - **7 个核心 MCP 工具**：`add_memory` / `get_event_status` / `search_memories` / `get_memories` / `get_memory` / `update_memory` / `delete_memory`——刻意不提供批量导入、整库/实体管理、agent/run 维度
-- **L0 原始会话归档**：各机安装采集器（pm2），把 Codex / Claude Code / ZCode 的原始会话追加归档到 `data/l0/<设备>/<agent>/`；上传带**设备码 + 设备信息 + agent**，可在任意机器按设备查看其他机器的会话；只采集上传、不做提炼（详见 [docs/L0-原始会话归档.md](docs/L0-原始会话归档.md)）。**当前服务器本机已部署**（设备「服务器本机 / user2」）。
+- **L0 原始会话归档**：各机安装采集器（pm2），把 Codex / Claude Code / ZCode 的原始会话追加归档到 `data/l0/<设备>/<agent>/`；上传带**设备码 + 设备信息 + agent**，Web「会话归档」页按**设备 → agent → 会话 → 详情**逐级下钻，可在任意机器查看其他机器的会话；只采集上传、不做提炼（详见 [docs/L0-原始会话归档.md](docs/L0-原始会话归档.md)）。**当前服务器本机已部署**（设备「服务器本机 / user2」）。
 - **多租户隔离**：数据按员工隔离，跨用户访问直接拒绝（MCP 与 REST 均验证）
 - **接入**：Web 自助签发多枚 `m0-xxx` Token（按客户端命名分发、单独吊销，明文页面随时可查）+ 设备流浏览器免粘贴授权；Web 页支持导出全量记忆（JSON）
 - **半熔断容错**：LLM/embedding 服务抖动自动熔断降级、恢复自动探测回补，无需重启

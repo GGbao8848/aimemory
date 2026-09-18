@@ -156,21 +156,29 @@
         </div>
       </section>
 
-      <!-- 视图：会话归档（L0 原始会话备份，按设备/agent 归类） -->
+      <!-- 视图：会话归档（L0 原始会话备份；设备 → agent → 会话 三级下钻） -->
       <section id="view-sessions" class="view">
         <div class="card">
           <div class="card-head">
             <h2>🖥 设备</h2>
             <button id="l0-refresh" class="btn btn-ghost" type="button">↻ 刷新</button>
           </div>
-          <p class="muted">每台安装采集器的机器是一个设备。点设备查看它在各 agent 下备份的会话，可跨机查看「另一台机器做了什么」。</p>
+          <p class="muted">每台安装采集器的机器是一个设备。依次选择「设备 → agent → 会话」查看原始会话，可跨机查看「另一台机器做了什么」。</p>
           <div id="l0-devices" class="device-list"></div>
         </div>
 
-        <div class="card">
+        <div class="card hidden" id="l0-agents-card">
+          <div class="card-head">
+            <h2>🤖 <span id="l0-agents-title">Agent</span></h2>
+            <span id="l0-agents-sub" class="muted small"></span>
+          </div>
+          <div id="l0-agents" class="agent-list"></div>
+        </div>
+
+        <div class="card hidden" id="l0-sessions-card">
           <div class="card-head">
             <h2>📄 <span id="l0-sessions-title">会话</span></h2>
-            <span id="l0-filter" class="muted small"></span>
+            <span id="l0-sessions-sub" class="muted small"></span>
           </div>
           <div id="l0-sessions" class="session-list"></div>
         </div>

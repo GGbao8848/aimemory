@@ -364,7 +364,7 @@ $('#key-create-form').addEventListener('submit', async (e) => {
   } catch (e2) { toast(e2.message); }
 });
 
-// ===== 会话归档（L0：按设备 → agent → 会话 浏览原始会话）=====
+// ===== 会话归档（L0：设备 → agent → 会话 三级下钻 → 详情）=====
 
 let archiveFilter = { device: null, agent: null };
 
@@ -387,15 +387,24 @@ function agentLabel(a) {
   return { codex: 'Codex', claude: 'Claude Code', zcode: 'ZCode' }[a] || a;
 }
 
+/**
+ * 加载归档并按层级渲染。
+ * 数据获取只随「设备」变化——选中设备后一次性取回该设备的全部会话，
+ * agent 层级与其会话列表都在本地派生（避免每次点 agent 都再打一次接口）。
+ */
 async function loadArchive() {
   try {
     const q = archiveFilter.device ? `?device=${encodeURIComponent(archiveFilter.device)}` : '';
     const data = await api(`/api/l0/stats${q}`);
-    renderDevices(data.devices_list || []);
-    renderArchiveSessions(data.sessions_list || []);
+    const sessions = data.sessions_list || [];
+    const devices = data.devices_list || [];
+    renderDevices(devices);
+    renderAgents(devices, sessions);
+    renderArchiveSessions(sessions);
   } catch (e) { toast(e.message); }
 }
 
+// ---- 一级：设备 ----
 function renderDevices(devices) {
   const host = $('#l0-devices');
   if (!devices.length) {
@@ -424,34 +433,93 @@ function renderDevices(devices) {
   host.querySelectorAll('[data-device]').forEach((el) => {
     el.onclick = () => {
       const code = el.dataset.device;
+      // 切换设备时清空下级选择（agent 与设备强绑定，换了设备就必须重选）
       archiveFilter.device = archiveFilter.device === code ? null : code;
+      archiveFilter.agent = null;
+      $('#l0-sessions-card').classList.add('hidden');
+      $('#l0-detail-card').classList.add('hidden');
       loadArchive();
     };
   });
 }
 
+// ---- 二级：agent（从该设备的会话中聚合）----
+function aggregateAgents(sessions) {
+  const m = new Map();
+  for (const s of sessions) {
+    const a = m.get(s.agent) || { agent: s.agent, sessions: 0, records: 0, bytes: 0, last: null };
+    a.sessions += 1;
+    a.records += s.records || 0;
+    a.bytes += s.bytes || 0;
+    if (!a.last || (s.last_received || '') > a.last) a.last = s.last_received;
+    m.set(s.agent, a);
+  }
+  return [...m.values()].sort((x, y) => (y.last || '').localeCompare(x.last || ''));
+}
+
+function renderAgents(devices, sessions) {
+  const card = $('#l0-agents-card');
+  if (!archiveFilter.device) { card.classList.add('hidden'); return; }
+
+  const dev = devices.find((d) => d.device_code === archiveFilter.device);
+  const devName = (dev && (dev.label || dev.device_code)) || archiveFilter.device;
+  $('#l0-agents-title').textContent = `Agent · ${devName}`;
+
+  const agents = aggregateAgents(sessions);
+  const host = $('#l0-agents');
+  $('#l0-agents-sub').textContent = agents.length ? `${agents.length} 个 agent` : '';
+
+  if (!agents.length) {
+    card.classList.remove('hidden');
+    host.innerHTML = '<p class="muted">该设备暂无归档会话。</p>';
+    return;
+  }
+  card.classList.remove('hidden');
+  host.innerHTML = agents.map((a) => {
+    const active = archiveFilter.agent === a.agent;
+    return `
+    <div class="agent-item${active ? ' agent-active' : ''}" data-agent="${esc(a.agent)}">
+      <div class="agent-main">
+        <span class="agent-name">${esc(agentLabel(a.agent))}</span>
+        <span class="muted small">${a.sessions} 会话 · ${a.records} 条 · ${fmtBytes(a.bytes)}</span>
+      </div>
+      <span class="muted small">最近 ${fmtTime(a.last)}</span>
+    </div>`;
+  }).join('');
+  host.querySelectorAll('[data-agent]').forEach((el) => {
+    el.onclick = () => {
+      const a = el.dataset.agent;
+      archiveFilter.agent = archiveFilter.agent === a ? null : a;
+      $('#l0-detail-card').classList.add('hidden');
+      loadArchive();
+    };
+  });
+}
+
+// ---- 三级：会话列表（须先选定 agent）----
 function renderArchiveSessions(sessions) {
+  const card = $('#l0-sessions-card');
+  // 未选 agent 时不展示会话列表——层级下钻到这一步才出现
+  if (!archiveFilter.device || !archiveFilter.agent) {
+    card.classList.add('hidden');
+    return;
+  }
+  card.classList.remove('hidden');
+
+  const filtered = sessions.filter((s) => s.agent === archiveFilter.agent);
+  $('#l0-sessions-title').textContent = `会话 · ${agentLabel(archiveFilter.agent)}`;
+  $('#l0-sessions-sub').textContent = `${filtered.length} 个会话 · ${fmtBytes(filtered.reduce((n, s) => n + (s.bytes || 0), 0))}`;
+
   const host = $('#l0-sessions');
-  const title = $('#l0-sessions-title');
-  const filter = $('#l0-filter');
-
-  const filtered = archiveFilter.agent ? sessions.filter((s) => s.agent === archiveFilter.agent) : sessions;
-  title.textContent = archiveFilter.device ? `会话 · ${archiveFilter.device}` : '会话（全部设备）';
-  filter.innerHTML = archiveFilter.device
-    ? `<a href="#" id="l0-clear">清除筛选</a>`
-    : '';
-  const clear = $('#l0-clear');
-  if (clear) clear.onclick = (e) => { e.preventDefault(); archiveFilter = { device: null, agent: null }; loadArchive(); };
-
   if (!filtered.length) {
-    host.innerHTML = '<p class="muted">暂无归档会话。</p>';
+    host.innerHTML = '<p class="muted">该 agent 下暂无归档会话。</p>';
     return;
   }
   host.innerHTML = filtered.map((s) => `
     <div class="session-item" data-session="${esc(s.session_id)}" data-agent="${esc(s.agent)}" data-device="${esc(s.device_code || '')}">
       <div class="session-main">
         <code class="session-id">${esc(s.session_id)}</code>
-        <span class="muted small">${esc(agentLabel(s.agent))} · ${esc(s.device_code || '未标注设备')} · ${s.records} 条 · ${fmtBytes(s.bytes)}</span>
+        <span class="muted small">${s.records} 条 · ${fmtBytes(s.bytes)} · 首次 ${fmtTime(s.first_received)}</span>
       </div>
       <span class="muted small">${fmtTime(s.last_received)}</span>
     </div>`).join('');

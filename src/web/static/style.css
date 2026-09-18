@@ -547,6 +547,19 @@ input:focus, textarea:focus {
 .device-stats { display: flex; gap: 14px; align-items: center; white-space: nowrap; font-size: 12.5px; color: var(--muted); flex-shrink: 0; }
 
 .session-list { margin-top: 10px; }
+
+/* 二级：agent 列表（与设备卡片同构，视觉上略缩进以体现层级） */
+.agent-list { margin-top: 10px; }
+.agent-item {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 9px 12px; margin-bottom: 6px; margin-left: 16px; cursor: pointer;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+  border-left: 3px solid transparent; transition: border-color .15s, background .15s;
+}
+.agent-item:hover { background: var(--surface-3); border-left-color: var(--accent-2); }
+.agent-item.agent-active { border-left-color: var(--accent-2); background: var(--surface-3); }
+.agent-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.agent-name { font-weight: 600; }
 .session-item {
   display: flex; justify-content: space-between; align-items: center; gap: 12px;
   padding: 9px 12px; margin-bottom: 6px; cursor: pointer;
