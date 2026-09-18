@@ -125,14 +125,32 @@ function mutateKind(kind, fn) {
 
 // ============ 查询 / 变更 ============
 
-/** 全部条目（跨 kind）。includeSuperseded=false 只返回仍成立的。 */
+/**
+ * 置信度时效衰减（指数半衰，只读视图——文件里的原值永远不动）。
+ * c_eff = c × 0.5^(ageDays/halfLife)。confidence 非数值、时间戳解析失败、halfLife≤0（关衰减）→ 原样透传。
+ */
+function effectiveConfidence(confidence, updatedAt, { now = Date.now(), halfLifeDays = config.l3.halfLifeDays } = {}) {
+  if (typeof confidence !== 'number') return null;
+  if (!(halfLifeDays > 0)) return confidence;
+  const base = Date.parse(updatedAt || '');
+  if (!Number.isFinite(base)) return confidence;
+  const ageDays = Math.max(0, (now - base) / 86400000);
+  return confidence * Math.pow(0.5, ageDays / halfLifeDays);
+}
+
+/** 全部条目（跨 kind）。includeSuperseded=false 只返回仍成立的。附 effective_confidence 时效衰减视图。 */
 function listEntries({ kind = null, includeSuperseded = false } = {}) {
   const kinds = kind ? [kindMeta(kind)].filter(Boolean) : KINDS;
   const out = [];
   for (const meta of kinds) {
     for (const e of readKind(meta.key)) {
       if (!includeSuperseded && e.superseded_by) continue;
-      out.push({ ...e, kind: meta.key, kind_label: meta.label });
+      out.push({
+        ...e,
+        kind: meta.key,
+        kind_label: meta.label,
+        effective_confidence: effectiveConfidence(e.confidence, e.updated_at),
+      });
     }
   }
   return out;
@@ -213,22 +231,40 @@ function l3Stats() {
   const byKind = {};
   let active = 0;
   let superseded = 0;
+  let effSum = 0;
+  let effN = 0;
   let lastUpdate = null;
   for (const meta of KINDS) {
     const all = readKind(meta.key);
-    const a = all.filter((e) => !e.superseded_by).length;
-    byKind[meta.key] = { active: a, superseded: all.length - a, label: meta.label };
-    active += a;
-    superseded += all.length - a;
-    for (const e of all) {
+    const live = all.filter((e) => !e.superseded_by);
+    byKind[meta.key] = {
+      active: live.length,
+      superseded: all.length - live.length,
+      label: meta.label,
+      // active 条目的平均有效置信度（时效衰减后），无条目为 null
+      effective_confidence: live.length
+        ? +(live.reduce((s, e) => s + (effectiveConfidence(e.confidence, e.updated_at) ?? 0), 0) / live.length).toFixed(4)
+        : null,
+    };
+    active += live.length;
+    superseded += all.length - live.length;
+    for (const e of live) {
+      const eff = effectiveConfidence(e.confidence, e.updated_at);
+      if (eff != null) { effSum += eff; effN += 1; }
       if (e.updated_at && (!lastUpdate || e.updated_at > lastUpdate)) lastUpdate = e.updated_at;
     }
   }
-  return { active, superseded, byKind, last_update: lastUpdate };
+  return {
+    active,
+    superseded,
+    byKind,
+    last_update: lastUpdate,
+    effective_confidence: effN ? +(effSum / effN).toFixed(4) : null,
+  };
 }
 
 module.exports = {
-  KINDS, parseAttrs, readKind, serializeKind,
+  KINDS, parseAttrs, readKind, serializeKind, effectiveConfidence,
   listEntries, getEntry, appendEntry, markSuperseded, updateBody, removeEntry, l3Stats,
   MAX_TEXT,
 };

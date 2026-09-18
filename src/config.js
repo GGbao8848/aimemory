@@ -105,6 +105,7 @@ const l3 = {
   clip: parseInt(process.env.L3_CLIP || '300', 10),                      // 摘要单条裁剪
   entryClip: parseInt(process.env.L3_ENTRY_CLIP || '120', 10),           // 现有条目单条裁剪
   maxTokens: parseInt(process.env.L3_MAX_TOKENS || '600', 10),           // 凝练输出上限
+  halfLifeDays: parseInt(process.env.L3_HALF_LIFE_DAYS || '180', 10),    // 置信度半衰期（天），≤0 = 关衰减
   intervalMs: parseInt(process.env.L3_INTERVAL_MS || String(10 * 60 * 1000), 10), // 轮询间隔
 };
 

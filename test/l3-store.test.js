@@ -123,3 +123,43 @@ test('序列化往返稳定：读出的文件再写回，内容不变（diff 友
   fs.writeFileSync(file, store.serializeKind('profile', entries), 'utf8');
   assert.equal(fs.readFileSync(file, 'utf8'), once, '二次序列化应逐字节一致');
 });
+
+test('置信度时效衰减：新≈原值，半衰处减半，远古趋近 0，边界安全', () => {
+  const now = Date.now();
+  const day = 86400000;
+  const iso = (ms) => new Date(ms).toISOString();
+
+  assert.equal(store.effectiveConfidence(null, iso(now), { now }), null, '无置信度 → null');
+  assert.ok(Math.abs(store.effectiveConfidence(0.8, iso(now - 3600e3), { now }) - 0.8) < 0.001, '1 小时前 ≈ 原值');
+  const half = store.effectiveConfidence(0.8, iso(now - 180 * day), { now, halfLifeDays: 180 });
+  assert.ok(Math.abs(half - 0.4) < 0.001, '半衰期处恰好衰减一半');
+  const ancient = store.effectiveConfidence(0.8, iso(now - 1800 * day), { now, halfLifeDays: 180 });
+  assert.ok(ancient >= 0 && ancient < 0.001, '10 倍半衰期后趋近 0');
+  assert.ok(Math.abs(store.effectiveConfidence(0.8, iso(now - 90 * day), { now, halfLifeDays: 90 }) - 0.4) < 0.001, '半衰期可调');
+  assert.equal(store.effectiveConfidence(0.8, '2020-01-01T00:00:00Z', { now, halfLifeDays: 0 }), 0.8, 'halfLife≤0 = 关衰减');
+  assert.equal(store.effectiveConfidence(0.8, 'not-a-date', { now }), 0.8, '坏时间戳不衰减也不崩');
+  const future = store.effectiveConfidence(0.8, iso(now + 30 * day), { now });
+  assert.equal(future, 0.8, '未来时间戳不放大（age 钳到 0）');
+});
+
+test('listEntries 携带 effective_confidence，文件原值不动', () => {
+  const id = store.appendEntry({ kind: 'constraints', text: '端口固定为 18543', confidence: 0.8 });
+  const got = store.listEntries({ kind: 'constraints' })[0];
+  assert.equal(got.confidence, 0.8, '原值保留');
+  assert.ok(Math.abs(got.effective_confidence - 0.8) < 0.001, '新建条目有效置信 ≈ 原值');
+  // 手工把 updated_at 改到远古 → 有效置信应显著低于原值，且文件中的 confidence 原值不被改写
+  const file = path.join(config.l3Dir, 'constraints.md');
+  fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(/updated_at=[^ ]+/, 'updated_at=2020-01-01T00:00:00.000Z'), 'utf8');
+  const old = store.listEntries({ kind: 'constraints' })[0];
+  assert.ok(old.effective_confidence < 0.1, '远古条目有效置信趋近 0');
+  assert.equal(old.confidence, 0.8, '文件原值不受衰减视图影响');
+  assert.equal(store.getEntry(id).confidence, 0.8);
+});
+
+test('l3Stats 输出 active 条目的平均有效置信度', () => {
+  store.appendEntry({ kind: 'profile', text: 'a', confidence: 0.6 });
+  store.appendEntry({ kind: 'constraints', text: 'b', confidence: 0.8 });
+  const s = store.l3Stats();
+  assert.ok(typeof s.effective_confidence === 'number' && s.effective_confidence > 0.6, '平均有效置信应在区间内');
+  assert.ok(typeof s.byKind.profile.effective_confidence === 'number');
+});
