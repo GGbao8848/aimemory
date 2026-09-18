@@ -1070,6 +1070,28 @@ function eventStats(userId) {
 
 // ============ 统计 / 健康 ============
 
+/**
+ * 事件队列积压探测（/healthz 用，全局视角不按用户）：
+ * pending+processing 卡住意味着后台提炼链停摆——素材「收了但不处理」，必须让健康检查看见。
+ */
+function queueBacklog() {
+  const row = db
+    .prepare(
+      `SELECT SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) pending,
+              SUM(CASE WHEN status='processing' THEN 1 ELSE 0 END) processing,
+              SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) failed,
+              MIN(CASE WHEN status IN ('pending','processing') THEN created_at END) oldest_at
+         FROM events`
+    )
+    .get();
+  return {
+    pending: row.pending || 0,
+    processing: row.processing || 0,
+    failed: row.failed || 0,
+    oldest_age_ms: row.oldest_at ? Math.max(0, Date.now() - Date.parse(row.oldest_at)) : 0,
+  };
+}
+
 /** 记忆统计（健康检查与页面展示用） */
 function stats(userId) {
   return {
@@ -1100,6 +1122,7 @@ module.exports = {
   getL1Summary,
   l1Stats,
   eventStats,
+  queueBacklog,
   resetStuckL1,
   l0BatchExists,
   l0FilterNewRecords,

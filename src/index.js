@@ -327,12 +327,20 @@ app.get('/healthz', async (_req, res) => {
     cfg.embedding.enabled ? probe(`${cfg.embedding.baseUrl}/models`, { key: cfg.embedding.apiKey }) : null,
     cfg.llm.enabled ? probe(`${cfg.llm.baseUrl}/models`, { key: cfg.llm.apiKey }) : null,
   ]);
-  const healthy = dbOk && (embOk !== false) && (llmOk !== false);
+  // 提炼队列积压 = 素材「收了但不处理」，达阈值即 degraded（EVENTS_BACKLOG_WARN=0 关闭该判定）
+  let queue = null;
+  let backlogExceeded = false;
+  try {
+    queue = repo.queueBacklog();
+    backlogExceeded = cfg.eventsBacklogWarn > 0 && queue.pending >= cfg.eventsBacklogWarn;
+  } catch { /* 队列探测失败不改变主判定，db 状态已覆盖 */ }
+  const healthy = dbOk && (embOk !== false) && (llmOk !== false) && !backlogExceeded;
   res.status(healthy ? 200 : 503).json({
     status: healthy ? 'ok' : 'degraded',
     db: dbOk,
     embedding: embOk === null ? 'disabled' : embOk,
     llm: llmOk === null ? 'disabled' : llmOk,
+    queue,
     time: new Date().toISOString(),
   });
 });

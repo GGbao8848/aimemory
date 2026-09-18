@@ -141,6 +141,8 @@ module.exports = {
   passwordGenerated: generatedPassword, // 非空表示本次是自动生成，启动时提示用户
   sessionTtlMs: 7 * 24 * 3600 * 1000, // Web 会话 7 天
   mcpSessionTtlMs: 30 * 60 * 1000, // MCP session 空闲 30 分钟清理
+  // /healthz 积压告警阈值：pending 达到该值判定 degraded（提炼链停摆信号）；0 = 关闭
+  eventsBacklogWarn: parseInt(process.env.EVENTS_BACKLOG_WARN || '50', 10),
   // 供测试直接验证口令生成逻辑（生产路径已在模块加载时调用过）
   _ensurePassword: ensurePassword,
 };
