@@ -21,16 +21,16 @@ const { summarizeOne } = require('./summarize');
 const llm = require('../llm/client');
 
 /** 会话静默多久才认为"告一段落"（毫秒） */
-const QUIET_MS = parseInt(process.env.AIMEMORY_L1_QUIET_MS || String(5 * 60 * 1000), 10);
+const QUIET_MS = config.l1.quietMs;
 /**
  * 每轮处理多少个会话。
  * 串行执行（本地 LLM 并发能力有限），单会话实测约 90-110 秒；
  * 首轮全量回填 85 个会话约需 2.5-3 小时——这是 sleep-time 后台任务，
  * 不阻塞在线请求，属于预期行为。赶时间可临时调大本值。
  */
-const BATCH = parseInt(process.env.AIMEMORY_L1_BATCH || '6', 10);
+const BATCH = config.l1.batch;
 /** 单会话最大重试次数 */
-const MAX_ATTEMPTS = parseInt(process.env.AIMEMORY_L1_MAX_ATTEMPTS || '3', 10);
+const MAX_ATTEMPTS = config.l1.maxAttempts;
 
 let ticking = false;
 
@@ -154,7 +154,7 @@ async function tick() {
 function start() {
   const reset = repo.resetStuckL1();
   if (reset) console.log(`[l1] 复位 ${reset} 个中断的摘要任务`);
-  const interval = parseInt(process.env.AIMEMORY_L1_INTERVAL_MS || '60000', 10);
+  const interval = config.l1.intervalMs;
   // 不 await：后台跑，避免拖慢启动
   tick().then((r) => { if (r && r.processed) console.log(`[l1] 首轮：${JSON.stringify(r)}`); }).catch(() => {});
   return setInterval(() => {

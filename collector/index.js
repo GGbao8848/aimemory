@@ -11,6 +11,8 @@
  *   node collector/index.js            常驻（pm2 托管）
  *   node collector/index.js --once     只跑一轮（cron / 手动 / 测试）
  *   node collector/index.js --status   打印采集与队列状态
+ *   node collector/index.js --dry-run  预览采集量：游标从零起算（冷启动全量口径），
+ *                                      不入队、不上传、真实 state 目录零触碰（临时目录跑完即删）
  *
  * 可靠性设计（"不丢不重"）：
  *   - 游标与待传队列一起落盘，崩溃重启从断点继续；
@@ -20,6 +22,8 @@
  */
 
 const os = require('os');
+const path = require('path');
+const fs = require('fs');
 const { buildConfig } = require('./config');
 const { State } = require('./lib/state');
 const { Uploader } = require('./lib/uploader');
@@ -53,6 +57,7 @@ function chunkRecords(records, { maxRecords, maxBytes }) {
 class Collector {
   constructor(config) {
     this.config = config;
+    this.dry = Boolean(config.dryRun);
     this.state = new State(config.stateDir);
     // 设备身份：每条上传数据都带 (设备码, 设备信息, agent)，服务端据此归类，
     // 这样在任意一台机器上都能查到"另一台机器做了什么"。
@@ -103,17 +108,23 @@ class Collector {
         // 记录级本地去重：重叠窗口重读到的、版本未涨的记录不再入队
         const fresh = this.state.filterUnsent(records);
         skippedSent += records.length - fresh.length;
-        for (const chunk of chunkRecords(fresh, {
-          maxRecords: this.config.maxRecordsPerBatch,
-          maxBytes: this.config.maxBatchBytes,
-        })) {
-          this.state.enqueue(this.uploader.makeBatch(agent, sessionId, chunk));
-          // 入队即认领：批次已持久化在队列中，下轮采集不得再次入队。
-          // （若等到上传成功才标记，重启/失败期间同一批会被反复入队。）
-          this.state.markSentRecords(chunk);
+      for (const chunk of chunkRecords(fresh, {
+        maxRecords: this.config.maxRecordsPerBatch,
+        maxBytes: this.config.maxBatchBytes,
+      })) {
+        if (this.dry) {
+          // dry-run：只计数。不写 spool（冷启动全量预览会很大）、不认领记录
           enqueued += 1;
           agentRecords += chunk.length;
+          continue;
         }
+        this.state.enqueue(this.uploader.makeBatch(agent, sessionId, chunk));
+        // 入队即认领：批次已持久化在队列中，下轮采集不得再次入队。
+        // （若等到上传成功才标记，重启/失败期间同一批会被反复入队。）
+        this.state.markSentRecords(chunk);
+        enqueued += 1;
+        agentRecords += chunk.length;
+      }
       };
 
       let out;
@@ -232,6 +243,26 @@ async function main() {
     const local = c.status();
     const remote = await c.remoteStats();
     process.stdout.write(JSON.stringify({ local, remote }, null, 2) + '\n');
+    return;
+  }
+
+  if (argv.includes('--dry-run')) {
+    // 预览「这台上会采到什么」：state 用临时目录（游标从零 = 冷启动全量口径），
+    // 采集结果只计数（不写 spool / 不认领 / 不上传），跑完即删临时目录。
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'collector-dry-'));
+    try {
+      const c = new Collector({ ...config, stateDir: tmp, dryRun: true });
+      const summary = c.collectOnce();
+      process.stdout.write(JSON.stringify({
+        mode: 'dry-run',
+        server: config.serverUrl,
+        agents: config.agents,
+        note: '游标从零起算（冷启动全量口径）；真实 state 目录、上传均未触碰',
+        summary,
+      }, null, 2) + '\n');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
     return;
   }
 

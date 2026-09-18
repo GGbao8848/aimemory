@@ -29,7 +29,7 @@ const repo = require('../db/repo');
 const llm = require('../llm/client');
 
 /** 摘要输入预算（字符）：中文约 1 字符 ≈ 1 token，留足输出空间避免撑爆上下文 */
-const DIGEST_BUDGET = parseInt(process.env.AIMEMORY_L1_BUDGET || '24000', 10);
+const DIGEST_BUDGET = config.l1.digestBudget;
 /** 单条 user/assistant 消息的裁剪上限 */
 const USER_CLIP = 600;
 const ASSISTANT_CLIP = 400;
@@ -39,9 +39,9 @@ const ASSISTANT_CLIP = 400;
  * 若上限设 1500 会让 finish_reason=length、content 为空（只产出 reasoning），
  * 摘要直接失败。8000 可覆盖「思考 + 正文」，单会话耗时约 90 秒。
  */
-const SUMMARY_MAX_TOKENS = parseInt(process.env.AIMEMORY_L1_MAX_TOKENS || '8000', 10);
+const SUMMARY_MAX_TOKENS = config.l1.maxTokens;
 /** 摘要调用超时：大输入 + 思考模型约需 90s，默认 30s 会超时（实测） */
-const SUMMARY_TIMEOUT_MS = parseInt(process.env.AIMEMORY_L1_TIMEOUT_MS || '240000', 10);
+const SUMMARY_TIMEOUT_MS = config.l1.timeoutMs;
 
 // ============ 读取与收敛 ============
 

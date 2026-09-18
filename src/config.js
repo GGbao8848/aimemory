@@ -74,6 +74,17 @@ const llm = {
   timeoutMs: parseInt(process.env.LLM_TIMEOUT_MS || '30000', 10),
 };
 
+// ===== L1 会话摘要（sleep-time：会话静默后才摘要，调度见 src/l1/scheduler.js）=====
+const l1 = {
+  quietMs: parseInt(process.env.AIMEMORY_L1_QUIET_MS || String(5 * 60 * 1000), 10),   // 会话静默多久才认为"告一段落"
+  batch: parseInt(process.env.AIMEMORY_L1_BATCH || '6', 10),                          // 每轮处理几个会话
+  maxAttempts: parseInt(process.env.AIMEMORY_L1_MAX_ATTEMPTS || '3', 10),             // 单会话重试上限
+  intervalMs: parseInt(process.env.AIMEMORY_L1_INTERVAL_MS || '60000', 10),           // 轮询间隔
+  digestBudget: parseInt(process.env.AIMEMORY_L1_BUDGET || '24000', 10),              // 摘要输入预算
+  maxTokens: parseInt(process.env.AIMEMORY_L1_MAX_TOKENS || '8000', 10),              // 摘要输出上限
+  timeoutMs: parseInt(process.env.AIMEMORY_L1_TIMEOUT_MS || '240000', 10),            // 单会话 LLM 超时
+};
+
 // ===== L2 事实记忆：冲突消解与派生（详见 docs/L2-事实记忆与冲突消解.md）=====
 // reconcile：写入时与已有记忆比对（ADD/UPDATE/DELETE/NOOP），避免同一事实反复入库、新旧取值并存。
 // derive：从 L1 会话摘要派生事实，补齐「上层可从 L0 重放」的派生链。
@@ -129,6 +140,7 @@ module.exports = {
   publicBaseUrl: (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, ''),
   embedding,
   llm,
+  l1,
   l2,
   l3,
   // ===== 单用户身份（个人部署） =====

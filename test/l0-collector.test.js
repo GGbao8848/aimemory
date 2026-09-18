@@ -585,3 +585,26 @@ test('zcode：同一记录更新两次 = 同 rid 两个版本（L1 取最大版�
 });
 
 module.exports = {};
+
+// ===== dry-run（部署前预览，零副作用） =====
+
+test('--dry-run：子进程跑通、输出预览 JSON、真实 state 目录零触碰', () => {
+  const { execFileSync } = require('node:child_process');
+  const stateDir = tmpdir('dry-state');
+  const out = execFileSync('node', ['collector/index.js', '--dry-run'], {
+    cwd: path.join(__dirname, '..'),
+    env: {
+      ...process.env,
+      AIMEMORY_COLLECTOR_AGENTS: 'nope-agent',
+      AIMEMORY_COLLECTOR_DIR: stateDir,
+    },
+    encoding: 'utf8',
+  });
+  const parsed = JSON.parse(out);
+  assert.equal(parsed.mode, 'dry-run');
+  assert.ok(Array.isArray(parsed.agents) && parsed.agents.includes('nope-agent'));
+  assert.equal(parsed.summary.records, 0, '未知 agent 应被跳过（0 条）');
+  assert.ok(!('nope-agent' in parsed.summary.agents), '未知 agent 应被跳过、不产生摘要键');
+  // 真实 state 目录零触碰：dry-run 的临时 state 在 os.tmpdir，配置的 stateDir 不应产生任何文件
+  assert.deepEqual(fs.readdirSync(stateDir), [], `stateDir 应为空，实际：${fs.readdirSync(stateDir)}`);
+});
