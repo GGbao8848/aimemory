@@ -229,12 +229,28 @@ async function searchMemories({ userId, query, limit = 10, threshold = 0, filter
       )
       .all(userId, ...fparams);
   }
-  // 4. 关键词二次过滤：每个查询词都必须出现在 text / facts / entities 中（覆盖中文短词、事实与实体命中）
-  ftsRows = ftsRows.filter((m) => {
+
+  // 4a. 严格 AND 过滤（高精度：每个查询词都必须出现）
+  let ftsFiltered = ftsRows.filter((m) => {
     const hay = `${m.text}\n${m.facts || ''}\n${m.entities || ''}`;
     return words.every((w) => hay.includes(w));
   });
 
+  // 4b. OR 计分兜底（基线教训：中文自然语言查询「部署在哪台机器」整句不逐字出现时，
+  //     严格过滤得 0 结果、命中率 3.8%）。做法：查询切词根（CJK 滑窗 + 拉丁词），
+  //     按不同词根命中数排序兜底——宁可宽一点，也不能对用户的自然语言问句交白卷。
+  if (!ftsFiltered.length) {
+    const tokens = searchTokens(q);
+    if (tokens.length) {
+      ftsFiltered = ftsRows
+        .map((m) => {
+          const hay = `${m.text}\n${m.facts || ''}\n${m.entities || ''}`.toLowerCase();
+          return { ...m, _score: tokens.filter((t) => hay.includes(t)).length };
+        })
+        .filter((m) => m._score > 0)
+        .sort((a, b) => (b._score - a._score) || String(b.updated_at).localeCompare(String(a.updated_at)));
+    }
+  }
   // 5. 合并：向量召回优先（语义命中排前），再补关键词字面命中；score 单一来源
   const seen = new Set();
   const merged = [];
@@ -244,9 +260,23 @@ async function searchMemories({ userId, query, limit = 10, threshold = 0, filter
     merged.push({ ...m, score: Number(score.toFixed(4)) });
   };
   for (const m of vecCandidates) push(m, m.similarity);
-  for (const m of ftsRows) push(m, m.score ?? 0);
+  for (const m of ftsFiltered) push(m, m.score ?? 0);
 
   return merged.slice(0, limit).map(toObj);
+}
+
+/** 检索词根：查询切 CJK 滑窗（步长 1，真实词不对齐固定步长）+ 拉丁词，小写归一 */
+function searchTokens(q) {
+  const ql = String(q || '').toLowerCase();
+  const out = new Set();
+  for (const run of ql.match(/[\u3400-\u9fff]{2,}/g) || []) {
+    if (run.length <= 4) out.add(run);
+    else for (let i = 0; i + 2 <= run.length; i += 1) out.add(run.slice(i, i + 2));
+  }
+  for (const w of ql.match(/[a-z0-9][a-z0-9._:/-]*/g) || []) {
+    if (w.length >= 2) out.add(w);
+  }
+  return [...out];
 }
 
 /** 向量候选：查询向量化后取 topN。优先走 sqlite-vec 索引，不可用时退回全扫 + JS 余弦。 */
