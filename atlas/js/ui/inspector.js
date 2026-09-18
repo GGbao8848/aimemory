@@ -47,10 +47,15 @@ export function createInspector(graph, { onSelect, onRequestClose }) {
         out.push(['记忆条目', nf.format(m.stats?.memories || 0)]);
         out.push(['生效 Token', String(m.keys?.active ?? m.stats?.keys ?? 0)]);
         break;
-      case 'l2_mem':
+      case 'l2_mem': {
         out.push(['记忆条目', nf.format(m.stats?.memories || 0)]);
         out.push(['提炼队列', `${(ev.pending || 0) + (ev.processing || 0)} 待处理`]);
+        const ops = m.l2?.ops || {};
+        if (ops.total) {
+          out.push(['近 30 天消解', `新增 ${ops.ADD || 0} · 更新 ${ops.UPDATE || 0} · 取代 ${ops.DELETE || 0} · 去重 ${ops.NOOP || 0}`]);
+        }
         break;
+      }
       case 'l2_events':
         out.push(['待处理', String(ev.pending || 0)]);
         out.push(['处理中', String(ev.processing || 0)]);
@@ -100,10 +105,20 @@ export function createInspector(graph, { onSelect, onRequestClose }) {
         out.push(['状态', m.health?.embedding === null ? '未启用' : m.health?.embedding ? '正常' : '不可用']);
         out.push(['降级', m.health?.embedding === false ? '已回退关键词' : '未触发']);
         break;
-      case 'l3':
-        out.push(['状态', '未建']);
-        out.push(['输入就绪', `L1 ${l1.done || 0} + L2 ${nf.format(m.stats?.memories || 0)}`]);
+      case 'l3': {
+        // L3 已建（一阶段）：从遥测的 l3 字段取真实规模（/api/atlas/overview 提供）
+        const l3 = m.l3 || {};
+        out.push(['生效条目', nf.format(l3.active || 0)]);
+        out.push(['已被取代', nf.format(l3.superseded || 0)]);
+        if (l3.last_update) {
+          out.push(['最近更新', fmtAge((Date.now() - Date.parse(l3.last_update)) / 60000) || '—']);
+        }
+        const parts = Object.entries(l3.byKind || {})
+          .map(([k, v]) => `${v.label || k} ${v.active || 0}`)
+          .join(' · ');
+        if (parts) out.push(['分 Kind', parts]);
         break;
+      }
       default:
         break;
     }
