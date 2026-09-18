@@ -3,8 +3,8 @@
 /**
  * 采集器配置。
  *
- * 优先级：环境变量 > 配置文件（默认 ~/.aimemory-collector/config.json）。
- * 配置文件由安装流程（skill / connect）写入，含服务端地址与本机 Token。
+ * 优先级：环境变量 > collector/.env > 配置文件（默认 ~/.aimemory-collector/config.json）。
+ * 配置文件由安装流程（skill / connect）写入，含服务端地址与本机 Token；.env 由部署者手工维护。
  *
  * 采集器是"死程序"：它只知道「从哪读、往哪传」，不知道对方是哪种 agent
  * （那是 adapter 的事），也不做任何提炼/embedding。
@@ -17,12 +17,30 @@ const path = require('path');
 const DEFAULT_DIR = path.join(os.homedir(), '.aimemory-collector');
 const DEFAULT_CONFIG = path.join(DEFAULT_DIR, 'config.json');
 
+/**
+ * 加载采集器自己的 .env（collector/.env；AIMEMORY_COLLECTOR_DOTENV 可覆盖路径）。
+ * 只填 process.env 里缺失的键——优先级：真环境变量 > .env > config.json > 默认值。
+ * 与服务端 src/config.js 的 loadEnv 同款行为；文件不存在是常态（安装流走 config.json），静默跳过。
+ */
+function loadDotenv(file = process.env.AIMEMORY_COLLECTOR_DOTENV || path.join(__dirname, '.env')) {
+  try {
+    const content = fs.readFileSync(file, 'utf8');
+    for (const line of content.split('\n')) {
+      const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
+      if (m && !(m[1] in process.env)) {
+        process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
+      }
+    }
+  } catch { /* 无 .env：由 config.json / 默认值接管 */ }
+}
+
 function loadConfigFile() {
   const p = process.env.AIMEMORY_COLLECTOR_CONFIG || DEFAULT_CONFIG;
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return {}; }
 }
 
 function buildConfig() {
+  loadDotenv();
   const file = loadConfigFile();
   const stateDir = process.env.AIMEMORY_COLLECTOR_DIR || file.state_dir || DEFAULT_DIR;
   const agents = process.env.AIMEMORY_COLLECTOR_AGENTS

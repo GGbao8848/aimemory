@@ -608,3 +608,27 @@ test('--dry-run：子进程跑通、输出预览 JSON、真实 state 目录零�
   // 真实 state 目录零触碰：dry-run 的临时 state 在 os.tmpdir，配置的 stateDir 不应产生任何文件
   assert.deepEqual(fs.readdirSync(stateDir), [], `stateDir 应为空，实际：${fs.readdirSync(stateDir)}`);
 });
+
+// ===== collector .env 加载（优先级：真环境变量 > .env > config.json > 默认值） =====
+
+test('collector .env：缺省静默跳过；加载进配置；真环境变量优先于 .env', () => {
+  const { execFileSync } = require('node:child_process');
+  const dir = tmpdir('dotenv');
+  const envFile = path.join(dir, 'c.env');
+  fs.writeFileSync(envFile, 'AIMEMORY_POLL_MS=7777\nAIMEMORY_SERVER_URL=http://dotenv-host:1\n');
+
+  const run = (extraEnv) => JSON.parse(execFileSync('node', ['-e',
+    'const { buildConfig } = require(process.cwd() + "/collector/config");'
+    + 'const c = buildConfig();'
+    + 'console.log(JSON.stringify({ poll: c.pollIntervalMs, server: c.serverUrl }));',
+  ], {
+    cwd: path.join(__dirname, '..'),
+    encoding: 'utf8',
+    env: { ...process.env, ...extraEnv, AIMEMORY_COLLECTOR_DOTENV: envFile },
+  }));
+
+  // .env 值生效（config.json 若存在其值更低）
+  assert.deepEqual(run({}), { poll: 7777, server: 'http://dotenv-host:1' });
+  // 真环境变量 > .env
+  assert.deepEqual(run({ AIMEMORY_POLL_MS: '9999' }), { poll: 9999, server: 'http://dotenv-host:1' });
+});
