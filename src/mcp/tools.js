@@ -18,6 +18,7 @@ const { McpError, ErrorCode, ListToolsRequestSchema, CallToolRequestSchema } =
   require('@modelcontextprotocol/sdk/types.js');
 const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
 const repo = require('../db/repo');
+const llm = require('../llm/client');
 const l3recall = require('../l3/recall');
 
 function jsonText(obj) {
@@ -66,6 +67,11 @@ const tools = [
     },
     handler: async ({ text, messages, metadata }, userId) => {
       const uid = userId;
+      // LLM 关闭时写入无法受理：必须是 isError 执行错误（给部署建议与替代动作），而非协议错误
+      if (!llm.enabled()) {
+        throw toolError('LLM 提炼服务未启用（LLM_ENABLED=0），写入无法受理——'
+          + '请让部署者在 .env 设置 LLM_ENABLED=1 并重启；或先用 search_memories 查询已有记忆。');
+      }
       if ((!text || !String(text).trim()) && !(Array.isArray(messages) && messages.length)) {
         throw toolError('缺少素材：请提供 text（单条素材）或 messages（多轮对话），二者至少其一。')
       }

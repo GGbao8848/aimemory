@@ -39,6 +39,20 @@ test('业务错误（id 不存在）→ isError 结果且给下一步建议', as
   assert.ok(out.content[0].text.includes('get_memories'), '应建议用 get_memories 找有效 id');
 });
 
+test('LLM 关闭时 add_memory → isError 执行错误（非协议错误），给部署建议与替代动作', async () => {
+  const llm = require('../src/llm/client');
+  const orig = llm.enabled;
+  llm.enabled = () => false;
+  try {
+    const out = await callTool('add_memory', { text: '验收素材' }, 'owner');
+    assert.equal(out.isError, true, '业务不可用应以 isError 结果返回');
+    assert.ok(out.content[0].text.includes('LLM_ENABLED'), '文案应指向配置项');
+    assert.ok(out.content[0].text.includes('search_memories'), '应给替代动作建议');
+  } finally {
+    llm.enabled = orig;
+  }
+});
+
 test('正常路径不受影响：合法调用仍返回结果（非 isError）', async () => {
   // search_memories 空库也返回正常结果
   const out = await callTool('search_memories', { query: '随便' }, 'owner');
