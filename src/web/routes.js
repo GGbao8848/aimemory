@@ -333,6 +333,12 @@ apiRouter.get('/l3/entries', requireAuth, wrap(async (req, res) => {
   });
 }));
 
+/** 变更历史：active 条目 + 被其取代的旧版链（纯读；孤儿链单独暴露供排查） */
+apiRouter.get('/l3/history', requireAuth, wrap(async (req, res) => {
+  const l3Store = require('../l3/store');
+  res.json(l3Store.entryHistory());
+}));
+
 /** 人工编辑正文（双时间轴与来源不动；被取代状态需人工改文件复原） */
 apiRouter.put('/l3/entries/:id', requireAuth, wrap(async (req, res) => {
   const l3Store = require('../l3/store');

@@ -163,3 +163,30 @@ test('l3Stats 输出 active 条目的平均有效置信度', () => {
   assert.ok(typeof s.effective_confidence === 'number' && s.effective_confidence > 0.6, '平均有效置信应在区间内');
   assert.ok(typeof s.byKind.profile.effective_confidence === 'number');
 });
+
+// ===== 变更历史视图（entryHistory，供 /api/l3/history） =====
+
+test('entryHistory：多步取代链归到现行条目下，孤儿单独暴露', () => {
+  const a = store.appendEntry({ kind: 'constraints', text: '旧版一：部署在内网。' });
+  const b = store.appendEntry({ kind: 'constraints', text: '旧版二：部署端口改为 18543。' });
+  const c = store.appendEntry({ kind: 'constraints', text: '现行：部署端口 18543，仅内网。' });
+  // 注意 appendEntry 返回的是 id 字符串（不是对象）
+  store.markSuperseded(a, b);
+  store.markSuperseded(b, c);
+  // 无变更史的 active 不进视图
+  store.appendEntry({ kind: 'profile', text: '偏好简洁回复。' });
+  // 孤儿：取代者不存在（人工改文件改坏链的场景）
+  const orphan = store.appendEntry({ kind: 'lessons', text: '教训：先真跑再交付。' });
+  store.markSuperseded(orphan, 'ghost000');
+
+  const h = store.entryHistory();
+  assert.equal(h.chains.length, 1, '只有一条有变更史的链');
+  const chain = h.chains[0];
+  assert.equal(chain.active.id, c, '链头是现行条目');
+  assert.equal(chain.depth, 2);
+  assert.deepEqual(new Set(chain.history.map((e) => e.id)), new Set([a, b]),
+    '旧版一/二都在历史里（含间接取代）');
+  assert.equal(h.orphans.length, 1, '指向 ghost 的孤儿被暴露');
+  assert.equal(h.orphans[0].id, orphan);
+  assert.equal(h.active_total, 2, '现行条目 = 现行约束 + 画像（孤儿原条目已被标记取代，不计）');
+});

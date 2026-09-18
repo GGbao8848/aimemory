@@ -6,54 +6,342 @@
     "description": "个人自托管 AI 记忆服务。鉴权：Authorization: Token m0-xxx（API key）或 aim_session cookie（Web 口令登录）；除标注「公开」外全部需要鉴权。请求/响应主体为 JSON；schemas 按需渐进补全，本契约当前承诺「路径与方法集」与实现一致（由 test/api-contract.test.js 守护）。",
     "x-data-model": "L0 原始会话归档（append-only）→ L1 会话摘要 → L2 事实记忆（memories，冲突消解）→ L3 画像/知识（data/l3 markdown）"
   },
-  "servers": [{ "url": "/" }],
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
   "tags": [
-    { "name": "system" }, { "name": "L0" }, { "name": "L1" }, { "name": "L2" }, { "name": "L3" },
-    { "name": "memories" }, { "name": "keys" }, { "name": "atlas" }, { "name": "connect" }
+    {
+      "name": "system"
+    },
+    {
+      "name": "L0"
+    },
+    {
+      "name": "L1"
+    },
+    {
+      "name": "L2"
+    },
+    {
+      "name": "L3"
+    },
+    {
+      "name": "memories"
+    },
+    {
+      "name": "keys"
+    },
+    {
+      "name": "atlas"
+    },
+    {
+      "name": "connect"
+    },
+    {
+      "name": "l3",
+      "description": "L3 画像/知识层"
+    }
   ],
   "paths": {
-    "/healthz": { "get": { "tags": ["system"], "summary": "健康探针（公开）", "description": "db / llm / embedding 连通性" } },
+    "/healthz": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "健康探针（公开）",
+        "description": "db / llm / embedding 连通性"
+      }
+    },
     "/mcp": {
-      "post": { "tags": ["system"], "summary": "MCP Streamable HTTP 端点" },
-      "get": { "tags": ["system"], "summary": "MCP 端点信息" }
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "MCP Streamable HTTP 端点"
+      },
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "MCP 端点信息"
+      }
     },
-    "/api/openapi.json": { "get": { "tags": ["system"], "summary": "本契约（公开直出）" } },
-    "/api/me": { "get": { "tags": ["system"], "summary": "当前身份" } },
-    "/api/stats": { "get": { "tags": ["memories"], "summary": "记忆与密钥计数" } },
+    "/api/openapi.json": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "本契约（公开直出）"
+      }
+    },
+    "/api/me": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "当前身份"
+      }
+    },
+    "/api/stats": {
+      "get": {
+        "tags": [
+          "memories"
+        ],
+        "summary": "记忆与密钥计数"
+      }
+    },
     "/api/memories": {
-      "get": { "tags": ["memories"], "summary": "分页列出记忆", "description": "filters 支持 metadata 键值与 created_at/updated_at 时间范围" },
-      "post": { "tags": ["memories"], "summary": "受理素材（text/messages）", "description": "异步：返回 event_id，后台 LLM 提炼 + 冲突消解后入库；提炼失败不落库" }
+      "get": {
+        "tags": [
+          "memories"
+        ],
+        "summary": "分页列出记忆",
+        "description": "filters 支持 metadata 键值与 created_at/updated_at 时间范围"
+      },
+      "post": {
+        "tags": [
+          "memories"
+        ],
+        "summary": "受理素材（text/messages）",
+        "description": "异步：返回 event_id，后台 LLM 提炼 + 冲突消解后入库；提炼失败不落库"
+      }
     },
-    "/api/memories/export": { "get": { "tags": ["memories"], "summary": "导出全量记忆（JSON）" } },
+    "/api/memories/export": {
+      "get": {
+        "tags": [
+          "memories"
+        ],
+        "summary": "导出全量记忆（JSON）"
+      }
+    },
     "/api/memories/{id}": {
-      "get": { "tags": ["memories"], "summary": "读取单条记忆" },
-      "delete": { "tags": ["memories"], "summary": "删除单条记忆" }
+      "get": {
+        "tags": [
+          "memories"
+        ],
+        "summary": "读取单条记忆"
+      },
+      "delete": {
+        "tags": [
+          "memories"
+        ],
+        "summary": "删除单条记忆"
+      }
     },
-    "/api/events/{id}": { "get": { "tags": ["memories"], "summary": "查询异步素材任务状态", "description": "status: pending|processing|done|failed；done 回执含 count/memories/ops（消解明细）" } },
+    "/api/events/{id}": {
+      "get": {
+        "tags": [
+          "memories"
+        ],
+        "summary": "查询异步素材任务状态",
+        "description": "status: pending|processing|done|failed；done 回执含 count/memories/ops（消解明细）"
+      }
+    },
     "/api/keys": {
-      "get": { "tags": ["keys"], "summary": "列出 API Token" },
-      "post": { "tags": ["keys"], "summary": "签发 API Token（返回明文 m0-xxx）" }
+      "get": {
+        "tags": [
+          "keys"
+        ],
+        "summary": "列出 API Token"
+      },
+      "post": {
+        "tags": [
+          "keys"
+        ],
+        "summary": "签发 API Token（返回明文 m0-xxx）"
+      }
     },
-    "/api/keys/{id}/revoke": { "post": { "tags": ["keys"], "summary": "吊销 API Token" } },
-    "/api/l0/ingest": { "post": { "tags": ["L0"], "summary": "采集器批次上传", "description": "幂等（批次指纹 + 记录级去重），body 上限 64mb，设备三元组定位归档文件" } },
-    "/api/l0/stats": { "get": { "tags": ["L0"], "summary": "归档统计 + 设备/会话清单" } },
-    "/api/l0/session": { "get": { "tags": ["L0"], "summary": "单会话归档详情" } },
-    "/api/l1/summaries": { "get": { "tags": ["L1"], "summary": "会话摘要清单", "description": "可按 device/agent 过滤，按会话最后时间倒序" } },
-    "/api/l1/stats": { "get": { "tags": ["L1"], "summary": "摘要进度统计" } },
-    "/api/l1/run": { "post": { "tags": ["L1"], "summary": "手动触发一轮摘要" } },
-    "/api/l2/stats": { "get": { "tags": ["L2"], "summary": "派生进度 + 四操作计数 + 向量层状态" } },
-    "/api/l2/ops": { "get": { "tags": ["L2"], "summary": "冲突消解审计（最新在前）", "description": "DELETE 记录被删原文可复原；applied=0 表示被安全阀拦下" } },
-    "/api/l2/sources": { "get": { "tags": ["L2"], "summary": "派生明细（哪些会话派生过）" } },
-    "/api/l2/run": { "post": { "tags": ["L2"], "summary": "手动触发一轮 L2 派生" } },
-    "/api/l2/vec/rebuild": { "post": { "tags": ["L2"], "summary": "重建向量索引", "description": "换 embedding 模型导致维度变化时必须；reset=true 先清表" } },
-    "/api/l3/entries": { "get": { "tags": ["L3"], "summary": "条目清单", "description": "?kind=profile|constraints|lessons；?include_superseded=1 连被取代的一起返回；每条带 effective_confidence（时效衰减视图）" } },
-    "/api/l3/entries/{id}": { "put": { "tags": ["L3"], "summary": "人工编辑条目正文", "description": "created_at/valid_from 不动，updated_at 刷新" } },
-    "/api/l3/run": { "post": { "tags": ["L3"], "summary": "手动触发一轮凝练", "description": "force=true 时无新增也取最近会话跑" } },
-    "/api/l3/stats": { "get": { "tags": ["L3"], "summary": "条目规模统计（含待凝练数与平均有效置信）" } },
-    "/api/atlas/overview": { "get": { "tags": ["atlas"], "summary": "星图聚合概览", "description": "一次往返取齐 L0/L1/L2/L3 规模、积压、连通性" } },
-    "/api/connect/start": { "post": { "tags": ["connect"], "summary": "设备流：发起连接请求（匿名）" } },
-    "/api/connect/poll": { "get": { "tags": ["connect"], "summary": "设备流：轮询授权结果" } },
-    "/api/connect/confirm": { "post": { "tags": ["connect"], "summary": "设备流：确认授权" } }
+    "/api/keys/{id}/revoke": {
+      "post": {
+        "tags": [
+          "keys"
+        ],
+        "summary": "吊销 API Token"
+      }
+    },
+    "/api/l0/ingest": {
+      "post": {
+        "tags": [
+          "L0"
+        ],
+        "summary": "采集器批次上传",
+        "description": "幂等（批次指纹 + 记录级去重），body 上限 64mb，设备三元组定位归档文件"
+      }
+    },
+    "/api/l0/stats": {
+      "get": {
+        "tags": [
+          "L0"
+        ],
+        "summary": "归档统计 + 设备/会话清单"
+      }
+    },
+    "/api/l0/session": {
+      "get": {
+        "tags": [
+          "L0"
+        ],
+        "summary": "单会话归档详情"
+      }
+    },
+    "/api/l1/summaries": {
+      "get": {
+        "tags": [
+          "L1"
+        ],
+        "summary": "会话摘要清单",
+        "description": "可按 device/agent 过滤，按会话最后时间倒序"
+      }
+    },
+    "/api/l1/stats": {
+      "get": {
+        "tags": [
+          "L1"
+        ],
+        "summary": "摘要进度统计"
+      }
+    },
+    "/api/l1/run": {
+      "post": {
+        "tags": [
+          "L1"
+        ],
+        "summary": "手动触发一轮摘要"
+      }
+    },
+    "/api/l2/stats": {
+      "get": {
+        "tags": [
+          "L2"
+        ],
+        "summary": "派生进度 + 四操作计数 + 向量层状态"
+      }
+    },
+    "/api/l2/ops": {
+      "get": {
+        "tags": [
+          "L2"
+        ],
+        "summary": "冲突消解审计（最新在前）",
+        "description": "DELETE 记录被删原文可复原；applied=0 表示被安全阀拦下"
+      }
+    },
+    "/api/l2/sources": {
+      "get": {
+        "tags": [
+          "L2"
+        ],
+        "summary": "派生明细（哪些会话派生过）"
+      }
+    },
+    "/api/l2/run": {
+      "post": {
+        "tags": [
+          "L2"
+        ],
+        "summary": "手动触发一轮 L2 派生"
+      }
+    },
+    "/api/l2/vec/rebuild": {
+      "post": {
+        "tags": [
+          "L2"
+        ],
+        "summary": "重建向量索引",
+        "description": "换 embedding 模型导致维度变化时必须；reset=true 先清表"
+      }
+    },
+    "/api/l3/entries": {
+      "get": {
+        "tags": [
+          "L3"
+        ],
+        "summary": "条目清单",
+        "description": "?kind=profile|constraints|lessons；?include_superseded=1 连被取代的一起返回；每条带 effective_confidence（时效衰减视图）"
+      }
+    },
+    "/api/l3/entries/{id}": {
+      "put": {
+        "tags": [
+          "L3"
+        ],
+        "summary": "人工编辑条目正文",
+        "description": "created_at/valid_from 不动，updated_at 刷新"
+      }
+    },
+    "/api/l3/run": {
+      "post": {
+        "tags": [
+          "L3"
+        ],
+        "summary": "手动触发一轮凝练",
+        "description": "force=true 时无新增也取最近会话跑"
+      }
+    },
+    "/api/l3/stats": {
+      "get": {
+        "tags": [
+          "L3"
+        ],
+        "summary": "条目规模统计（含待凝练数与平均有效置信）"
+      }
+    },
+    "/api/atlas/overview": {
+      "get": {
+        "tags": [
+          "atlas"
+        ],
+        "summary": "星图聚合概览",
+        "description": "一次往返取齐 L0/L1/L2/L3 规模、积压、连通性"
+      }
+    },
+    "/api/connect/start": {
+      "post": {
+        "tags": [
+          "connect"
+        ],
+        "summary": "设备流：发起连接请求（匿名）"
+      }
+    },
+    "/api/connect/poll": {
+      "get": {
+        "tags": [
+          "connect"
+        ],
+        "summary": "设备流：轮询授权结果"
+      }
+    },
+    "/api/connect/confirm": {
+      "post": {
+        "tags": [
+          "connect"
+        ],
+        "summary": "设备流：确认授权"
+      }
+    },
+    "/api/l3/history": {
+      "get": {
+        "tags": [
+          "l3"
+        ],
+        "summary": "L3 变更历史",
+        "description": "每个 active 条目 + 被其直接/间接取代的旧版链（新→旧）；orphan 孤儿链单独暴露。纯读。",
+        "responses": {
+          "200": {
+            "description": "变更历史视图",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
   },
   "x-exempt-notes": "HTML 页面（/、/admin、/auth/login、/connect）与 /skill/* 静态资源不属于 REST 契约。"
 }

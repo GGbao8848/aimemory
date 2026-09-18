@@ -200,6 +200,43 @@ function markSuperseded(oldId, newId) {
   return true;
 }
 
+/**
+ * 变更历史视图（纯读）：每个 active 条目配一条「被其直接/间接取代」的旧版链，
+ * 链内按 updated_at 新→旧（最近改动在前）。无变更史的 active 不进视图（输出保持聚焦）。
+ * 孤儿（指向不存在的取代者）单独暴露——正常数据不该有，出现即说明人工改文件时改坏了链。
+ */
+function entryHistory() {
+  const all = listEntries({ includeSuperseded: true });
+  const byId = new Map(all.map((e) => [e.id, e]));
+  const inChain = new Set();
+  const chains = [];
+  for (const active of all) {
+    if (active.superseded_by) continue; // 只从链头（仍成立的条目）建链
+    const history = [];
+    const seen = new Set();
+    let frontier = [active.id];
+    while (frontier.length) {
+      const next = [];
+      for (const id of frontier) {
+        for (const cand of all) {
+          if (cand.superseded_by === id && !seen.has(cand.id)) {
+            seen.add(cand.id);
+            history.push(cand);
+            next.push(cand.id);
+          }
+        }
+      }
+      frontier = next;
+    }
+    if (!history.length) continue;
+    history.sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+    for (const h of history) inChain.add(h.id);
+    chains.push({ active, history, depth: history.length });
+  }
+  const orphans = all.filter((e) => e.superseded_by && !byId.has(e.superseded_by) && !inChain.has(e.id));
+  return { chains, orphans, total: all.length, active_total: all.filter((e) => !e.superseded_by).length };
+}
+
 /** 人工编辑正文（updated_at 刷新；来源与双时间轴不动） */
 function updateBody(id, text) {
   const entry = getEntry(id);
@@ -268,5 +305,6 @@ function l3Stats() {
 module.exports = {
   KINDS, parseAttrs, readKind, serializeKind, effectiveConfidence,
   listEntries, getEntry, appendEntry, markSuperseded, updateBody, removeEntry, l3Stats,
+  entryHistory,
   MAX_TEXT,
 };
