@@ -180,6 +180,15 @@ function demoModel() {
     keys: { active: 3 },
     events: { pending: 1, processing: 1, done: 912, failed: 4 },
     l1: { total: 129, done: 118, pending: 6, running: 1, failed: 4, last_run: new Date(now - 6 * MIN).toISOString() },
+    // L3 演示量级按真实起步规模给（少量条目），避免误导对规模的判断
+    l3: {
+      active: 9, superseded: 3, last_update: new Date(now - 52 * MIN).toISOString(),
+      byKind: {
+        profile: { active: 3, superseded: 1, label: '用户画像' },
+        constraints: { active: 4, superseded: 1, label: '项目约束' },
+        lessons: { active: 2, superseded: 1, label: '经验教训' },
+      },
+    },
     l0: {
       batches: 742,
       sessions: 129,

@@ -15,9 +15,8 @@ export const RINGS = [
     radius: 96,
     label: 'L3',
     name: '画像／知识',
-    note: '待建 · 双时间轴 · 从 L1+L2 长期凝练',
-    state: 'pending',
-    dash: true,
+    note: '双时间轴 · 从 L1+L2 长期凝练',
+    state: 'live',
     labelAngle: 62,
   },
   {
@@ -92,23 +91,24 @@ export const NODES = [
   {
     id: 'l3',
     label: 'L3 画像／知识',
-    sub: '待建',
+    sub: '双时间轴',
     ring: 'l3',
     angle: 90,
     radius: 96,
-    kind: 'pending',
+    kind: 'store',
     accent: '#8b9dc3',
-    metric: null,
+    metric: 'l3.active',
+    metricLabel: '条',
     info: {
       role: '长期凝练的用户画像 / 项目约束 / 经验教训。低频、高价值。',
-      files: ['docs/四层记忆架构与进展.md'],
-      endpoints: [],
+      files: ['src/l3/store.js', 'src/l3/scheduler.js', 'docs/L3-画像与知识层.md'],
+      endpoints: ['GET /api/l3/entries', 'PUT /api/l3/entries/:id', 'POST /api/l3/run'],
       params: [
-        ['输入', 'L1 摘要 + L2 事实记忆'],
+        ['输入', '新消化的 L1 摘要（攒够 5 个跑一轮，低频）'],
         ['关键设计', '双时间轴（事实何时为真 / 何时入库）'],
         ['旧事实', '不删，标记 superseded'],
       ],
-      note: '形态可先轻量：Markdown 起步，人工可审阅可编辑。',
+      note: 'data/l3/ 下的 Markdown 文件，人工可审阅可编辑；后台凝练与手改合并共存。',
     },
   },
 
@@ -137,6 +137,7 @@ export const NODES = [
   },
   {
     id: 'l2_fts',
+    minor: true,
     label: 'FTS5 trigram',
     sub: '关键词召回',
     ring: 'l2',
@@ -159,6 +160,7 @@ export const NODES = [
   },
   {
     id: 'l2_vec',
+    minor: true,
     label: '向量召回',
     sub: '余弦相似 · float32 BLOB',
     ring: 'l2',
@@ -180,6 +182,7 @@ export const NODES = [
   },
   {
     id: 'l2_search',
+    minor: true,
     label: '混合检索',
     sub: '双路召回融合',
     ring: 'l2',
@@ -201,6 +204,7 @@ export const NODES = [
   },
   {
     id: 'l2_events',
+    minor: true,
     label: 'events 队列',
     sub: '202 受理 · 串行提炼',
     ring: 'l2',
@@ -226,6 +230,7 @@ export const NODES = [
   // ---------- L1 会话摘要 ----------
   {
     id: 'l1_sched',
+    minor: true,
     label: 'L1 调度器',
     sub: '静默 5min + 指纹判变',
     ring: 'l1',
@@ -250,6 +255,7 @@ export const NODES = [
   },
   {
     id: 'l1_comp',
+    minor: true,
     label: '预算化压缩',
     sub: '滤系统注入 · 工具合并',
     ring: 'l1',
@@ -321,6 +327,7 @@ export const NODES = [
   },
   {
     id: 'l0_rec',
+    minor: true,
     label: 'l0_records',
     sub: '记录级去重 (rid, version)',
     ring: 'l0',
@@ -344,6 +351,7 @@ export const NODES = [
   },
   {
     id: 'l0_batch',
+    minor: true,
     label: 'l0_batches',
     sub: '批次指纹 _bid 幂等',
     ring: 'l0',
@@ -368,6 +376,7 @@ export const NODES = [
   // ---------- 接入面 ----------
   {
     id: 'ingest',
+    minor: true,
     label: 'POST /api/l0/ingest',
     sub: '采集上传 · body 上限 64mb',
     ring: 'edge',
@@ -391,6 +400,7 @@ export const NODES = [
   },
   {
     id: 'devflow',
+    minor: true,
     label: '设备流授权',
     sub: '零粘贴签发 Token',
     ring: 'edge',
@@ -414,6 +424,7 @@ export const NODES = [
   },
   {
     id: 'auth',
+    minor: true,
     label: 'Token 鉴权',
     sub: 'sha256 · 多枚并存',
     ring: 'edge',
@@ -543,7 +554,7 @@ export const LINKS = [
   { from: 'ingest', to: 'l0_file', kind: 'data', label: 'append jsonl', speed: 0.45, density: 5, weight: 1.2 },
 
   // L0 → L1（重放）
-  { from: 'l0_file', to: 'l1_sched', kind: 'derive', label: '按 rid+version 收敛', speed: 0.30, density: 3, weight: 1.15, bow: 40 },
+  { from: 'l0_file', to: 'l1_sched', kind: 'derive', label: '按 rid+version 收敛', speed: 0.30, density: 2, weight: 1.15, bow: 40 },
   { from: 'l0_rec', to: 'l1_sched', kind: 'derive', label: '内容指纹判变', speed: 0.34, density: 6, weight: 0.8, bow: 30 },
 
   // L1 内部
@@ -555,7 +566,7 @@ export const LINKS = [
 
   // 素材沉淀链（MCP 写）
   { from: 'mcp', to: 'l2_events', kind: 'data', label: 'add_memory → 202', speed: 0.75, density: 7, weight: 1.2, bow: 22 },
-  { from: 'l2_events', to: 'llm', kind: 'external', label: '素材提炼', speed: 0.40, density: 3, weight: 1.0, bow: 80 },
+  { from: 'l2_events', to: 'llm', kind: 'external', label: '素材提炼', speed: 0.40, density: 2, weight: 1.0, bow: 80 },
   { from: 'llm', to: 'l2_mem', kind: 'external', label: '结构化事实', speed: 0.44, density: 4, weight: 1.15, bow: 40 },
   { from: 'l2_mem', to: 'core', kind: 'data', label: '入库', speed: 0.6, density: 8, weight: 0.95, bow: 26 },
   { from: 'l2_mem', to: 'l2_fts', kind: 'derive', label: 'FTS 触发器', speed: 0.7, density: 10, weight: 0.8 },
@@ -581,8 +592,8 @@ export const LINKS = [
   { from: 'rest', to: 'l0_file', kind: 'query', label: '归档下钻', speed: 0.6, density: 4, weight: 0.7, bow: -50 },
 
   // L3 待建（虚线、不发光）
-  { from: 'l1_sum', to: 'l3', kind: 'pending', label: '长期凝练', speed: 0.18, density: 3, weight: 0.5, bow: 20 },
-  { from: 'l2_mem', to: 'l3', kind: 'pending', label: '长期凝练', speed: 0.18, density: 3, weight: 0.5, bow: -20 },
+  { from: 'l1_sum', to: 'l3', kind: 'derive', label: '长期凝练', speed: 0.18, density: 2, weight: 0.5, bow: 20 },
+  { from: 'l2_mem', to: 'l3', kind: 'derive', label: '长期凝练', speed: 0.18, density: 2, weight: 0.5, bow: -20 },
 ];
 
 /**

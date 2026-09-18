@@ -43,6 +43,9 @@ export function createLabels(graph, { onSelect, onHover, onRingClick }) {
     const el = document.createElement('div');
     el.className = 'nlabel';
     el.dataset.id = n.id;
+    // 标签两级制：minor 节点默认不显示标签（悬停/选中/链路追踪时浮现），
+    // 见 topology.js 的 minor 标注与 atlas.css 的 is-ghost 规则。
+    if (n.minor) el.classList.add('nlabel--minor');
 
     // 方位：一律朝圆心外侧排。各环标签因此落在各自的外侧环带里，
     // 不会像「外环标签朝内」那样全挤到中间那圈去。
@@ -160,6 +163,16 @@ export function createLabels(graph, { onSelect, onHover, onRingClick }) {
       el.style.display = '';
       const s = sizes.get(n.id) || { w: 130, h: 36 };
 
+      // 次要标签默认不显示、也不参与去重叠占位（否则 20 多个标签互相推挤，
+      // 主干标签会被顶得满屏跑）。浮现时机：悬停 / 选中 / 追踪高亮的成员。
+      if (n.minor) {
+        const force = el.classList.contains('is-hot')
+          || el.classList.contains('is-sel')
+          || (dimActive && !el.classList.contains('is-dim'));
+        el.classList.toggle('is-ghost', !force);
+        if (!force) continue;
+      }
+
       // 先把锚点沿径向外推，再按方位把标签盒摆到锚点旁边
       const [ux, uy] = el.dataset.radial.split(',').map(Number);
       const ax = sx + ux * RADIAL_PUSH;
@@ -221,8 +234,10 @@ export function createLabels(graph, { onSelect, onHover, onRingClick }) {
     for (const [nid, el] of els) el.classList.toggle('is-sel', nid === id);
   }
 
-  /** dim: Set<string> | null，null 表示全部正常 */
+  /** dim: Set<string> | null，null 表示全部正常。非空 = 链路追踪中（次要标签的成员要浮现） */
+  let dimActive = false;
   function setDim(set) {
+    dimActive = !!set;
     for (const [nid, el] of els) el.classList.toggle('is-dim', !!set && !set.has(nid));
   }
 

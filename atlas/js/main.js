@@ -413,7 +413,6 @@ function setHover(id) {
   if (hoverId === id) return;
   hoverId = id;
   labels.setHot(id);
-  $('cursor').classList.toggle('is-hot', !!id);
   markDirty();
 }
 
@@ -433,7 +432,6 @@ function select(id) {
 
 function bindPointer() {
   const stage = $('stage');
-  const cursor = $('cursor');
   let down = false;
   let moved = 0;
   let lastX = 0;
@@ -442,7 +440,6 @@ function bindPointer() {
 
   if (!window.matchMedia('(hover: hover)').matches) {
     document.body.classList.add('touch');
-    cursor.style.display = 'none';
   }
 
   stage.addEventListener('pointerdown', (e) => {
@@ -461,7 +458,6 @@ function bindPointer() {
     lastX = e.clientX;
     lastY = e.clientY;
     stage.setPointerCapture(e.pointerId);
-    cursor.classList.add('is-down');
   });
 
   stage.addEventListener('pointermove', (e) => {
@@ -486,21 +482,19 @@ function bindPointer() {
     // 星云视差
     renderer.state.mouse[0] = (e.clientX / window.innerWidth) * 2 - 1;
     renderer.state.mouse[1] = -((e.clientY / window.innerHeight) * 2 - 1);
-    cursor.style.transform = `translate3d(${e.clientX}px, ${e.clientY}px, 0)`;
   });
 
   const end = (e) => {
     if (onLabel) { onLabel = false; return; }
     if (!down) return;
     down = false;
-    cursor.classList.remove('is-down');
     if (moved <= 4) {
       const n = hitTest(e.clientX, e.clientY);
       select(n ? n.id : null);
     }
   };
   stage.addEventListener('pointerup', end);
-  stage.addEventListener('pointercancel', () => { down = false; onLabel = false; cursor.classList.remove('is-down'); });
+  stage.addEventListener('pointercancel', () => { down = false; onLabel = false; });
 
   stage.addEventListener('wheel', (e) => {
     e.preventDefault();

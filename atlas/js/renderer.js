@@ -295,7 +295,9 @@ export function createRenderer(canvas, { onContextLost } = {}) {
       const pending = l.kind === 'pending';
 
       const [r, gg, b] = LINK_COLORS[l.kind] || LINK_COLORS.data;
-      let alpha = (pending ? 0.22 : 0.16 + 0.5 * act) * (l.weight || 1);
+      // 基础透明度压低（0.16+0.5act → 0.08+0.34act）：三十条线常亮时视觉噪音过大，
+      // 让线路网退成背景；悬停/追踪的 hot 增强不变，需要看时依然醒目。
+      let alpha = (pending ? 0.13 : 0.08 + 0.34 * act) * (l.weight || 1);
       if (hot) alpha = Math.min(1.5, alpha * 3.0 + 0.62);
       if (dim) alpha *= 0.42;
 
