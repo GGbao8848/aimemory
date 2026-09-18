@@ -154,14 +154,31 @@ const tools = [
         query: { type: 'string', description: '当前任务描述，用于相关度排序与相关事实召回；可省略' },
         per_kind: { type: 'integer', minimum: 1, maximum: 12, description: '每类条目最多返回几条，默认 6' },
         facts: { type: 'integer', minimum: 0, maximum: 20, description: '相关 L2 事实条数，默认 5；0 = 不带事实' },
+        kinds: {
+          type: 'array',
+          items: { type: 'string', enum: l3recall.KIND_ORDER },
+          description: '只返回指定类别（如 ["constraints","lessons"]，开场只要约束/教训时省 token）；省略 = 全部三类',
+        },
       },
     },
-    handler: async ({ query = '', per_kind, facts }, userId) => {
+    handler: async ({ query = '', per_kind, facts, kinds }, userId) => {
+      let kindList = null;
+      if (kinds !== undefined) {
+        const bad = Array.isArray(kinds) ? kinds.filter((k) => !l3recall.KIND_ORDER.includes(k)) : null;
+        if (!Array.isArray(kinds) || bad === null) {
+          throw toolError('kinds 需为字符串数组，取值 profile / constraints / lessons，例如 ["constraints","lessons"]。');
+        }
+        if (bad.length) {
+          throw toolError(`kinds 含未知类别：${bad.join(', ')}——只支持 ${l3recall.KIND_ORDER.join(' / ')}，请修正后重试。`);
+        }
+        kindList = kinds;
+      }
       const r = await l3recall.recallContext({
         userId,
         query: String(query || ''),
         perKind: per_kind,
         facts,
+        kinds: kindList,
       });
       return { content: [{ type: 'text', text: jsonText(r) }] };
     },

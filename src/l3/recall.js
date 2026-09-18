@@ -41,11 +41,14 @@ function scoreText(text, tokens) {
 
 /**
  * 召回上下文。永不抛错（存储读不到就返回空组）。
- * @returns {Promise<{profile:Array,constraints:Array,lessons:Array,facts:Array}>}
+ * @param {Array<string>} [kinds] 只返回指定类别（profile/constraints/lessons 子集）；
+ *   省略/空/全未知 → 三类全量（坏输入在 MCP 层拦截并给自愈文案，这层只做宽容降级）。
+ * @returns {Promise<{profile?:Array,constraints?:Array,lessons?:Array,facts:Array}>}
  */
-async function recallContext({ userId, query = '', perKind = 6, facts = 5 } = {}) {
+async function recallContext({ userId, query = '', perKind = 6, facts = 5, kinds = null } = {}) {
   const tokens = extractTokens(query);
   const cap = Math.max(1, Math.min(Number(perKind) || 6, 12));
+  const want = Array.isArray(kinds) && kinds.length ? KIND_ORDER.filter((k) => kinds.includes(k)) : null;
 
   const groups = { profile: [], constraints: [], lessons: [] };
   for (const e of store.listEntries({ includeSuperseded: false })) {
@@ -59,7 +62,7 @@ async function recallContext({ userId, query = '', perKind = 6, facts = 5 } = {}
     });
   }
   const out = {};
-  for (const kind of KIND_ORDER) {
+  for (const kind of want && want.length ? want : KIND_ORDER) {
     out[kind] = groups[kind]
       .sort((a, b) => b._score - a._score || (b.confidence || 0) - (a.confidence || 0))
       .slice(0, cap)

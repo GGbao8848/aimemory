@@ -116,3 +116,32 @@ test('extractTokens：CJK 长串滑窗 + 拉丁词', () => {
   const t2 = extractTokens('这是一段比较长的中文描述用来验证滑窗切分逻辑');
   assert.ok(t2.length >= 4 && t2.every((w) => w.length >= 2));
 });
+
+// ===== kinds 过滤（评估轮 Q2：agent 开场只要约束/教训时省 token） =====
+
+test('kinds 过滤：只返回指定类别，未请求的类别不出现在输出里', async () => {
+  l3store.appendEntry({ kind: 'profile', text: '画像条目：偏好简洁。' });
+  l3store.appendEntry({ kind: 'constraints', text: '约束条目：端口 18543。' });
+
+  const r = await recallContext({ userId: u1, kinds: ['constraints'] });
+  assert.deepEqual(Object.keys(r).sort(), ['constraints', 'facts'], '输出只含请求类别 + facts');
+  assert.equal(r.constraints.length, 1);
+
+  const r2 = await recallContext({ userId: u1, kinds: ['constraints', 'lessons'] });
+  assert.deepEqual(Object.keys(r2).sort(), ['constraints', 'facts', 'lessons']);
+
+  // store 层宽容降级：全未知类别 → 三类全量（MCP 层负责拦截坏输入）
+  const r3 = await recallContext({ userId: u1, kinds: ['nope'] });
+  assert.ok('profile' in r3 && 'constraints' in r3 && 'lessons' in r3);
+});
+
+test('kinds 非法输入：MCP 层返回 isError 执行错误（含合法取值清单，模型可自愈）', async () => {
+  const { tools, callTool } = require('../src/mcp/tools');
+  const t = tools.find((x) => x.name === 'recall_context');
+  assert.ok(t.inputSchema.properties.kinds, 'schema 应声明 kinds');
+  assert.deepEqual(t.inputSchema.properties.kinds.items.enum, ['profile', 'constraints', 'lessons']);
+
+  const out = await callTool('recall_context', { kinds: ['nope'] }, u1);
+  assert.equal(out.isError, true);
+  assert.ok(out.content[0].text.includes('profile'), '文案应列出合法取值');
+});
