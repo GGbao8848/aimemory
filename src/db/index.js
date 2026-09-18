@@ -126,6 +126,21 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS idx_events_user ON events(user_id, created_at);
 
+-- L0 已收记录索引：按 (会话, rid, version) 去重。
+-- 为什么不能只靠批次指纹：指纹对整个批次内容敏感，同一批记录若因分块方式不同
+-- （批大小调整、记录顺序变化）算出不同指纹，服务端就会重复落盘同样的记录。
+-- L0 允许同一 rid 的多个**版本**（ZCode 会原地更新，靠版本号收敛），
+-- 但完全相同的 (rid, version) 是纯冗余，在此拦掉。
+CREATE TABLE IF NOT EXISTS l0_records (
+  user_id     TEXT NOT NULL,
+  device_code TEXT NOT NULL,
+  agent       TEXT NOT NULL,
+  session_id  TEXT NOT NULL,
+  rid         TEXT NOT NULL,
+  version     INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (user_id, device_code, agent, session_id, rid, version)
+) WITHOUT ROWID;
+
 -- L0 设备注册表：每台采集机器一条，承载设备信息（归类与跨机查询的依据）
 CREATE TABLE IF NOT EXISTS l0_devices (
   user_id      TEXT NOT NULL,

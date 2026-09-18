@@ -118,54 +118,65 @@ function stripUndef(o) {
 }
 
 /**
- * 采集一轮。
+ * 采集一轮（流式）。
+ *
+ * **内存纪律**：本机实测 part 有 6.7 万行、message 1.8 万行，若整轮 .all() 读进内存
+ * 再归一化，峰值可达 800MB+（足以触发 pm2 max_memory_restart 反复重启）。
+ * 因此按 rowid 键集分页读取，每页归一化后立刻通过 emit 交出，不跨页累积。
+ *
  * 水位线存 state，key = `zcode:chat`（全局）/ `zcode:sessions`（会话元信息）。
- * @returns {{files:number, records:Array, cursorUpdates:Array, seenKeys:Array, skippedNoise:number}}
+ * @param {(sessionId:string, records:object[])=>void} emit 每页/每组记录产出时调用
+ * @returns {{files:number, cursorUpdates:Array, seenKeys:Array, skippedNoise:number}}
  */
-function collect(config, state) {
+function collect(config, state, emit) {
   const db = openDb(config);
-  if (!db) return { files: 0, records: [], cursorUpdates: [], seenKeys: [], skippedNoise: 0 };
+  if (!db) return { files: 0, cursorUpdates: [], seenKeys: [], skippedNoise: 0 };
 
-  const records = [];
   let skippedNoise = 0;
+  const emitSafe = typeof emit === 'function' ? emit : () => {};
 
   try {
-    // ---- 1) 会话元信息（新增/改名都按 time_updated 增量） ----
+    // ---- 1) 会话元信息（新增/改名都按 time_updated 增量；仅数十行，可整取） ----
     const sessKey = 'zcode:sessions';
     const sessCur = state.getCursor(sessKey) || { watermark: 0 };
     const sessRows = db
       .prepare('SELECT id, project_id, directory, title, time_created, time_updated, task_type FROM session WHERE time_updated > ?')
       .all(Math.max(0, (sessCur.watermark || 0) - OVERLAP_MS));
-    if (sessRows.length) {
-      for (const s of sessRows) {
-        records.push({
-          sessionId: s.id,
-          records: [
-            makeRecord({
-              rid: makeRid('zcode', s.id, 'session'),
-              ts: new Date(Number(s.time_created || s.time_updated)).toISOString(),
-              version: Number(s.time_updated || 0),
-              role: ROLE.META,
-              content: '',
-              meta: stripUndef({ kind: 'session', title: s.title, directory: s.directory, project: s.project_id, task_type: s.task_type }),
-            }),
-          ],
-        });
-      }
+    for (const s of sessRows) {
+      emitSafe(s.id, [
+        makeRecord({
+          rid: makeRid('zcode', s.id, 'session'),
+          ts: new Date(Number(s.time_created || s.time_updated)).toISOString(),
+          version: Number(s.time_updated || 0),
+          role: ROLE.META,
+          content: '',
+          meta: stripUndef({ kind: 'session', title: s.title, directory: s.directory, project: s.project_id, task_type: s.task_type }),
+        }),
+      ]);
     }
 
-    // ---- 2) 内容：以 part 为单位，水位线 + 重叠窗口 ----
+    // ---- 2) 内容：以 part 为单位，水位线 + 重叠窗口；按键集分页流式处理 ----
     const chatKey = 'zcode:chat';
     const chatCur = state.getCursor(chatKey) || { watermark: 0 };
     const since = Math.max(0, (chatCur.watermark || 0) - OVERLAP_MS);
 
-    const partRows = db
-      .prepare('SELECT id, message_id, session_id, time_created, time_updated, data, sequence FROM part WHERE time_updated > ? ORDER BY time_updated ASC')
-      .all(since);
+    const PAGE = 2000;
+    const pageStmt = db.prepare(
+      `SELECT rowid AS rid_, id, message_id, session_id, time_created, time_updated, data, sequence
+         FROM part
+        WHERE time_updated > ? AND rowid > ?
+        ORDER BY rowid ASC
+        LIMIT ?`
+    );
 
-    if (partRows.length) {
-      // part 需要所属 message 的 role —— 按涉及的 message_id 批量取
-      const msgIds = [...new Set(partRows.map((r) => r.message_id))];
+    let lastRowid = 0;
+    let maxPart = chatCur.watermark || 0;
+    for (;;) {
+      const rows = pageStmt.all(since, lastRowid, PAGE);
+      if (!rows.length) break;
+
+      // part 的 role 来自所属 message —— 只取本页涉及的 message_id（本页量级）
+      const msgIds = [...new Set(rows.map((r) => r.message_id))];
       const roleMap = new Map();
       const CHUNK = 500; // SQLite 变量上限保护
       for (let i = 0; i < msgIds.length; i += CHUNK) {
@@ -176,8 +187,9 @@ function collect(config, state) {
         }
       }
 
+      // 本页归一化后按会话交出（同一会话可能跨页，多次 emit 是允许的——服务端追加到同一文件）
       const bySession = new Map();
-      for (const row of partRows) {
+      for (const row of rows) {
         const msgRole = roleMap.get(row.message_id) || ROLE.META;
         const { rec, noise } = partToRecord(row.session_id, msgRole, row, config.keepRaw);
         if (noise) { skippedNoise += 1; continue; }
@@ -185,17 +197,23 @@ function collect(config, state) {
         if (!bySession.has(row.session_id)) bySession.set(row.session_id, []);
         bySession.get(row.session_id).push(rec);
       }
-      for (const [sid, recs] of bySession) records.push({ sessionId: sid, records: recs });
+      for (const [sid, recs] of bySession) emitSafe(sid, recs);
+
+      lastRowid = rows[rows.length - 1].rid_;
+      for (const p of rows) maxPart = Math.max(maxPart, Number(p.time_updated || 0));
+
+      if (rows.length < PAGE) break;
     }
 
     // ---- 3) 推进水位线（取本轮见到的最大 time_updated） ----
     const cursorUpdates = [];
     const maxSess = sessRows.reduce((n, s) => Math.max(n, Number(s.time_updated || 0)), sessCur.watermark || 0);
     if (sessRows.length) cursorUpdates.push([sessKey, { watermark: maxSess, updated_at: new Date().toISOString() }]);
-    const maxPart = partRows.reduce((n, p) => Math.max(n, Number(p.time_updated || 0)), chatCur.watermark || 0);
-    if (partRows.length) cursorUpdates.push([chatKey, { watermark: maxPart, updated_at: new Date().toISOString() }]);
+    if (maxPart > (chatCur.watermark || 0)) {
+      cursorUpdates.push([chatKey, { watermark: maxPart, updated_at: new Date().toISOString() }]);
+    }
 
-    return { files: 1, records, cursorUpdates, seenKeys: [sessKey, chatKey], skippedNoise };
+    return { files: 1, cursorUpdates, seenKeys: [sessKey, chatKey], skippedNoise };
   } finally {
     try { db.close(); } catch { /* 只读句柄，关闭失败无副作用 */ }
   }

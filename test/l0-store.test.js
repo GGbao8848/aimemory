@@ -115,6 +115,72 @@ test('L0 store：会话清单可查（供 Web / status 展示）', () => {
   assert.ok(list.every((s) => s.last_received));
 });
 
+// ===== 记录级去重（批次指纹挡不住"同内容不同分块"） =====
+
+test('L0 store：记录级去重——同内容不同分块不得重复落盘', () => {
+  // 这是真实踩过的坑：批次指纹对整个批次内容敏感，批大小一变指纹就变，
+  // 服务端会把同样的记录再落一遍。记录级去重按 (rid, version) 兜底。
+  const mk = (i) => ({ rid: `dedup:s:${i}`, ts: 't', version: 100, role: 'user', content: `c${i}` });
+
+  // 第一次：3 条一起传
+  const a = store.ingestBatch({
+    userId: 'u-dd', agent: 'zcode', sessionId: 's', deviceCode: 'dev_dd',
+    records: [mk(1), mk(2), mk(3)],
+  });
+  assert.strictEqual(a.stored, 3);
+
+  // 第二次：同样的记录、不同分块（2+1）→ 应全部识别为已收，不落盘
+  const b = store.ingestBatch({
+    userId: 'u-dd', agent: 'zcode', sessionId: 's', deviceCode: 'dev_dd',
+    records: [mk(1), mk(2)],
+  });
+  assert.strictEqual(b.stored, 0, '已收记录不得重复落盘');
+  assert.strictEqual(b.deduped, true);
+  assert.strictEqual(b.skipped, 2);
+
+  // 部分新、部分旧 → 只落新的
+  const c = store.ingestBatch({
+    userId: 'u-dd', agent: 'zcode', sessionId: 's', deviceCode: 'dev_dd',
+    records: [mk(2), mk(4)],
+  });
+  assert.strictEqual(c.stored, 1, '只应落新记录');
+  assert.strictEqual(c.skipped, 1);
+
+  const lines = fs.readFileSync(store.sessionFilePath('u-dd', 'dev_dd', 'zcode', 's'), 'utf8').trim().split('\n');
+  assert.strictEqual(lines.length, 4, `文件应只有 4 条唯一记录，实际 ${lines.length}`);
+});
+
+test('L0 store：同一 rid 的不同 version 必须保留（ZCode 原地更新的收敛依据）', () => {
+  const rec = (v, content) => ({ rid: 'ver:s:p1', ts: 't', version: v, role: 'assistant', content });
+
+  store.ingestBatch({
+    userId: 'u-ver', agent: 'zcode', sessionId: 's', deviceCode: 'dev_v',
+    records: [rec(1000, '部分内容')],
+  });
+  const r = store.ingestBatch({
+    userId: 'u-ver', agent: 'zcode', sessionId: 's', deviceCode: 'dev_v',
+    records: [rec(2000, '完整内容')],
+  });
+  assert.strictEqual(r.stored, 1, '版本上涨的记录是合法更新，必须落盘');
+
+  const lines = fs.readFileSync(store.sessionFilePath('u-ver', 'dev_v', 'zcode', 's'), 'utf8').trim().split('\n');
+  assert.strictEqual(lines.length, 2, '两个版本都应保留（供 L1 取最大版本）');
+
+  // 同一版本重复 → 拦掉
+  const dup = store.ingestBatch({
+    userId: 'u-ver', agent: 'zcode', sessionId: 's', deviceCode: 'dev_v',
+    records: [rec(2000, '完整内容')],
+  });
+  assert.strictEqual(dup.stored, 0);
+});
+
+test('L0 store：跨设备同名会话互不干扰（去重按设备隔离）', () => {
+  const rec = { rid: 'x:same:r1', ts: 't', version: 1, role: 'user', content: 'x' };
+  store.ingestBatch({ userId: 'u-x', agent: 'codex', sessionId: 'same', deviceCode: 'dev_A', records: [rec] });
+  const b = store.ingestBatch({ userId: 'u-x', agent: 'codex', sessionId: 'same', deviceCode: 'dev_B', records: [rec] });
+  assert.strictEqual(b.stored, 1, '不同设备的同名会话是两份独立数据，不应被去重拦掉');
+});
+
 // ===== 设备维度（跨机归类） =====
 
 test('L0 store：同一用户两台设备，归档与会话按设备区分', () => {

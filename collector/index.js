@@ -84,43 +84,49 @@ class Collector {
     for (const agent of this.config.agents) {
       const a = ADAPTERS[agent];
       if (!a) continue;
-      let out;
-      try {
-        out = a.collect(this.config, this.state);
-      } catch (e) {
-        // 采集失败不静默：记录错误，游标不动（下轮重试，不会丢数据）
-        summary.agents[agent] = { error: e.message };
-        this.stats.parse_errors += 1;
-        continue;
-      }
 
       let agentRecords = 0;
       let enqueued = 0;
       let skippedSent = 0;
-      for (const group of out.records || []) {
+
+      // 流式接收：adapter 每产出一批就入队，不把整轮采集结果攒在内存里。
+      // 冷启动回填时这是必须的——一次性攒 3.5 万条记录会让峰值内存到 800MB+
+      // （实测），足以触发 pm2 max_memory_restart 而反复重启。
+      const emit = (sessionId, records) => {
+        if (!records || !records.length) return;
         // 记录级本地去重：重叠窗口重读到的、版本未涨的记录不再入队
-        const fresh = this.state.filterUnsent(group.records);
-        skippedSent += group.records.length - fresh.length;
+        const fresh = this.state.filterUnsent(records);
+        skippedSent += records.length - fresh.length;
         for (const chunk of chunkRecords(fresh, {
           maxRecords: this.config.maxRecordsPerBatch,
           maxBytes: this.config.maxBatchBytes,
         })) {
-          this.state.enqueue(this.uploader.makeBatch(agent, group.sessionId, chunk));
+          this.state.enqueue(this.uploader.makeBatch(agent, sessionId, chunk));
           // 入队即认领：批次已持久化在队列中，下轮采集不得再次入队。
           // （若等到上传成功才标记，重启/失败期间同一批会被反复入队。）
           this.state.markSentRecords(chunk);
           enqueued += 1;
           agentRecords += chunk.length;
         }
+      };
+
+      let out;
+      try {
+        out = a.collect(this.config, this.state, emit);
+      } catch (e) {
+        // 采集失败不静默：记录错误，游标不动（下轮重试，不会丢数据）。
+        // 已 emit 的部分批次仍在队列里，靠记录级去重避免下轮重复入队。
+        summary.agents[agent] = { error: e.message };
+        this.stats.parse_errors += 1;
+        continue;
       }
 
-      // 游标推进与入队一起提交（同一 write，避免中间态丢批次）
+      // 游标推进（游标很小，整轮结束后一次性提交）
       let cursorAdvanced = false;
       for (const [key, value] of out.cursorUpdates || []) {
         if (this.state.setCursor(key, value)) cursorAdvanced = true;
       }
       if (out.seenKeys?.length) this.state.pruneCursors(`${agent}:`, out.seenKeys);
-      // 仅在真有新数据入队或游标实质前进时写盘（稳态下不产生空转 IO）
       if (enqueued || cursorAdvanced) this.state.markDirty();
       this.state.commitIfDirty();
 

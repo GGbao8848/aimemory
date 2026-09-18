@@ -553,6 +553,37 @@ function l0BatchExists(batchId) {
   return !!db.prepare('SELECT 1 FROM l0_batches WHERE batch_id = ?').get(batchId);
 }
 
+/**
+ * 记录级去重：滤掉已收过的 (rid, version)。
+ * 批次指纹挡不住"同内容、不同分块"（批大小调整、顺序变化都会改指纹），
+ * 这里按记录粒度兜底。允许同一 rid 的不同版本（ZCode 原地更新），只挡完全相同版本。
+ * @returns {object[]} 其中真正是新记录的子集
+ */
+function l0FilterNewRecords({ userId, deviceCode, agent, sessionId, records }) {
+  if (!records.length) return records;
+  const stmt = db.prepare(
+    `SELECT 1 FROM l0_records
+      WHERE user_id = ? AND device_code = ? AND agent = ? AND session_id = ? AND rid = ? AND version = ?`
+  );
+  return records.filter(
+    (r) => !stmt.get(userId, deviceCode, agent, sessionId, String(r.rid), Number(r.version) || 0)
+  );
+}
+
+/** 记录已收（落盘成功后调用）；已存在则忽略 */
+function l0MarkRecords({ userId, deviceCode, agent, sessionId, records }) {
+  const stmt = db.prepare(
+    `INSERT OR IGNORE INTO l0_records (user_id, device_code, agent, session_id, rid, version)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  );
+  const tx = db.transaction(() => {
+    for (const r of records) {
+      stmt.run(userId, deviceCode, agent, sessionId, String(r.rid), Number(r.version) || 0);
+    }
+  });
+  tx();
+}
+
 function insertL0Batch({ batchId, userId, agent, sessionId, deviceCode, collectorId, records, bytes }) {
   db.prepare(
     `INSERT OR IGNORE INTO l0_batches
@@ -604,14 +635,14 @@ function listL0Devices(userId) {
   return db
     .prepare(
       `SELECT d.device_code, d.label, d.info, d.agents, d.first_seen, d.last_seen,
-              COUNT(DISTINCT b.session_id) sessions,
-              COALESCE(SUM(b.records), 0) records,
-              COALESCE(SUM(b.bytes), 0) bytes
+              COALESCE((SELECT COUNT(DISTINCT r.session_id) FROM l0_records r
+                         WHERE r.user_id = d.user_id AND r.device_code = d.device_code), 0) sessions,
+              COALESCE((SELECT COUNT(*) FROM l0_records r
+                         WHERE r.user_id = d.user_id AND r.device_code = d.device_code), 0) records,
+              COALESCE((SELECT SUM(b.bytes) FROM l0_batches b
+                         WHERE b.user_id = d.user_id AND b.device_code = d.device_code), 0) bytes
          FROM l0_devices d
-         LEFT JOIN l0_batches b
-                ON b.user_id = d.user_id AND b.device_code = d.device_code
         WHERE d.user_id = ?
-        GROUP BY d.device_code
         ORDER BY d.last_seen DESC`
     )
     .all(userId)
@@ -635,13 +666,20 @@ function l0Sessions(userId, { deviceCode, agent, limit = 200 } = {}) {
   if (deviceCode) { where.push('device_code = ?'); args.push(deviceCode); }
   if (agent) { where.push('agent = ?'); args.push(agent); }
   args.push(limit);
+  // 记录数取自 l0_records（记录级权威索引，已排除重复）；
+  // 时间/字节取自 l0_batches（批次维度）。两表用 (设备, agent, 会话) 关联。
   return db
     .prepare(
-      `SELECT agent, session_id, device_code, collector_id, COUNT(*) batches, SUM(records) records,
-              SUM(bytes) bytes, MIN(received_at) first_received, MAX(received_at) last_received
-       FROM l0_batches
-       WHERE ${where.join(' AND ')}
-       GROUP BY device_code, agent, session_id
+      `SELECT b.agent, b.session_id, b.device_code, MAX(b.collector_id) collector_id,
+              COUNT(DISTINCT b.batch_id) batches,
+              COALESCE((SELECT COUNT(*) FROM l0_records r
+                         WHERE r.user_id = b.user_id AND r.device_code = b.device_code
+                           AND r.agent = b.agent AND r.session_id = b.session_id), 0) records,
+              SUM(b.bytes) bytes,
+              MIN(b.received_at) first_received, MAX(b.received_at) last_received
+       FROM l0_batches b
+       WHERE ${where.map((w) => `b.${w}`).join(' AND ')}
+       GROUP BY b.device_code, b.agent, b.session_id
        ORDER BY last_received DESC
        LIMIT ?`
     )
@@ -661,24 +699,35 @@ function l0SessionOwned(userId, { deviceCode, agent, sessionId }) {
   return !!row;
 }
 
-/** 归档概况（采集器对账 / Web 展示） */
+/**
+ * 归档概况（采集器对账 / Web 展示）。
+ * records 取自 l0_records（真实落盘的唯一记录数），不是 l0_batches.records 的累计值——
+ * 后者是"累计接收量"，历史重复批次会让它虚高，不能当作归档规模。
+ */
 function l0Stats(userId) {
   const row = db
     .prepare(
-      `SELECT COUNT(*) batches, COUNT(DISTINCT session_id) sessions,
-              COUNT(DISTINCT agent) agents, COUNT(DISTINCT device_code) devices,
-              COALESCE(SUM(records),0) records, COALESCE(SUM(bytes),0) bytes, MAX(received_at) last_received
+      `SELECT COUNT(*) records,
+              COUNT(DISTINCT session_id) sessions,
+              COUNT(DISTINCT agent) agents,
+              COUNT(DISTINCT device_code) devices
+       FROM l0_records WHERE user_id = ?`
+    )
+    .get(userId);
+  const b = db
+    .prepare(
+      `SELECT COUNT(*) batches, COALESCE(SUM(bytes),0) bytes, MAX(received_at) last_received
        FROM l0_batches WHERE user_id = ?`
     )
     .get(userId);
   return {
-    batches: row.batches,
+    batches: b.batches,
     sessions: row.sessions,
     agents: row.agents,
     devices: row.devices,
     records: row.records,
-    bytes: row.bytes,
-    last_received: row.last_received || null,
+    bytes: b.bytes,
+    last_received: b.last_received || null,
   };
 }
 
@@ -706,6 +755,8 @@ module.exports = {
   deleteMemory,
   stats,
   l0BatchExists,
+  l0FilterNewRecords,
+  l0MarkRecords,
   insertL0Batch,
   l0Stats,
   l0Sessions,

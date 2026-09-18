@@ -45,7 +45,9 @@ function buildConfig() {
     // 节奏
     pollIntervalMs: parseInt(process.env.AIMEMORY_POLL_MS || file.poll_interval_ms || '15000', 10),
     maxRecordsPerBatch: parseInt(process.env.AIMEMORY_BATCH_RECORDS || file.max_records_per_batch || '500', 10),
-    maxBatchBytes: parseInt(process.env.AIMEMORY_BATCH_BYTES || file.max_batch_bytes || String(4 * 1024 * 1024), 10),
+    // 单批字节上限：偏小可降低上传期瞬时内存峰值（每批要序列化一次），
+    // 代价是批数变多、HTTP 往返更多。2MB 在两者间较平衡。
+    maxBatchBytes: parseInt(process.env.AIMEMORY_BATCH_BYTES || file.max_batch_bytes || String(2 * 1024 * 1024), 10),
     // 队列积压上限（批次）：超过则本轮只上传不采集（背压），避免 state.json 无限膨胀
     maxQueuedBatches: parseInt(process.env.AIMEMORY_MAX_QUEUED || file.max_queued_batches || '300', 10),
     // 保留原始行（L0 是事实源；关掉可省约一半体积，但会丢字段）

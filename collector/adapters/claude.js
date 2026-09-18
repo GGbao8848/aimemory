@@ -134,16 +134,18 @@ function stripUndef(o) {
 }
 
 /**
- * 采集一轮。
+ * 采集一轮（流式）。
+ * 每个文件归一化后立即通过 emit 交出，不跨文件累积。
  * 改名处理：若某路径消失但同会话存在其它变体文件，把旧游标按「内容长度」迁移，
  * 避免从头重读（重复上传由 batch_id 幂等兜底，但迁移能显著省带宽）。
+ * @param {(sessionId:string, records:object[])=>void} emit
  */
-function collect(config, state) {
+function collect(config, state, emit) {
   const root = config.paths.claude;
-  if (!fs.existsSync(root)) return { files: 0, records: [], cursorUpdates: [], seenKeys: [] };
+  const emitSafe = typeof emit === 'function' ? emit : () => {};
+  if (!fs.existsSync(root)) return { files: 0, cursorUpdates: [], seenKeys: [] };
 
   const files = discoverFiles(root);
-  const records = [];
   const cursorUpdates = [];
   const seenKeys = [];
 
@@ -175,21 +177,26 @@ function collect(config, state) {
       if (r.truncated) cursorUpdates.push([key, { offset: 0, truncated_at: new Date().toISOString() }]);
 
       if (r.lines.length) {
-        const batch = [];
+        const FLUSH = 1000;
+        let batch = [];
         for (const line of r.lines) {
           const d = parseJsonLine(line);
           if (!d) continue; // 坏行跳过，不中断
           try {
             batch.push(...blocksToRecords('claude', sessionId, variant, d, config.keepRaw));
           } catch { /* 单条失败不影响整批 */ }
+          if (batch.length >= FLUSH) {
+            emitSafe(sessionId, batch);
+            batch = [];
+          }
         }
-        if (batch.length) records.push({ sessionId, records: batch });
+        if (batch.length) emitSafe(sessionId, batch);
       }
       cursorUpdates.push([key, { offset: r.offset, size: r.size, updated_at: new Date().toISOString() }]);
     }
   }
 
-  return { files: files.length, records, cursorUpdates, seenKeys };
+  return { files: files.length, cursorUpdates, seenKeys };
 }
 
 module.exports = { name: 'claude', collect, discoverFiles, sessionIdOf, variantOf, blocksToRecords };

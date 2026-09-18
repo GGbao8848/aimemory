@@ -197,15 +197,16 @@ function stripUndef(o) {
 }
 
 /**
- * 采集一轮：返回 { files, records, cursorUpdates }。
- * 只读源文件；游标推进由调用方与队列一起提交。
+ * 采集一轮（流式）。
+ * 每个文件归一化后立即通过 emit 交出，不跨文件累积（大仓库里会话文件可能很多）。
+ * @param {(sessionId:string, records:object[])=>void} emit
  */
-function collect(config, state) {
+function collect(config, state, emit) {
   const root = config.paths.codex;
-  if (!fs.existsSync(root)) return { files: 0, records: [], cursorUpdates: [] };
+  const emitSafe = typeof emit === 'function' ? emit : () => {};
+  if (!fs.existsSync(root)) return { files: 0, cursorUpdates: [], seenKeys: [] };
 
   const files = discoverFiles(root);
-  const records = [];
   const cursorUpdates = [];
   const seenKeys = [];
 
@@ -224,22 +225,26 @@ function collect(config, state) {
       cursorUpdates.push([key, { ...(cur || {}), offset: r.offset }]);
       continue;
     }
-    const batch = [];
+    // 单个文件的行可能很多 → 分批边转边交，避免整文件攒在内存里
+    const FLUSH = 2000;
+    let batch = [];
     for (const line of r.lines) {
       try {
         const rec = normalizeLine('codex', effectiveSession, line, { keepRaw: config.keepRaw });
         if (rec) batch.push(rec);
       } catch {
-        // 单行解析失败不中断整批（不静默失败：计入 stats 的 parse_errors 由调用方汇总）
+        // 单行解析失败不中断整批（不静默失败：由调用方汇总 parse_errors）
+      }
+      if (batch.length >= FLUSH) {
+        emitSafe(effectiveSession, batch);
+        batch = [];
       }
     }
-    if (batch.length) {
-      records.push({ sessionId: effectiveSession, records: batch });
-    }
+    if (batch.length) emitSafe(effectiveSession, batch);
     cursorUpdates.push([key, { offset: r.offset, size: r.size, updated_at: new Date().toISOString() }]);
   }
 
-  return { files: files.length, records, cursorUpdates, seenKeys };
+  return { files: files.length, cursorUpdates, seenKeys };
 }
 
 module.exports = { name: 'codex', collect, discoverFiles, parseName, normalizeLine };

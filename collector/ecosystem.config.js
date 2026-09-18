@@ -22,8 +22,11 @@ module.exports = {
       cwd: require('path').join(__dirname, '..'),
       instances: 1,
       autorestart: true,
-      // 采集器稳态内存很小（队列为空时不驻留大对象）
-      max_memory_restart: '300M',
+      // 内存上限：稳态远低于此（实测采集后 GC 仅 13MB heap）。
+      // 但**首次冷启动回填**要一次性把存量会话（实测单机 3.5 万条 / 147MB）过一遍，
+      // 峰值约 400MB，且 V8 扩张后不立即归还 OS。上限设太小会导致回填期被反复
+      // max_memory_restart 杀掉（错误日志为空、只看到 restarts 增长）。
+      max_memory_restart: '700M',
       time: true,
       // 崩溃重启太快会反复失败刷日志，退避 5 秒
       restart_delay: 5000,

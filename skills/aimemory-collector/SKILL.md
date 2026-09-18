@@ -87,9 +87,14 @@ node collector/index.js --status           # 本机 + 服务端双向对账
 `--status` 输出里重点看：
 - `token_set: true`、`last_upload_error: null`
 - `queue_batches` 应逐步趋近 0（首次全量回填会有一段时间积压，正常）
-- `remote.batches` / `remote.records` 在增长 = 服务端确实收到了
+- `remote.records` / `remote.batches` 在增长 = 服务端确实收到了
 
 若 `queue_batches` 一直不降，看 `last_upload_error`：401 → Token 错；连不上 → 服务端地址错。
+
+**首次全量回填会吃内存**：把存量会话（单机实测 3.5 万条 / 147MB）过一遍，峰值约 400MB，
+V8 扩张后不立即归还（稳态会回落到 ~110MB）。若 `pm2 describe` 里 `restarts` 在回填期间增长、
+而**错误日志为空**，就是 `max_memory_restart` 设太小被 SIGKILL（不是代码崩溃）。默认配置给了
+700M，一般无需调整；资源紧张的机器可调 `AIMEMORY_BATCH_BYTES` 减小批次或分批部署。
 
 ## 日常运维
 

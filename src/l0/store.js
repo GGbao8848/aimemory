@@ -74,13 +74,29 @@ function ingestBatch({ userId, agent, sessionId, deviceCode, deviceLabel, device
 
   // 幂等：同批次重传直接跳过（网络重试、进程重启后重放）
   if (repo.l0BatchExists(bid)) {
-    return { ok: true, batch_id: bid, deduped: true, stored: 0, bytes: 0, file: sessionFilePath(userId, devCode, agent, sessionId) };
+    return { ok: true, batch_id: bid, deduped: true, stored: 0, bytes: 0, skipped: 0, file: sessionFilePath(userId, devCode, agent, sessionId) };
+  }
+
+  // 记录级去重：拦掉已收过的 (rid, version)。
+  // 批次指纹对分块方式敏感（批大小/顺序一变就换指纹），仅靠它会让同样的记录重复落盘；
+  // 这里按记录粒度兜底。同一 rid 的不同版本仍会保留（ZCode 原地更新，靠版本收敛）。
+  const fresh = repo.l0FilterNewRecords({
+    userId, deviceCode: devCode, agent, sessionId, records,
+  });
+  const skipped = records.length - fresh.length;
+  if (!fresh.length) {
+    // 整个批次都是已收记录 → 只登记批次指纹，不再追加
+    repo.insertL0Batch({
+      batchId: bid, userId, agent, sessionId, deviceCode: devCode, collectorId,
+      records: 0, bytes: 0,
+    });
+    return { ok: true, batch_id: bid, deduped: true, stored: 0, bytes: 0, skipped, file: sessionFilePath(userId, devCode, agent, sessionId) };
   }
 
   const receivedAt = new Date().toISOString();
   // 每条记录内嵌设备与 agent：即使归档文件被单独取走，也能自述来源（可审计）
   const lines =
-    records
+    fresh
       .map((r) => JSON.stringify({ ...r, _dev: devCode, _agent: agent, _bid: bid, _recv: receivedAt }))
       .join('\n') + '\n';
 
@@ -88,6 +104,7 @@ function ingestBatch({ userId, agent, sessionId, deviceCode, deviceLabel, device
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.appendFileSync(file, lines, 'utf8');
 
+  repo.l0MarkRecords({ userId, deviceCode: devCode, agent, sessionId, records: fresh });
   repo.insertL0Batch({
     batchId: bid,
     userId,
@@ -95,11 +112,11 @@ function ingestBatch({ userId, agent, sessionId, deviceCode, deviceLabel, device
     sessionId,
     deviceCode: devCode,
     collectorId,
-    records: records.length,
+    records: fresh.length,
     bytes: Buffer.byteLength(lines),
   });
 
-  return { ok: true, batch_id: bid, deduped: false, stored: records.length, bytes: Buffer.byteLength(lines), file };
+  return { ok: true, batch_id: bid, deduped: false, stored: fresh.length, bytes: Buffer.byteLength(lines), skipped, file };
 }
 
 /** 归档概况：批次表统计 + 磁盘实际占用（口径不同，都返回便于对账） */
