@@ -264,6 +264,62 @@ test('State：sweepSpool 清理孤儿文件（崩溃残留）', () => {
   assert.ok(fs.existsSync(s.spoolPath('keep')), '在队列中的 spool 不得被误删');
 });
 
+// ===== 设备身份 =====
+
+test('device：首次生成稳定设备码，重启后不变（同一台机器始终同一设备）', () => {
+  const { loadOrCreateDevice } = require('../collector/lib/device');
+  const d = tmpdir('device');
+
+  const a = loadOrCreateDevice(d, {});
+  assert.match(a.code, /^dev_[0-9a-f]{8}$/, '设备码格式应为 dev_ + 8 hex');
+  assert.ok(a.info.hostname, '应采集主机名');
+  assert.ok(a.info.platform && a.info.arch, '应采集系统信息');
+  assert.ok(a.first_seen, '应记录首次出现时间');
+
+  // 模拟重启：同目录再取，码必须一致（否则历史归档会被割裂成两台设备）
+  const b = loadOrCreateDevice(d, {});
+  assert.strictEqual(b.code, a.code, '设备码重启后必须稳定');
+  assert.strictEqual(b.first_seen, a.first_seen, 'first_seen 不应被刷新');
+});
+
+test('device：可用环境配置覆盖设备码与可读名（多机部署显式指定）', () => {
+  const { loadOrCreateDevice } = require('../collector/lib/device');
+  const d = tmpdir('device-override');
+  const dev = loadOrCreateDevice(d, { deviceCode: 'dev_deadbeef', deviceLabel: '我的笔记本' });
+  assert.strictEqual(dev.code, 'dev_deadbeef');
+  assert.strictEqual(dev.label, '我的笔记本');
+  // 覆盖值也落盘，重启后保持
+  const again = loadOrCreateDevice(d, {});
+  assert.strictEqual(again.code, 'dev_deadbeef');
+  assert.strictEqual(again.label, '我的笔记本');
+});
+
+test('Uploader：上传体携带设备三元组（设备码 + 设备信息 + agent）', async () => {
+  const { Uploader } = require('../collector/lib/uploader');
+  const device = { code: 'dev_abcdef01', label: '笔记本', info: { hostname: 'laptop', platform: 'darwin' } };
+  const up = new Uploader(
+    { collectorId: 'ignored', retry: { maxAttempts: 1, baseDelayMs: 1, maxDelayMs: 1 } },
+    device
+  );
+  const batch = up.makeBatch('codex', 'sess-1', [{ rid: 'r', ts: 't', role: 'user', content: 'x' }]);
+  assert.strictEqual(batch.device_code, 'dev_abcdef01', '批次应带设备码');
+  assert.strictEqual(batch.device_label, '笔记本');
+
+  // 抓取实际发出的请求体，确认设备信息确实上传了
+  let sent = null;
+  global.fetch = async (url, opts) => {
+    sent = JSON.parse(opts.body);
+    return { ok: true, status: 201, json: async () => ({ ok: true }) };
+  };
+  await up.send(batch);
+
+  assert.strictEqual(sent.agent, 'codex', '应带 agent');
+  assert.strictEqual(sent.device.code, 'dev_abcdef01');
+  assert.strictEqual(sent.device.label, '笔记本');
+  assert.strictEqual(sent.device.info.platform, 'darwin', '应带设备信息');
+  assert.strictEqual(sent.collector_id, 'dev_abcdef01', '兼容字段同步为设备码');
+});
+
 // ===== 上限阻断防护（413 拆分 / 毒批 / 进程锁） =====
 
 test('splitBatch：批次过大时一分为二，内容不丢', () => {

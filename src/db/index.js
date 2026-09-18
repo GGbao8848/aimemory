@@ -126,21 +126,36 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS idx_events_user ON events(user_id, created_at);
 
+-- L0 设备注册表：每台采集机器一条，承载设备信息（归类与跨机查询的依据）
+CREATE TABLE IF NOT EXISTS l0_devices (
+  user_id      TEXT NOT NULL,
+  device_code  TEXT NOT NULL,             -- 稳定设备码（dev_xxxxxxxx，采集端首次运行生成）
+  label        TEXT,                      -- 人类可读名（默认主机名，可自定义）
+  info         TEXT,                      -- JSON：hostname/platform/arch/os/node/cpus/mem/user…
+  agents       TEXT,                      -- JSON 数组：该设备上报过的 agent
+  first_seen   TEXT NOT NULL,
+  last_seen    TEXT NOT NULL,
+  PRIMARY KEY (user_id, device_code)
+);
+CREATE INDEX IF NOT EXISTS idx_l0_devices_user ON l0_devices(user_id, last_seen);
+
 -- L0 原始会话归档：批次去重表（幂等重传用）。
 -- 原始记录本体不落 SQLite（体量大且 append-only），存 data/l0/ 下的 jsonl 文件；
 -- 本表只记批次指纹，重复上传同一批次直接跳过。
 CREATE TABLE IF NOT EXISTS l0_batches (
-  batch_id    TEXT PRIMARY KEY,          -- sha256(collector|agent|session|batch_seq|records)
-  user_id     TEXT NOT NULL,
-  agent       TEXT NOT NULL,
-  session_id  TEXT NOT NULL,
+  batch_id     TEXT PRIMARY KEY,          -- sha256(设备|agent|会话|记录集)
+  user_id      TEXT NOT NULL,
+  agent        TEXT NOT NULL,
+  session_id   TEXT NOT NULL,
+  device_code  TEXT,
   collector_id TEXT,
-  records     INTEGER NOT NULL,
-  bytes       INTEGER NOT NULL,
-  received_at TEXT NOT NULL
+  records      INTEGER NOT NULL,
+  bytes        INTEGER NOT NULL,
+  received_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_l0_batches_user ON l0_batches(user_id, received_at);
 CREATE INDEX IF NOT EXISTS idx_l0_batches_session ON l0_batches(session_id);
+-- 注意：设备维度索引在下方老库迁移补列之后再建（老库无 device_code 时建索引会失败）
 `);
 
 // 老库兼容：sessions 表早期无 username 列 → 补充（幂等）
@@ -155,6 +170,14 @@ const apiKeyCols = db.prepare("PRAGMA table_info(api_keys)").all().map((c) => c.
 if (!apiKeyCols.includes('token_plain')) {
   db.exec('ALTER TABLE api_keys ADD COLUMN token_plain TEXT');
 }
+
+// 老库兼容：l0_batches 早期无 device_code 列 → 补充（历史行留空，列表里显示为"未标注"）
+const l0Cols = db.prepare("PRAGMA table_info(l0_batches)").all().map((c) => c.name);
+if (!l0Cols.includes('device_code')) {
+  db.exec('ALTER TABLE l0_batches ADD COLUMN device_code TEXT');
+}
+// 设备维度索引须在补列之后创建（见上）
+db.exec('CREATE INDEX IF NOT EXISTS idx_l0_batches_device ON l0_batches(user_id, device_code, agent)');
 
 // 老库兼容：memories 早期无 embedding / facts / entities 列 → 补充
 // （float32 BLOB 向量 / infer 抽取的结构化事实 / LLM 抽取的实体，均为可空列）

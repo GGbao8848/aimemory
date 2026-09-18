@@ -35,6 +35,10 @@ module.exports = {
         // 本机令牌：在 Web「接入 Token」页为这台机器单独签发一枚（命名如 collector-<主机名>）
         AIMEMORY_TOKEN: process.env.AIMEMORY_TOKEN || '',
         // ===== 可选 =====
+        // 设备可读名（默认取主机名）。多台机器时建议设为"谁的机器"，便于在界面里分辨。
+        AIMEMORY_DEVICE_LABEL: process.env.AIMEMORY_DEVICE_LABEL || '',
+        // 设备码：缺省自动生成并落盘到状态目录（重启不变）。仅重装且需保持同一身份时才显式固定。
+        AIMEMORY_DEVICE_CODE: process.env.AIMEMORY_DEVICE_CODE || '',
         // 要采集哪些 agent（逗号分隔；本机没装的会自动跳过）
         AIMEMORY_COLLECTOR_AGENTS: process.env.AIMEMORY_COLLECTOR_AGENTS || 'codex,claude,zcode',
         // 采集间隔

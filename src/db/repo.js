@@ -553,19 +553,120 @@ function l0BatchExists(batchId) {
   return !!db.prepare('SELECT 1 FROM l0_batches WHERE batch_id = ?').get(batchId);
 }
 
-function insertL0Batch({ batchId, userId, agent, sessionId, collectorId, records, bytes }) {
+function insertL0Batch({ batchId, userId, agent, sessionId, deviceCode, collectorId, records, bytes }) {
   db.prepare(
     `INSERT OR IGNORE INTO l0_batches
-     (batch_id, user_id, agent, session_id, collector_id, records, bytes, received_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(batchId, userId, agent, sessionId, collectorId || null, records, bytes, now());
+     (batch_id, user_id, agent, session_id, device_code, collector_id, records, bytes, received_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(batchId, userId, agent, sessionId, deviceCode || null, collectorId || null, records, bytes, now());
 }
 
-/** L0 归档统计（Web / 采集器 status 用） */
+/**
+ * 登记/更新设备：首次见到插入，之后更新 label/info/last_seen 与 agent 集合。
+ * agents 用集合并集（同一设备可能陆续上报多种 agent）。
+ */
+function upsertL0Device({ userId, deviceCode, label, info, agent }) {
+  const ts = now();
+  const row = db
+    .prepare('SELECT agents FROM l0_devices WHERE user_id = ? AND device_code = ?')
+    .get(userId, deviceCode);
+  if (!row) {
+    db.prepare(
+      `INSERT INTO l0_devices (user_id, device_code, label, info, agents, first_seen, last_seen)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      userId,
+      deviceCode,
+      label || null,
+      info ? JSON.stringify(info) : null,
+      JSON.stringify(agent ? [agent] : []),
+      ts,
+      ts
+    );
+    return;
+  }
+  let agents = [];
+  try { agents = JSON.parse(row.agents || '[]'); } catch { agents = []; }
+  if (agent && !agents.includes(agent)) agents.push(agent);
+  // label/info 用「有值才覆盖」，避免老客户端不带这些字段时把已有信息清掉
+  db.prepare(
+    `UPDATE l0_devices
+        SET label = COALESCE(?, label),
+            info = COALESCE(?, info),
+            agents = ?,
+            last_seen = ?
+      WHERE user_id = ? AND device_code = ?`
+  ).run(label || null, info ? JSON.stringify(info) : null, JSON.stringify(agents), ts, userId, deviceCode);
+}
+
+/** 设备清单（含各设备的会话/记录统计），按最近活跃倒序 */
+function listL0Devices(userId) {
+  return db
+    .prepare(
+      `SELECT d.device_code, d.label, d.info, d.agents, d.first_seen, d.last_seen,
+              COUNT(DISTINCT b.session_id) sessions,
+              COALESCE(SUM(b.records), 0) records,
+              COALESCE(SUM(b.bytes), 0) bytes
+         FROM l0_devices d
+         LEFT JOIN l0_batches b
+                ON b.user_id = d.user_id AND b.device_code = d.device_code
+        WHERE d.user_id = ?
+        GROUP BY d.device_code
+        ORDER BY d.last_seen DESC`
+    )
+    .all(userId)
+    .map((r) => ({
+      device_code: r.device_code,
+      label: r.label,
+      info: safeParse(r.info, {}),
+      agents: safeParse(r.agents, []),
+      first_seen: r.first_seen,
+      last_seen: r.last_seen,
+      sessions: r.sessions,
+      records: r.records,
+      bytes: r.bytes,
+    }));
+}
+
+/** 归档会话清单（可按设备/agent 过滤），按最后接收时间倒序 */
+function l0Sessions(userId, { deviceCode, agent, limit = 200 } = {}) {
+  const where = ['user_id = ?'];
+  const args = [userId];
+  if (deviceCode) { where.push('device_code = ?'); args.push(deviceCode); }
+  if (agent) { where.push('agent = ?'); args.push(agent); }
+  args.push(limit);
+  return db
+    .prepare(
+      `SELECT agent, session_id, device_code, collector_id, COUNT(*) batches, SUM(records) records,
+              SUM(bytes) bytes, MIN(received_at) first_received, MAX(received_at) last_received
+       FROM l0_batches
+       WHERE ${where.join(' AND ')}
+       GROUP BY device_code, agent, session_id
+       ORDER BY last_received DESC
+       LIMIT ?`
+    )
+    .all(...args);
+}
+
+/** 单个会话是否属于该用户（跨用户访问防护，读取归档文件前必须校验） */
+function l0SessionOwned(userId, { deviceCode, agent, sessionId }) {
+  const row = db
+    .prepare(
+      `SELECT 1 FROM l0_batches
+        WHERE user_id = ? AND agent = ? AND session_id = ?
+          AND (? IS NULL OR device_code = ?)
+        LIMIT 1`
+    )
+    .get(userId, agent, sessionId, deviceCode || null, deviceCode || null);
+  return !!row;
+}
+
+/** 归档概况（采集器对账 / Web 展示） */
 function l0Stats(userId) {
   const row = db
     .prepare(
-      `SELECT COUNT(*) batches, COUNT(DISTINCT session_id) sessions, COUNT(DISTINCT agent) agents,
+      `SELECT COUNT(*) batches, COUNT(DISTINCT session_id) sessions,
+              COUNT(DISTINCT agent) agents, COUNT(DISTINCT device_code) devices,
               COALESCE(SUM(records),0) records, COALESCE(SUM(bytes),0) bytes, MAX(received_at) last_received
        FROM l0_batches WHERE user_id = ?`
     )
@@ -574,24 +675,15 @@ function l0Stats(userId) {
     batches: row.batches,
     sessions: row.sessions,
     agents: row.agents,
+    devices: row.devices,
     records: row.records,
     bytes: row.bytes,
     last_received: row.last_received || null,
   };
 }
 
-/** 归档会话清单（按最后接收时间倒序） */
-function l0Sessions(userId, limit = 200) {
-  return db
-    .prepare(
-      `SELECT agent, session_id, collector_id, COUNT(*) batches, SUM(records) records,
-              SUM(bytes) bytes, MIN(received_at) first_received, MAX(received_at) last_received
-       FROM l0_batches WHERE user_id = ?
-       GROUP BY agent, session_id
-       ORDER BY last_received DESC
-       LIMIT ?`
-    )
-    .all(userId, limit);
+function safeParse(s, fallback) {
+  try { return s ? JSON.parse(s) : fallback; } catch { return fallback; }
 }
 
 // ============ 统计 / 健康 ============
@@ -617,6 +709,9 @@ module.exports = {
   insertL0Batch,
   l0Stats,
   l0Sessions,
+  upsertL0Device,
+  listL0Devices,
+  l0SessionOwned,
   createApiKey,
   listApiKeys,
   findUserIdByTokenHash,

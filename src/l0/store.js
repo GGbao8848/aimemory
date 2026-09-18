@@ -31,38 +31,60 @@ function sanitizeSeg(s, max = 120) {
 }
 
 /** 批次指纹：采集器可自带；缺失时由服务端按内容计算（保证重传可识别） */
-function computeBatchId({ collectorId, agent, sessionId, batchSeq, records }) {
+function computeBatchId({ deviceCode, collectorId, agent, sessionId, batchSeq, records }) {
   return crypto
     .createHash('sha256')
-    .update(`${collectorId || ''}|${agent}|${sessionId}|${batchSeq == null ? '' : batchSeq}|${JSON.stringify(records)}`)
+    .update(
+      `${deviceCode || collectorId || ''}|${agent}|${sessionId}|${batchSeq == null ? '' : batchSeq}|${JSON.stringify(records)}`
+    )
     .digest('hex');
 }
 
-function sessionFilePath(userId, agent, sessionId) {
-  return path.join(config.l0Dir, sanitizeSeg(userId), sanitizeSeg(agent), `${sanitizeSeg(sessionId)}.jsonl`);
+/**
+ * 归档文件路径：<l0Dir>/<user>/<device>/<agent>/<session>.jsonl
+ * 设备维度是必需的——同一员工多台机器、每台多个 agent，只有带上设备码才能区分
+ * "这一份会话是哪台机器的哪个 agent 产生的"。
+ */
+function sessionFilePath(userId, deviceCode, agent, sessionId) {
+  return path.join(
+    config.l0Dir,
+    sanitizeSeg(userId),
+    sanitizeSeg(deviceCode || 'unknown-device'),
+    sanitizeSeg(agent),
+    `${sanitizeSeg(sessionId)}.jsonl`
+  );
 }
 
 /**
  * 落盘一个批次。
  * @returns {{ok:true, batch_id:string, deduped:boolean, stored:number, bytes:number, file:string}}
  */
-function ingestBatch({ userId, agent, sessionId, collectorId, batchSeq, batchId, records }) {
+function ingestBatch({ userId, agent, sessionId, deviceCode, deviceLabel, deviceInfo, collectorId, batchSeq, batchId, records }) {
   if (!Array.isArray(records) || records.length === 0) {
     const e = new Error('records 不能为空');
     e.status = 400;
     throw e;
   }
-  const bid = batchId || computeBatchId({ collectorId, agent, sessionId, batchSeq, records });
+  // 设备码缺省回退到 collector_id（老客户端只发 collector_id）；都没有则归入 unknown-device
+  const devCode = deviceCode || collectorId || 'unknown-device';
+  const bid = batchId || computeBatchId({ deviceCode: devCode, collectorId, agent, sessionId, batchSeq, records });
+
+  // 登记设备（即使批次是重传也要更新 last_seen/agent 集合）
+  repo.upsertL0Device({ userId, deviceCode: devCode, label: deviceLabel, info: deviceInfo, agent });
 
   // 幂等：同批次重传直接跳过（网络重试、进程重启后重放）
   if (repo.l0BatchExists(bid)) {
-    return { ok: true, batch_id: bid, deduped: true, stored: 0, bytes: 0, file: sessionFilePath(userId, agent, sessionId) };
+    return { ok: true, batch_id: bid, deduped: true, stored: 0, bytes: 0, file: sessionFilePath(userId, devCode, agent, sessionId) };
   }
 
   const receivedAt = new Date().toISOString();
-  const lines = records.map((r) => JSON.stringify({ ...r, _bid: bid, _recv: receivedAt })).join('\n') + '\n';
+  // 每条记录内嵌设备与 agent：即使归档文件被单独取走，也能自述来源（可审计）
+  const lines =
+    records
+      .map((r) => JSON.stringify({ ...r, _dev: devCode, _agent: agent, _bid: bid, _recv: receivedAt }))
+      .join('\n') + '\n';
 
-  const file = sessionFilePath(userId, agent, sessionId);
+  const file = sessionFilePath(userId, devCode, agent, sessionId);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.appendFileSync(file, lines, 'utf8');
 
@@ -71,6 +93,7 @@ function ingestBatch({ userId, agent, sessionId, collectorId, batchSeq, batchId,
     userId,
     agent,
     sessionId,
+    deviceCode: devCode,
     collectorId,
     records: records.length,
     bytes: Buffer.byteLength(lines),
@@ -101,9 +124,47 @@ function archiveStats(userId) {
   return { ...stat, files, disk_bytes: diskBytes };
 }
 
-/** 列出某用户的归档会话（供 Web / 采集器 status 展示） */
-function listSessions(userId, limit) {
-  return repo.l0Sessions(userId, limit);
+/** 列出某用户的归档会话（可按设备/agent 过滤） */
+function listSessions(userId, opts) {
+  return repo.l0Sessions(userId, opts);
 }
 
-module.exports = { ingestBatch, archiveStats, listSessions, sessionFilePath, sanitizeSeg, computeBatchId };
+/** 设备清单 */
+function listDevices(userId) {
+  return repo.listL0Devices(userId);
+}
+
+/**
+ * 读取某个会话的归档内容（供 Web 查看详情）。
+ * 安全：先用数据库校验该会话确实属于此用户，再读文件——不能只靠路径拼接，
+ * 否则构造 device/agent/session 就能越权读别人的会话。
+ * @returns {{records:object[], truncated:boolean}|null} null = 不存在或不属于该用户
+ */
+function readSession(userId, { deviceCode, agent, sessionId }, { limit = 2000 } = {}) {
+  if (!repo.l0SessionOwned(userId, { deviceCode, agent, sessionId })) return null;
+  const file = sessionFilePath(userId, deviceCode, agent, sessionId);
+  let raw;
+  try {
+    raw = fs.readFileSync(file, 'utf8');
+  } catch {
+    return { records: [], truncated: false }; // 库里有记录但文件不在（被清理）——如实返回空
+  }
+  const lines = raw.split('\n').filter((l) => l.trim());
+  const truncated = lines.length > limit;
+  const records = [];
+  for (const line of lines.slice(0, limit)) {
+    try { records.push(JSON.parse(line)); } catch { /* 跳过坏行 */ }
+  }
+  return { records, truncated, total: lines.length };
+}
+
+module.exports = {
+  ingestBatch,
+  archiveStats,
+  listSessions,
+  listDevices,
+  readSession,
+  sessionFilePath,
+  sanitizeSeg,
+  computeBatchId,
+};

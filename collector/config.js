@@ -35,7 +35,11 @@ function buildConfig() {
     // 服务端
     serverUrl: (process.env.AIMEMORY_SERVER_URL || file.server_url || 'http://10.10.10.169:18543').replace(/\/$/, ''),
     token: process.env.AIMEMORY_TOKEN || file.token || '',
-    collectorId: process.env.AIMEMORY_COLLECTOR_ID || file.collector_id || os.hostname(),
+    // 设备身份：code 稳定标识（首次生成后落盘，见 lib/device.js），label 人类可读名
+    deviceCode: process.env.AIMEMORY_DEVICE_CODE || file.device_code || '',
+    deviceLabel: process.env.AIMEMORY_DEVICE_LABEL || file.device_label || '',
+    // 兼容字段：collector_id 缺省即设备码，由 Collector 构造时回填
+    collectorId: process.env.AIMEMORY_COLLECTOR_ID || file.collector_id || '',
     // 采集范围
     agents,
     // 节奏

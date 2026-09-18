@@ -47,9 +47,13 @@ cd <仓库或采集器所在目录>
 AIMEMORY_COLLECTOR_AGENTS=codex,claude,zcode node collector/index.js --status
 ```
 
+`--status` 会显示本机**设备码与设备信息**（首次运行即生成，之后稳定不变）。同一个账号在多台机器
+部署时会得到不同的设备码，服务端据此归类——用户可在任意一台机器的 Web「会话归档」页看到每台机器
+分别做了什么。
+
 同时报告将发生的事：
 1. 安装常驻 pm2 服务 `aimemory-collector`（崩溃自动重启、开机自启）
-2. 写入状态目录 `~/.aimemory-collector/`（游标 + 上传队列）
+2. 写入状态目录 `~/.aimemory-collector/`（设备身份 + 游标 + 上传队列）
 3. 采集范围：本机 `<检测到的 agent>` 的会话原文，每 15 秒一轮增量上传
 4. **不上传**：任何 `~/.ssh`、配置密钥、credentials 等非会话文件
 
@@ -66,10 +70,12 @@ Token 名称**必须**填写；本机每台设备用一枚，便于日后单独�
 cd <仓库根目录>
 AIMEMORY_TOKEN=<用户提供的 m0-xxx> \
 AIMEMORY_SERVER_URL=http://<服务端IP>:18543 \
+AIMEMORY_DEVICE_LABEL=<人类可读的设备名，如"张三的笔记本"> \
 pm2 start collector/ecosystem.config.js --only aimemory-collector && pm2 save
 ```
 
 `pm2 save` 才会注册开机自启（否则重启机器后采集停摆，Claude 有 30 天清理窗口，会永久丢数据）。
+建议给设备起个可读名（`AIMEMORY_DEVICE_LABEL`），否则界面里只显示主机名，多机时不好分辨。
 
 ## 第 5 步：验证（必做，别只看"启动成功"）
 
@@ -111,3 +117,14 @@ rm -rf ~/.aimemory-collector          # 删除本机游标与待传队列
   进程被 `kill -9` 后残留的锁会由下次启动自动接管，无需手工清理。
 - **不碰源数据**：采集器只读 agent 的数据文件（ZCode 的 DB 以只读方式打开），绝不修改。
 - **稳态无空转写盘**：没有新会话时采集器不会反复写状态文件。
+- **设备身份在状态目录里**（`~/.aimemory-collector/device.json`）：删掉状态目录 = 变成新设备，
+  服务端会把旧会话当新数据重传一遍。若确实要重装又不想重复，先记下原设备码并在安装时
+  用 `AIMEMORY_DEVICE_CODE=<原设备码>` 固定身份。
+
+## 与其他 skill 的关系
+
+| 用户想要 | 用哪个 |
+|---|---|
+| 会话不丢、可回溯、跨机可查 | 本 skill（L0 原始会话备份） |
+| 让 agent 记住要点、下次自动想起 | `aimemory-remember` / `aimemory-recall`（L2 记忆） |
+| 管理已有记忆的增删改查 | `aimemory` |

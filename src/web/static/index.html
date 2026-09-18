@@ -51,6 +51,10 @@
           <svg viewBox="0 0 16 16" class="nav-ico" aria-hidden="true"><circle cx="5.5" cy="10.5" r="3.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 8 13.5 2.5M11 5l2 2M12.5 3.5l1.5 1.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <span>接入 Token</span>
         </button>
+        <button class="nav-item" data-view="sessions">
+          <svg viewBox="0 0 16 16" class="nav-ico" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5 2.5v11M8 5.5h4M8 8h4M8 10.5h2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          <span>会话归档</span>
+        </button>
         <button class="nav-item" data-view="guide">
           <svg viewBox="0 0 16 16" class="nav-ico" aria-hidden="true"><path d="M3 2.5h7a2 2 0 0 1 2 2V13a1.5 1.5 0 0 0-1.5-1.5H3z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M10 4.5v6.5" stroke="currentColor" stroke-width="1.4"/></svg>
           <span>接入指南</span>
@@ -149,6 +153,35 @@
             </div>
             <p class="muted small">按上面的「服务器名称 / 传输类型 / 服务器 URL / 自定义 Headers」对应填入你的 MCP 客户端（如 BR-Agent 自定义连接器、Claude Code 等）。Token 明文长期保存，可随时回「接入 Token」页复制。</p>
           </div>
+        </div>
+      </section>
+
+      <!-- 视图：会话归档（L0 原始会话备份，按设备/agent 归类） -->
+      <section id="view-sessions" class="view">
+        <div class="card">
+          <div class="card-head">
+            <h2>🖥 设备</h2>
+            <button id="l0-refresh" class="btn btn-ghost" type="button">↻ 刷新</button>
+          </div>
+          <p class="muted">每台安装采集器的机器是一个设备。点设备查看它在各 agent 下备份的会话，可跨机查看「另一台机器做了什么」。</p>
+          <div id="l0-devices" class="device-list"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>📄 <span id="l0-sessions-title">会话</span></h2>
+            <span id="l0-filter" class="muted small"></span>
+          </div>
+          <div id="l0-sessions" class="session-list"></div>
+        </div>
+
+        <div class="card hidden" id="l0-detail-card">
+          <div class="card-head">
+            <h2>💬 <span id="l0-detail-title">会话详情</span></h2>
+            <button id="l0-detail-close" class="btn btn-ghost" type="button">关闭</button>
+          </div>
+          <div id="l0-detail-meta" class="muted small"></div>
+          <div id="l0-detail" class="session-detail"></div>
         </div>
       </section>
 

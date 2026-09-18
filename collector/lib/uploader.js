@@ -25,18 +25,23 @@ function batchIdFor({ collectorId, agent, sessionId, records }) {
 }
 
 class Uploader {
-  constructor(config) {
+  constructor(config, device) {
     this.config = config;
+    // 设备身份（可选：测试可只传 config）。上传时随每个批次携带，
+    // 服务端据此把数据归到「哪台机器的哪个 agent」。
+    this.device = device || { code: config.collectorId || 'unknown', label: '', info: {} };
     this.lastError = null;
   }
 
   /** 组一个批次对象（入队用；bytes 为估算值，服务端会重算实际落盘字节） */
   makeBatch(agent, sessionId, records) {
-    const batchId = batchIdFor({ collectorId: this.config.collectorId, agent, sessionId, records });
+    const batchId = batchIdFor({ collectorId: this.device.code, agent, sessionId, records });
     return {
       agent,
       session_id: sessionId,
-      collector_id: this.config.collectorId,
+      collector_id: this.device.code,
+      device_code: this.device.code,
+      device_label: this.device.label,
       batch_id: batchId,
       records,
       records_count: records.length,
@@ -60,6 +65,12 @@ class Uploader {
           agent: batch.agent,
           session_id: batch.session_id,
           collector_id: batch.collector_id,
+          // 设备三元组：设备码 + 设备信息 + agent —— 服务端据此归类
+          device: {
+            code: batch.device_code || this.device.code,
+            label: batch.device_label || this.device.label,
+            info: this.device.info,
+          },
           batch_id: batch.batch_id,
           records: batch.records,
         }),

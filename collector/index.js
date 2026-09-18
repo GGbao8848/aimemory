@@ -23,6 +23,7 @@ const os = require('os');
 const { buildConfig } = require('./config');
 const { State } = require('./lib/state');
 const { Uploader } = require('./lib/uploader');
+const { loadOrCreateDevice } = require('./lib/device');
 
 const ADAPTERS = {
   codex: require('./adapters/codex'),
@@ -53,10 +54,18 @@ class Collector {
   constructor(config) {
     this.config = config;
     this.state = new State(config.stateDir);
+    // 设备身份：每条上传数据都带 (设备码, 设备信息, agent)，服务端据此归类，
+    // 这样在任意一台机器上都能查到"另一台机器做了什么"。
+    this.device = loadOrCreateDevice(config.stateDir, {
+      deviceCode: config.deviceCode,
+      deviceLabel: config.deviceLabel,
+    });
+    // collector_id 兼容字段保留，缺省即设备码
+    this.config.collectorId = this.config.collectorId || this.device.code;
     // 清理孤儿 spool（崩溃在"写完内容、未提交队列元数据"之间会残留）
     const swept = this.state.sweepSpool();
     if (swept) process.stdout.write(`[collector] 清理孤儿 spool 文件 ${swept} 个\n`);
-    this.uploader = new Uploader(config);
+    this.uploader = new Uploader(config, this.device);
     this.stats = { rounds: 0, collected: 0, sent: 0, deduped: 0, upload_errors: 0, parse_errors: 0, skipped_noise: 0 };
     this.stopping = false;
   }
@@ -136,6 +145,7 @@ class Collector {
   status() {
     return {
       collector_id: this.config.collectorId,
+      device: { code: this.device.code, label: this.device.label, first_seen: this.device.first_seen, info: this.device.info },
       host: os.hostname(),
       server: this.config.serverUrl,
       agents: this.config.agents,
@@ -161,7 +171,7 @@ class Collector {
   }
 
   async run() {
-    process.stdout.write(`[collector] 启动：${this.config.collectorId} → ${this.config.serverUrl}（agent: ${this.config.agents.join(',')}）\n`);
+    process.stdout.write(`[collector] 启动：${this.device.label}（${this.device.code}） → ${this.config.serverUrl}（agent: ${this.config.agents.join(',')}）\n`);
     if (!this.config.token) {
       process.stderr.write('[collector] 未配置 Token（AIMEMORY_TOKEN 或 config.json 的 token）——上传会 401\n');
     }

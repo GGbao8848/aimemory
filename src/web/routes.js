@@ -170,10 +170,15 @@ const l0IngestHandler = wrap(async (req, res) => {
   if (b.records.length > 5000) {
     return res.status(413).json({ error: '单批次记录数超限（≤5000），请拆分上传' });
   }
+  // 设备信息：device.code 是归类主键；label/info 供跨机识别与排查
+  const dev = b.device && typeof b.device === 'object' ? b.device : {};
   const r = l0Store.ingestBatch({
     userId: req.identity.userId,
     agent,
     sessionId,
+    deviceCode: dev.code || b.device_code || b.collector_id,
+    deviceLabel: dev.label || b.device_label,
+    deviceInfo: dev.info,
     collectorId: b.collector_id,
     batchSeq: b.batch_seq,
     batchId: b.batch_id,
@@ -185,9 +190,29 @@ const l0IngestHandler = wrap(async (req, res) => {
 // 鉴权 + 处理：index.js 以 [parser, ...l0IngestRoute] 形式挂载，先于全局 1mb parser
 const l0IngestRoute = [requireAuth, l0IngestHandler];
 
-// 归档概况 + 会话清单（Web 展示 / 采集器 status 自检）
+// 归档概况 + 设备清单 + 会话清单（Web 展示 / 采集器 status 自检）
+// 支持 ?device=<设备码>&agent=<agent> 过滤会话，用于"看某台机器做了什么"
 apiRouter.get('/l0/stats', requireAuth, wrap(async (req, res) => {
-  res.json({ ...l0Store.archiveStats(req.identity.userId), sessions_list: l0Store.listSessions(req.identity.userId, 50) });
+  const deviceCode = req.query.device ? String(req.query.device) : null;
+  const agent = req.query.agent ? String(req.query.agent) : null;
+  res.json({
+    ...l0Store.archiveStats(req.identity.userId),
+    devices_list: l0Store.listDevices(req.identity.userId),
+    sessions_list: l0Store.listSessions(req.identity.userId, { deviceCode, agent, limit: 200 }),
+  });
+}));
+
+// 单会话详情：读取归档内容（跨用户访问在 store 层校验）
+apiRouter.get('/l0/session', requireAuth, wrap(async (req, res) => {
+  const { device, agent, session_id: sessionId } = req.query;
+  if (!agent || !sessionId) return res.status(400).json({ error: '缺少 agent / session_id' });
+  const r = l0Store.readSession(req.identity.userId, {
+    deviceCode: device ? String(device) : null,
+    agent: String(agent),
+    sessionId: String(sessionId),
+  });
+  if (!r) return res.status(404).json({ error: '会话不存在或无权访问' });
+  res.json({ agent, device: device || null, session_id: sessionId, ...r });
 }));
 
 // ===== 设备流连接（零粘贴：发起 → 授权页确认 → 轮询拿 key）=====

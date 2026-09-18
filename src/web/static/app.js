@@ -99,6 +99,7 @@ function showApp() {
 
 const VIEW_META = {
   memories: { title: '我的记忆', sub: '管理 agent 为你沉淀的记忆，跨会话复用' },
+  sessions: { title: '会话归档', sub: '各设备 agent 的原始会话备份（只归档，不做 AI 加工）' },
   keys: { title: '接入 Token', sub: '为每个 agent 客户端签发独立 Token，随时单独吊销' },
   guide: { title: '接入指南', sub: 'MCP 接入步骤与工具说明' },
 };
@@ -112,6 +113,7 @@ function switchView(name) {
   );
   $('#view-title').textContent = VIEW_META[name].title;
   $('#view-sub').textContent = VIEW_META[name].sub;
+  if (name === 'sessions') loadArchive();
 }
 
 document.querySelectorAll('.nav-item').forEach((btn) => {
@@ -361,6 +363,159 @@ $('#key-create-form').addEventListener('submit', async (e) => {
     loadKeys();
   } catch (e2) { toast(e2.message); }
 });
+
+// ===== 会话归档（L0：按设备 → agent → 会话 浏览原始会话）=====
+
+let archiveFilter = { device: null, agent: null };
+
+function fmtBytes(n) {
+  if (!n) return '0 B';
+  const u = ['B', 'KB', 'MB', 'GB'];
+  let i = 0;
+  let v = n;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i += 1; }
+  return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${u[i]}`;
+}
+
+function fmtTime(s) {
+  if (!s) return '—';
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? s : d.toLocaleString();
+}
+
+function agentLabel(a) {
+  return { codex: 'Codex', claude: 'Claude Code', zcode: 'ZCode' }[a] || a;
+}
+
+async function loadArchive() {
+  try {
+    const q = archiveFilter.device ? `?device=${encodeURIComponent(archiveFilter.device)}` : '';
+    const data = await api(`/api/l0/stats${q}`);
+    renderDevices(data.devices_list || []);
+    renderArchiveSessions(data.sessions_list || []);
+  } catch (e) { toast(e.message); }
+}
+
+function renderDevices(devices) {
+  const host = $('#l0-devices');
+  if (!devices.length) {
+    host.innerHTML = `<p class="muted">暂无设备上报。在目标机器上部署采集器后（见「接入指南」的 aimemory-collector skill），这里会出现该设备。</p>`;
+    return;
+  }
+  host.innerHTML = devices.map((d) => {
+    const info = d.info || {};
+    const os = [info.platform, info.os_release, info.arch].filter(Boolean).join(' ');
+    const active = archiveFilter.device === d.device_code;
+    return `
+    <div class="device-item${active ? ' device-active' : ''}" data-device="${esc(d.device_code)}">
+      <div class="device-main">
+        <span class="device-name">${esc(d.label || d.device_code)}</span>
+        <code class="muted small">${esc(d.device_code)}</code>
+        <span class="muted small">${os ? esc(os) + ' · ' : ''}${(d.agents || []).map(agentLabel).map(esc).join(' / ')}</span>
+      </div>
+      <div class="device-stats">
+        <span>${d.sessions} 会话</span>
+        <span>${d.records} 条</span>
+        <span>${fmtBytes(d.bytes)}</span>
+        <span class="muted small">最近 ${fmtTime(d.last_seen)}</span>
+      </div>
+    </div>`;
+  }).join('');
+  host.querySelectorAll('[data-device]').forEach((el) => {
+    el.onclick = () => {
+      const code = el.dataset.device;
+      archiveFilter.device = archiveFilter.device === code ? null : code;
+      loadArchive();
+    };
+  });
+}
+
+function renderArchiveSessions(sessions) {
+  const host = $('#l0-sessions');
+  const title = $('#l0-sessions-title');
+  const filter = $('#l0-filter');
+
+  const filtered = archiveFilter.agent ? sessions.filter((s) => s.agent === archiveFilter.agent) : sessions;
+  title.textContent = archiveFilter.device ? `会话 · ${archiveFilter.device}` : '会话（全部设备）';
+  filter.innerHTML = archiveFilter.device
+    ? `<a href="#" id="l0-clear">清除筛选</a>`
+    : '';
+  const clear = $('#l0-clear');
+  if (clear) clear.onclick = (e) => { e.preventDefault(); archiveFilter = { device: null, agent: null }; loadArchive(); };
+
+  if (!filtered.length) {
+    host.innerHTML = '<p class="muted">暂无归档会话。</p>';
+    return;
+  }
+  host.innerHTML = filtered.map((s) => `
+    <div class="session-item" data-session="${esc(s.session_id)}" data-agent="${esc(s.agent)}" data-device="${esc(s.device_code || '')}">
+      <div class="session-main">
+        <code class="session-id">${esc(s.session_id)}</code>
+        <span class="muted small">${esc(agentLabel(s.agent))} · ${esc(s.device_code || '未标注设备')} · ${s.records} 条 · ${fmtBytes(s.bytes)}</span>
+      </div>
+      <span class="muted small">${fmtTime(s.last_received)}</span>
+    </div>`).join('');
+  host.querySelectorAll('[data-session]').forEach((el) => {
+    el.onclick = () => openSession(el.dataset.agent, el.dataset.device, el.dataset.session);
+  });
+}
+
+const ROLE_LABEL = {
+  user: '用户', assistant: '助手', system: '系统', tool: '工具', reasoning: '推理', meta: '元信息',
+};
+
+async function openSession(agent, device, sessionId) {
+  const card = $('#l0-detail-card');
+  const host = $('#l0-detail');
+  card.classList.remove('hidden');
+  $('#l0-detail-title').textContent = sessionId;
+  $('#l0-detail-meta').textContent = '加载中…';
+  host.innerHTML = '';
+  try {
+    const q = new URLSearchParams({ agent, session_id: sessionId });
+    if (device) q.set('device', device);
+    const d = await api(`/api/l0/session?${q}`);
+    const recs = d.records || [];
+    $('#l0-detail-meta').textContent =
+      `${agentLabel(agent)} · ${device || '未标注设备'} · 共 ${d.total || recs.length} 条` +
+      (d.truncated ? `（仅显示前 ${recs.length} 条）` : '');
+    if (!recs.length) {
+      host.innerHTML = '<p class="muted">该会话暂无内容（归档文件可能已被清理）。</p>';
+      return;
+    }
+    host.innerHTML = recs.map((r) => {
+      const role = r.role || 'meta';
+      const content = r.content ? esc(r.content) : '<span class="muted">（无正文）</span>';
+      const meta = r.meta && Object.keys(r.meta).length
+        ? `<div class="sd-meta muted small">${esc(JSON.stringify(r.meta))}</div>` : '';
+      const hasRaw = r.raw !== undefined;
+      return `
+      <div class="sd-item sd-${esc(role)}">
+        <div class="sd-head">
+          <span class="sd-role">${esc(ROLE_LABEL[role] || role)}</span>
+          <span class="muted small">${fmtTime(r.ts)}</span>
+          ${hasRaw ? '<button class="btn btn-ghost sd-raw-btn" type="button">原始</button>' : ''}
+        </div>
+        <pre class="sd-content">${content}</pre>
+        ${meta}
+        ${hasRaw ? `<pre class="sd-raw hidden">${esc(JSON.stringify(r.raw, null, 2))}</pre>` : ''}
+      </div>`;
+    }).join('');
+    host.querySelectorAll('.sd-raw-btn').forEach((b) => {
+      b.onclick = () => {
+        const raw = b.closest('.sd-item').querySelector('.sd-raw');
+        raw.classList.toggle('hidden');
+      };
+    });
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (e) {
+    $('#l0-detail-meta').textContent = '';
+    host.innerHTML = `<p class="muted">加载失败：${esc(e.message)}</p>`;
+  }
+}
+
+$('#l0-detail-close').addEventListener('click', () => $('#l0-detail-card').classList.add('hidden'));
+$('#l0-refresh').addEventListener('click', () => loadArchive());
 
 // ===== MCP 配置 JSON =====
 
