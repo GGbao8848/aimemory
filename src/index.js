@@ -73,6 +73,12 @@ if (fs.existsSync(ATLAS_DIR)) {
     res.sendFile(path.join(__dirname, 'web', 'static', 'index.html'))
   );
 }
+// 多框架前端样例（评估用，见 samples/README.md）：/samples/three-3d/ 等。
+// 数据接口与星图同源同鉴权（未登录时样例自动切内置演示数据），纯静态直出即可。
+const SAMPLES_DIR = path.join(config.root, 'samples');
+if (fs.existsSync(SAMPLES_DIR)) {
+  app.use('/samples', express.static(SAMPLES_DIR, { index: 'index.html' }));
+}
 app.use(express.static(path.join(__dirname, 'web', 'static')));
 
 // ===== MCP 端点（Streamable HTTP）=====

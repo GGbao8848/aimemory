@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>aimemory · 图谱（Vue 3 样例）</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #060a14; color: #dfe8f8;
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; overflow: hidden; }
+  #app { display: grid; grid-template-columns: 1fr 320px; height: 100%; }
+  header { position: fixed; top: 0; left: 0; right: 0; z-index: 10; display: flex; gap: 12px; align-items: center;
+    padding: 10px 16px; font-size: 13px; background: linear-gradient(180deg, rgba(4,8,16,.9), transparent); }
+  .badge { padding: 3px 10px; border-radius: 999px; font-size: 11px; border: 1px solid rgba(125,211,252,.45); color: #7dd3fc; }
+  .badge.demo { border-color: rgba(251,191,36,.5); color: #fbbf24; }
+  header a { margin-left: auto; color: #8fb6e8; font-size: 12px; }
+  svg { width: 100%; height: 100%; display: block; }
+  .ring { fill: none; stroke-width: 1.5; }
+  .link { fill: none; stroke: #6fb4ff; stroke-opacity: .18; stroke-width: 1; }
+  .link.hot { stroke: #9fd6ff; stroke-opacity: .8; stroke-width: 1.8; }
+  .node { cursor: pointer; }
+  .node circle { transition: r .2s; }
+  .node text { fill: #dfe8f8; font-size: 11px; paint-order: stroke; stroke: rgba(4,8,16,.9); stroke-width: 3px; }
+  .node.dim { opacity: .18; }
+  .panel { border-left: 1px solid rgba(140,175,230,.16); background: rgba(10,16,30,.72); padding: 18px 16px; overflow: auto; }
+  .panel h2 { font-size: 15px; margin: 0 0 2px; }
+  .panel .sub { color: #8ba0c0; font-size: 12px; margin-bottom: 10px; }
+  .panel h4 { font-size: 10px; letter-spacing: .18em; color: #7d8fb0; margin: 16px 0 6px; }
+  .panel li, .panel .kv { font-size: 12px; color: #b9c7de; line-height: 1.6; }
+  .panel .metric { font-size: 22px; font-variant-numeric: tabular-nums; color: #7dd3fc; }
+  .layers { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+  .layers button { cursor: pointer; background: rgba(120,170,255,.08); color: #cfdcf0;
+    border: 1px solid rgba(140,175,230,.2); border-radius: 999px; padding: 4px 12px; font-size: 11.5px; }
+  .layers button.on { border-color: rgba(125,211,252,.6); color: #eaf4ff; background: rgba(125,211,252,.14); }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
