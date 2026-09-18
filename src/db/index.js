@@ -73,7 +73,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_user_name ON api_keys(user_id, na
 -- 迁移：旧版「一人最多一条生效密钥」的硬约束已随多 Token 策略移除（幂等 DROP 兼容存量库）
 DROP INDEX IF EXISTS idx_api_keys_user_active;
 
--- Web 登录会话（Keycloak 登录成功后建立，HttpOnly cookie 引用 sid）
+-- Web 登录会话（本地口令登录成功后建立，HttpOnly cookie 引用 sid）
 CREATE TABLE IF NOT EXISTS sessions (
   id         TEXT PRIMARY KEY,
   user_id    TEXT NOT NULL,

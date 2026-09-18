@@ -1,13 +1,12 @@
 {
   "name": "aimemory",
   "version": "0.1.0",
-  "description": "企业级自托管 AI 记忆库：mem0 兼容的 MCP 记忆服务 + Keycloak 多租户隔离 + 用户自助管理平台",
+  "description": "aimemory —— 个人自托管的 AI 记忆库：mem0 兼容 MCP 服务 + 四层记忆（L0 会话归档 / L2 事实记忆）+ Web 管理平台",
   "private": true,
   "type": "commonjs",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "setup-keycloak": "node scripts/setup-keycloak.mjs",
     "collector": "node collector/index.js",
     "collector:status": "node collector/index.js --status",
     "test": "node --test"
@@ -20,8 +19,7 @@
     "adm-zip": "^0.6.0",
     "better-sqlite3": "^13.0.3",
     "cookie-parser": "^1.4.7",
-    "express": "^4.21.2",
-    "jose": "^5.9.6"
+    "express": "^4.21.2"
   },
   "allowScripts": {
     "better-sqlite3@13.0.3": true

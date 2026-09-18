@@ -2,7 +2,7 @@
 
 /**
  * REST /api + Web 会话辅助。
- * - 鉴权：Authorization: Token m0-xxx（API key）或 aim_session cookie（Keycloak 登录会话）
+ * - 鉴权：Authorization: Token m0-xxx（API key）或 aim_session cookie（Web 口令登录会话）
  * - 所有数据访问强制 user_id 隔离
  */
 const express = require('express');
@@ -36,16 +36,10 @@ function resolveIdentity(req) {
 function requireAuth(req, res, next) {
   const id = resolveIdentity(req);
   if (!id) {
-    return res.status(401).json({ error: '未授权：请携带 Authorization: Token m0-xxx 或先登录 Web 平台' });
+    return res.status(401).json({ error: '未授权：请携带 Authorization: Token m0-xxx，或先在 Web 页登录' });
   }
   req.identity = id;
   next();
-}
-
-/** 构造回调地址：PUBLIC_BASE_URL 优先，否则用请求来源 Host */
-function buildRedirectUri(req, pathname = '/auth/callback') {
-  const base = config.publicBaseUrl || `http://${req.get('host')}`;
-  return `${base}${pathname}`;
 }
 
 apiRouter.get('/me', wrap(async (req, res) => {
@@ -257,4 +251,4 @@ apiRouter.post('/connect/confirm', requireAuth, wrap(async (req, res) => {
   res.status(201).json({ token: r.token, key_name: r.key_name, api_key_id: r.api_key_id });
 }));
 
-module.exports = { apiRouter, resolveIdentity, buildRedirectUri, l0IngestRoute };
+module.exports = { apiRouter, resolveIdentity, l0IngestRoute };

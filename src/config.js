@@ -23,22 +23,33 @@ function loadEnv() {
 
 loadEnv();
 
-// 会话签名/校验密钥：缺失或为空时自动生成并写回 .env，保证 pm2 重启后会话不失效
-// 注意：不能只看「SESSION_SECRET= 这行是否存在」——.env 里空值也会被 loadEnv 读进来，
-// 若不回填，每次重启都会生成新 secret，已登录的 Web 会话全部失效。
-function ensureSessionSecret() {
-  if (process.env.SESSION_SECRET) return;
-  const secret = crypto.randomBytes(32).toString('hex');
-  let content = fs.readFileSync(envPath, 'utf8');
-  if (/^\s*SESSION_SECRET\s*=/m.test(content)) {
-    content = content.replace(/^\s*SESSION_SECRET\s*=.*$/m, `SESSION_SECRET=${secret}`);
+// 身份常量：单用户模式下所有数据归属这一个身份，由 MCP 的 instructions / Web 展示使用
+const USER_ID = process.env.AIMEMORY_USER_ID || 'owner';
+
+/**
+ * 本地登录口令：缺失或为空时自动生成强口令并写回 .env。
+ * 与旧 SESSION_SECRET 的坑同理——不能只看「.env 里有没有 AIMEMORY_PASSWORD= 这行」，
+ * 空值也会被 loadEnv 读进来，若不回填则每次重启都会换口令、且旧口令无从得知。
+ *
+ * @param {string} file 目标 .env 路径
+ * @param {string|undefined} current 当前生效值（非空则直接返回 null，不生成）
+ * @returns {string|null} 生成的口令，或 null（无需生成）
+ */
+function ensurePassword(file, current) {
+  if (current) return null;
+  const generated = crypto.randomBytes(16).toString('base64url');
+  let content = fs.readFileSync(file, 'utf8');
+  if (/^\s*AIMEMORY_PASSWORD\s*=/m.test(content)) {
+    // 已有该行（可能是空值）→ 就地替换，避免重复追加
+    content = content.replace(/^\s*AIMEMORY_PASSWORD\s*=.*$/m, `AIMEMORY_PASSWORD=${generated}`);
   } else {
-    content = `${content.replace(/\s*$/, '')}\nSESSION_SECRET=${secret}\n`;
+    content = `${content.replace(/\s*$/, '')}\nAIMEMORY_PASSWORD=${generated}\n`;
   }
-  fs.writeFileSync(envPath, content);
-  process.env.SESSION_SECRET = secret;
+  fs.writeFileSync(file, content);
+  return generated;
 }
-ensureSessionSecret();
+const generatedPassword = ensurePassword(envPath, process.env.AIMEMORY_PASSWORD);
+if (generatedPassword) process.env.AIMEMORY_PASSWORD = generatedPassword;
 
 // ===== Embedding 语义检索 =====
 // 用于 search_memories 的语义召回。指向任意 OpenAI 兼容的 /v1/embeddings 服务。
@@ -75,14 +86,18 @@ module.exports = {
   l0MaxBody: process.env.AIMEMORY_L0_MAX_BODY || '64mb',
   port: parseInt(process.env.PORT || '18543', 10),
   publicBaseUrl: (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, ''),
-  keycloak: {
-    url: (process.env.KEYCLOAK_URL || 'http://localhost:18443').replace(/\/$/, ''),
-    realm: process.env.KEYCLOAK_REALM || 'aimemory',
-    clientId: process.env.KEYCLOAK_CLIENT_ID || 'aimemory-web',
-  },
   embedding,
   llm,
-  sessionSecret: process.env.SESSION_SECRET,
+  // ===== 单用户身份（个人部署） =====
+  // 所有数据归属这一个身份；不存在多用户/租户概念。
+  // 默认 'owner'：全新的个人部署直接用默认值即可，无需配置。
+  userId: USER_ID,
+  userName: process.env.AIMEMORY_USER_NAME || '我',
+  // 本地登录口令（Web 管理页）；首次启动自动生成并写回 .env
+  password: process.env.AIMEMORY_PASSWORD,
+  passwordGenerated: generatedPassword, // 非空表示本次是自动生成，启动时提示用户
   sessionTtlMs: 7 * 24 * 3600 * 1000, // Web 会话 7 天
   mcpSessionTtlMs: 30 * 60 * 1000, // MCP session 空闲 30 分钟清理
+  // 供测试直接验证口令生成逻辑（生产路径已在模块加载时调用过）
+  _ensurePassword: ensurePassword,
 };

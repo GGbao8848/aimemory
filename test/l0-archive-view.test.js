@@ -35,6 +35,7 @@ function harness() {
         contains: (c) => cls.has(c),
       },
       addEventListener() {},
+      focus() {},
       querySelectorAll() { return []; },
       querySelector() { return null; },
       closest() { return mkEl('x'); },

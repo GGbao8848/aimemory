@@ -4,7 +4,7 @@
  * 核心回归测试（素材提炼型记忆库）：
  * - 写入语义：add 一律异步受理（text/messages 都返回 event_id），不落原文
  * - 提炼流程：事件 done 后产物入库；提炼失败/无产物 → failed，素材不落库
- * - CRUD / 多租户隔离 / 关键词检索兜底 / schema
+ * - CRUD / user_id 过滤正确性 / 关键词检索兜底 / schema
  *
  * 用独立临时 DB（AIMEMORY_DB），不碰生产数据。运行：npm test
  * LLM 与 embedding 用 stub 假实现（不依赖外部服务），保证确定性。
@@ -131,7 +131,7 @@ test('text 读取 / 更新 / 删除', async () => {
   assert.equal(got.id, id);
   const upd = repo.updateMemory({ id, userId: u1, text: '手动添加的最终记忆文本 v2' });
   assert.equal(upd.text, '手动添加的最终记忆文本 v2');
-  assert.equal(repo.deleteMemory(id, u2), false, '跨用户删除应拒');
+  assert.equal(repo.deleteMemory(id, u2), false, '非归属身份不得删除（user_id 过滤生效）');
   assert.equal(repo.deleteMemory(id, u1), true);
 });
 
@@ -142,7 +142,7 @@ test('关键词检索命中（stub embedding 向量恒定，走 FTS 也能命中
   assert.ok(res.length >= 1, '关键词检索应命中');
 });
 
-test('多租户隔离：u2 看不到 u1 的记忆', async () => {
+test('user_id 过滤：u2 查不到 u1 的记忆（单用户下仍保证查询不串账本）', async () => {
   const before = repo.stats(u1).memories;
   const res = await repo.searchMemories({ userId: u2, query: 'bip-timesheet', limit: 10 });
   assert.equal(res.length, 0, 'u2 搜不到 u1 的记忆');

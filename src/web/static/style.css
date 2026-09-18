@@ -322,6 +322,8 @@ input[type="text"], input[type="search"], textarea,
 }
 .login-card { max-width: 400px; width: 100%; text-align: center; padding: 36px 32px; }
 .login-card h1 { font-size: 20px; margin-bottom: 8px; }
+.login-form { margin-top: 20px; display: flex; flex-direction: column; gap: 12px; }
+.login-form input { width: 100%; text-align: center; }
 
 /* 按钮 */
 .btn {

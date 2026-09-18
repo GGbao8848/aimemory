@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>aimemory · 企业 AI 记忆库</title>
+  <title>aimemory · 个人 AI 记忆库</title>
   <link rel="icon" type="image/png" href="/icon-32.png" />
   <link rel="apple-touch-icon" href="/icon-192.png" />
   <script>
@@ -21,13 +21,16 @@
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <!-- 未登录视图（SSO 未通过时短暂显示） -->
+  <!-- 未登录视图（本地口令登录） -->
   <section id="view-login" class="login-wrap hidden">
     <div class="card login-card">
       <img class="login-logo" src="/icon-128.png" alt="aimemory" />
       <h1>登录记忆平台</h1>
-      <p class="muted">通过公司统一登录平台（Keycloak）登录后，即可管理你的记忆、生成接入密钥。</p>
-      <a class="btn btn-primary btn-block" href="/auth/login">通过登录平台登录</a>
+      <p class="muted">输入访问口令以管理你的记忆、会话归档与接入 Token。</p>
+      <form id="login-form" method="POST" action="/auth/local-login">
+        <input id="login-password" name="password" type="password" placeholder="访问口令" autocomplete="current-password" required />
+        <button class="btn btn-primary btn-block" type="submit">登录</button>
+      </form>
     </div>
   </section>
 
@@ -38,7 +41,7 @@
         <img class="brand-logo" src="/icon-128.png" alt="aimemory" />
         <div class="brand-text">
           <strong>aimemory</strong>
-          <span>企业 AI 记忆库</span>
+          <span>个人 AI 记忆库</span>
         </div>
       </div>
 
@@ -72,8 +75,7 @@
           <span class="who-dot" aria-hidden="true"></span>
           <span id="user-name" class="who">—</span>
         </div>
-        <a class="logout" href="/auth/logout">
-          <svg viewBox="0 0 16 16" class="nav-ico" aria-hidden="true"><path d="M6 3H3.5A1.5 1.5 0 0 0 2 4.5v7A1.5 1.5 0 0 0 3.5 13H6M10 5l3 3-3 3M13 8H6.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <a class="logout" href="/auth/logout">          <svg viewBox="0 0 16 16" class="nav-ico" aria-hidden="true"><path d="M6 3H3.5A1.5 1.5 0 0 0 2 4.5v7A1.5 1.5 0 0 0 3.5 13H6M10 5l3 3-3 3M13 8H6.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <span>退出登录</span>
         </a>
       </div>
@@ -212,7 +214,7 @@
             <li><b>填入客户端</b>：把 JSON 或字段粘贴到你的 agent 的 MCP 客户端配置（Claude Code / Codex / BR-Agent 自定义连接器…）</li>
             <li><b>验证</b>：agent 调用 <code>add_memory</code> 提交一条素材（等 AI 提炼完成后），再到本平台「我的记忆」确认</li>
           </ol>
-          <p class="muted small">每个员工 Token 互不可见、数据互相隔离；一名员工可同时持有多枚 Token，按客户端分发、单独吊销。MCP 端点：<code>http://&lt;服务器内网IP&gt;:18543/mcp</code></p>
+          <p class="muted small">可同时持有多枚 Token，按客户端 / 设备分发、单独吊销；任一枚泄露只波及它自己。MCP 端点：<code>http://&lt;服务器内网IP&gt;:18543/mcp</code></p>
         </div>
 
         <div class="card">
@@ -224,7 +226,7 @@
             <li><code>get_memories</code> / <code>get_memory</code> — 列出 / 查看单条</li>
             <li><code>update_memory</code> / <code>delete_memory</code> — 修正 / 删除</li>
           </ul>
-          <p class="muted small">只暴露这 7 个核心工具；写入自动抽取事实（facts）增强召回。每个员工的记忆互相隔离，同一员工多个 agent 共享一份账本。</p>
+          <p class="muted small">只暴露这 7 个核心工具；写入自动抽取事实（facts）增强召回。所有记忆归属同一个账本，跨设备、跨 agent 共享。</p>
         </div>
       </section>
     </main>

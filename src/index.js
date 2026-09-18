@@ -8,7 +8,6 @@ const cookieParser = require('cookie-parser');
 const config = require('./config');
 const repo = require('./db/repo');
 const { handleMcpRequest } = require('./mcp/server');
-const keycloak = require('./auth/keycloak');
 const tokens = require('./auth/tokens');
 const web = require('./web/routes');
 
@@ -71,68 +70,126 @@ app.get('/mcp', (_req, res) =>
 // ===== REST /api（统一鉴权：Token API key 或 Web 会话 cookie）=====
 app.use('/api', web.apiRouter);
 
-// ===== Keycloak 登录流程 =====
-// ?next= 支持站内跳转（如 /connect）：回调后落到目标页，用于半自动连接授权
-app.get('/auth/login', async (req, res) => {
-  try {
-    const next = typeof req.query.next === 'string' && req.query.next.startsWith('/') && !req.query.next.includes('//') ? req.query.next : '/';
-    const redirectUri = web.buildRedirectUri(req);
-    const { url, state, verifier } = await keycloak.buildAuthorizeUrl(redirectUri);
-    // state 校验 + verifier + next 都放 HttpOnly cookie（PKCE）
-    res.cookie('kc_state', state, { httpOnly: true, sameSite: 'lax', maxAge: 10 * 60 * 1000 });
-    res.cookie('kc_verifier', verifier, { httpOnly: true, sameSite: 'lax', maxAge: 10 * 60 * 1000 });
-    res.cookie('kc_next', next, { httpOnly: true, sameSite: 'lax', maxAge: 10 * 60 * 1000 });
-    res.redirect(url);
-  } catch (e) {
-    res.status(500).send(`登录发起失败: ${e.message}`);
-  }
+// ===== 本地口令登录（单用户）=====
+// 个人部署，不需要 SSO；用 .env 里的 AIMEMORY_PASSWORD 登录，成功后建立本地会话
+// （sessions 表 + aim_session cookie）。
+
+/** 登录失败限速：同一 IP 15 分钟内失败上限（内网服务也要防暴力猜口令） */
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX_FAILS = 10;
+const loginFails = new Map(); // ip -> { count, firstAt }
+
+function loginBlocked(ip) {
+  const r = loginFails.get(ip);
+  if (!r) return false;
+  if (Date.now() - r.firstAt > LOGIN_WINDOW_MS) { loginFails.delete(ip); return false; }
+  return r.count >= LOGIN_MAX_FAILS;
+}
+function noteLoginFail(ip) {
+  const r = loginFails.get(ip);
+  if (!r || Date.now() - r.firstAt > LOGIN_WINDOW_MS) loginFails.set(ip, { count: 1, firstAt: Date.now() });
+  else r.count += 1;
+}
+
+/** 恒定时长比较，避免通过响应时间猜口令长度 */
+function passwordOk(input) {
+  const a = Buffer.from(String(input == null ? '' : input));
+  const b = Buffer.from(config.password);
+  if (a.length !== b.length) return false;
+  return require('crypto').timingSafeEqual(a, b);
+}
+
+/** 站内跳转白名单（防开放重定向） */
+function safeNext(v) {
+  return typeof v === 'string' && v.startsWith('/') && !v.includes('//') ? v : '/';
+}
+
+/** 登录页（口令表单；无需前端框架，与 /connect 页同风格） */
+function renderLoginPage(next, { error, blocked } = {}) {
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>aimemory · 登录</title>
+<link rel="icon" type="image/png" href="/icon-32.png" />
+<style>
+  :root { --bg:#0b0f17; --surface:#131a29; --surface-2:#1a2336; --border:#243049;
+          --text:#e8ecf4; --muted:#8a94a8; --accent:#4c8dff; --danger:#f87171; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+         background:radial-gradient(600px 300px at 70% -10%, rgba(76,141,255,.08), transparent 60%), var(--bg);
+         font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; color:var(--text); }
+  .card { width:100%; max-width:400px; margin:24px; padding:34px 30px; background:var(--surface);
+          border:1px solid var(--border); border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.35); }
+  h1 { margin:0 0 6px; font-size:20px; }
+  .sub { margin:0 0 22px; color:var(--muted); font-size:13px; }
+  label { display:block; font-size:12px; color:var(--muted); margin-bottom:6px; }
+  input[type=password] { width:100%; background:var(--surface-2); border:1px solid var(--border); border-radius:8px;
+                         color:var(--text); padding:11px 12px; font-size:14px; font-family:inherit; }
+  input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px rgba(76,141,255,.12); }
+  .btn { width:100%; border:none; background:var(--accent); color:#fff; border-radius:8px;
+         padding:11px 0; font-size:14px; font-weight:600; cursor:pointer; margin-top:18px; font-family:inherit; }
+  .btn:hover { background:#3a6fd8; }
+  .err { color:var(--danger); font-size:12.5px; margin-top:12px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>aimemory</h1>
+    <p class="sub">输入访问口令以管理记忆与会话归档</p>
+    <form method="POST" action="/auth/local-login">
+      <input type="hidden" name="next" value="${esc(next)}" />
+      <label for="password">访问口令</label>
+      <input type="password" id="password" name="password" autocomplete="current-password" autofocus required />
+      <button class="btn" type="submit">登录</button>
+      ${blocked ? '<p class="err">尝试次数过多，请 15 分钟后再试</p>' : ''}
+      ${error ? `<p class="err">${esc(error)}</p>` : ''}
+    </form>
+  </div>
+</body>
+</html>`;
+}
+
+// 登录页：?next= 支持站内跳转（如 /connect）
+app.get('/auth/login', (req, res) => {
+  const next = safeNext(req.query.next);
+  const ip = req.ip || req.socket.remoteAddress || '';
+  res.type('html').send(renderLoginPage(next, { blocked: loginBlocked(ip) }));
 });
 
-app.get('/auth/callback', async (req, res) => {
-  try {
-    const { code, state, error } = req.query;
-    if (error) return res.status(400).send(`Keycloak 登录失败: ${error}`);
-    if (state !== req.cookies?.kc_state) return res.status(400).send('state 校验失败（防 CSRF）');
-    const redirectUri = web.buildRedirectUri(req);
-    const { user, tokens: kcTokens } = await keycloak.exchangeCode(redirectUri, code, req.cookies.kc_verifier);
-    // 建立本地会话
-    const sid = require('crypto').randomBytes(24).toString('hex');
-    repo.createSession(sid, user.id, config.sessionTtlMs, user.username);
-    res.cookie('aim_session', sid, {
-      httpOnly: true, sameSite: 'lax', maxAge: config.sessionTtlMs,
-    });
-    // 保存 Keycloak id_token（HttpOnly，仅用于登出时拼 end_session 参数）
-    if (kcTokens.id_token) {
-      res.cookie('kc_id_token', kcTokens.id_token, {
-        httpOnly: true, sameSite: 'lax', maxAge: config.sessionTtlMs,
-      });
-    }
-    res.clearCookie('kc_state');
-    res.clearCookie('kc_verifier');
-    // 支持 /auth/login?next= 跳转（半自动连接落在 /connect）；否则首页带 logged=1 标记
-    // （前端据此避免「回跳首页后又跳登录」的死循环）
-    const next = req.cookies?.kc_next || '/';
-    res.clearCookie('kc_next');
-    res.redirect(next === '/connect' ? '/connect' : '/?logged=1');
-  } catch (e) {
-    res.status(500).send(`登录回调失败: ${e.message}`);
+// 口令校验 → 建立本地会话
+app.post('/auth/local-login', express.urlencoded({ extended: false }), (req, res) => {
+  const ip = req.ip || req.socket.remoteAddress || '';
+  const next = safeNext((req.body || {}).next);
+
+  if (loginBlocked(ip)) {
+    return res.status(429).type('html').send(renderLoginPage(next, { blocked: true }));
   }
+  if (!passwordOk((req.body || {}).password)) {
+    noteLoginFail(ip);
+    return res.status(401).type('html').send(renderLoginPage(next, { error: '口令不正确' }));
+  }
+
+  loginFails.delete(ip);
+  const sid = require('crypto').randomBytes(24).toString('hex');
+  repo.createSession(sid, config.userId, config.sessionTtlMs, config.userName);
+  res.cookie('aim_session', sid, { httpOnly: true, sameSite: 'lax', maxAge: config.sessionTtlMs });
+  res.redirect(next === '/connect' ? '/connect' : '/');
 });
 
-app.get('/auth/logout', async (req, res) => {
+app.get('/auth/logout', (req, res) => {
   const sid = req.cookies?.aim_session;
   if (sid) {
     repo.deleteSession(sid);
     res.clearCookie('aim_session');
   }
-  res.clearCookie('kc_id_token');
-  // 跳到 Keycloak 登出页（携带 id_token），再回首页
-  const kcLogout = await keycloak.buildLogoutUrl(web.buildRedirectUri(req, '/'), req.cookies?.kc_id_token);
-  res.redirect(kcLogout);
+  res.redirect('/');
 });
 
 // ===== 设备流授权页 =====
-// agent 端发起连接 → 浏览器打开 /connect?request_id=xxx → SSO 登录 → 点「确认授权」
+// agent 端发起连接 → 浏览器打开 /connect?request_id=xxx → 本地口令登录 → 点「确认授权」
 // （可给 token 命名）→ agent 轮询 /api/connect/poll 拿到密钥，全程零粘贴复制。
 app.get('/connect', (req, res) => {
   const id = web.resolveIdentity(req);
@@ -190,7 +247,7 @@ app.get('/connect', (req, res) => {
   <div class="card">
     <h1 id="title">连接授权</h1>
     <p class="sub">为你的 agent 授权访问 aimemory 记忆库。</p>
-    <div class="who"><span class="dot"></span><span>已通过统一登录平台确认身份：${esc(id.username || id.userId.slice(0,8))}</span></div>
+    <div class="who"><span class="dot"></span><span>已确认身份：${esc(id.username || config.userName)}</span></div>
 
     <div id="form-area">
       <label>连接请求</label>
@@ -243,23 +300,7 @@ app.get('/connect', (req, res) => {
 </html>`);
 });
 
-// ===== 单点登出（SLO）：Keycloak front-channel logout iframe 加载本端点 =====
-// Keycloak 在某 client 登出（end_session）后，会以 iframe 加载本 realm 下所有配置了
-// frontChannelLogoutUri 的 client 的对应 URL（浏览器带 cookie 请求）——本端点据此清除
-// 本地会话 cookie，实现「在 BR-Agent 登出 → aimemory 也退出」。必须返回 200（iframe 要求）。
-app.get('/slo-logout', (req, res) => {
-  const sid = req.cookies?.aim_session;
-  if (sid) {
-    repo.deleteSession(sid);
-    res.clearCookie('aim_session');
-  }
-  res.clearCookie('kc_id_token');
-  res.clearCookie('kc_state');
-  res.clearCookie('kc_verifier');
-  res.status(200).type('text/plain').send('ok');
-});
-
-// ===== 健康检查（运维：DB 可读 + 模型服务连通性 + Keycloak 可达） =====
+// ===== 健康检查（运维：DB 可读 + 模型服务连通性） =====
 app.get('/healthz', async (_req, res) => {
   const probe = async (url, { key } = {}) => {
     try {
@@ -271,19 +312,17 @@ app.get('/healthz', async (_req, res) => {
     } catch { return false; }
   };
   const cfg = require('./config');
-  const [dbOk, embOk, llmOk, kcOk] = await Promise.all([
-    Promise.resolve(true).then(() => { repo.stats('__probe__'); return true; }).catch(() => false),
+  const [dbOk, embOk, llmOk] = await Promise.all([
+    Promise.resolve(true).then(() => { repo.stats(cfg.userId); return true; }).catch(() => false),
     cfg.embedding.enabled ? probe(`${cfg.embedding.baseUrl}/models`, { key: cfg.embedding.apiKey }) : null,
     cfg.llm.enabled ? probe(`${cfg.llm.baseUrl}/models`, { key: cfg.llm.apiKey }) : null,
-    probe(`${cfg.keycloak.url}/realms/${cfg.keycloak.realm}/.well-known/openid-configuration`),
   ]);
-  const healthy = dbOk && (embOk !== false) && (llmOk !== false) && kcOk;
+  const healthy = dbOk && (embOk !== false) && (llmOk !== false);
   res.status(healthy ? 200 : 503).json({
     status: healthy ? 'ok' : 'degraded',
     db: dbOk,
     embedding: embOk === null ? 'disabled' : embOk,
     llm: llmOk === null ? 'disabled' : llmOk,
-    keycloak: kcOk,
     time: new Date().toISOString(),
   });
 });
@@ -302,5 +341,12 @@ setInterval(() => repo.cleanupEvents(), 3600_000).unref();
 app.listen(config.port, '0.0.0.0', () => {
   console.log(`[aimemory] MCP + API + Web 已启动: http://0.0.0.0:${config.port}`);
   console.log(`[aimemory] MCP 端点: http://<内网IP>:${config.port}/mcp`);
-  console.log(`[aimemory] Keycloak: ${config.keycloak.url}/realms/${config.keycloak.realm}`);
+  console.log(`[aimemory] 身份: ${config.userName}（${config.userId}）· 单用户模式`);
+  if (config.passwordGenerated) {
+    // 首次启动自动生成口令 → 必须打印出来，否则用户无从得知（也只写在本机 .env）
+    console.log(`[aimemory] ⚠ 已生成 Web 访问口令并写入 .env：${config.passwordGenerated}`);
+    console.log('[aimemory] （登录 http://<内网IP>:' + config.port + ' 使用；请妥善保存）');
+  } else {
+    console.log(`[aimemory] Web 登录口令：.env 的 AIMEMORY_PASSWORD`);
+  }
 });

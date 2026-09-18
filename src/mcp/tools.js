@@ -6,24 +6,13 @@
  * update_memory / delete_memory。
  * - 写入语义：所有 add_memory 输入都是"素材"（text/messages），一律异步受理返回 event_id，
  *   后台内部 LLM 提炼成结构化记忆入库（不存原文）；get_event_status 查进度。
- * - 已裁剪：批量导入、整库/实体管理、agent/run 作用域。所有数据访问强制 user_id 隔离（员工维度）。
+ * - 已裁剪：批量导入、整库/实体管理、agent/run 作用域。单用户部署：所有数据归属同一身份，无需传 user_id。
  * 注：API Key 管理不暴露为 MCP 工具，由 Web 平台 REST（/api/keys）+ 设备流接入提供。
  */
 const { McpError, ErrorCode, ListToolsRequestSchema, CallToolRequestSchema } =
   require('@modelcontextprotocol/sdk/types.js');
 const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
 const repo = require('../db/repo');
-
-/** 把调用方的 user_id 解析出来；user_id 参数只能等于当前身份，否则拒绝（防跨租户） */
-function resolveUserId(userId, paramsUserId) {
-  if (paramsUserId !== undefined && paramsUserId !== null && paramsUserId !== userId) {
-    throw new McpError(
-      ErrorCode.InvalidParams,
-      'user_id 只能使用当前登录身份，无权访问其他用户的数据'
-    );
-  }
-  return userId;
-}
 
 function jsonText(obj) {
   return JSON.stringify(obj, null, 2);
@@ -35,7 +24,7 @@ const tools = [
   {
     name: 'add_memory',
     description:
-      '提交记忆素材（员工维度）。text：单条素材文本；messages：多轮对话 [{role, content}]。' +
+      '提交记忆素材。text：单条素材文本；messages：多轮对话 [{role, content}]。' +
       '素材一律**异步受理**：立即返回 {event_id, status:"pending"}，后台由 aimemory 内部 LLM 提炼成多条' +
       '自包含的结构化记忆后入库（库内只存提炼产物，不存原文），再用 get_event_status 查询提炼进度。' +
       '提炼失败（LLM 不可用/无有效产出）→ 事件 failed，素材不落库。',
@@ -55,12 +44,11 @@ const tools = [
             required: ['role', 'content'],
           },
         },
-        user_id: { type: 'string', description: '用户标识（可选，仅限当前身份）' },
         metadata: { type: 'object', description: '附加元数据（如 {source: "zcode"}），会透传给提炼出的每条记忆' },
       },
     },
-    handler: async ({ text, messages, metadata, user_id }, userId) => {
-      const uid = resolveUserId(userId, user_id);
+    handler: async ({ text, messages, metadata }, userId) => {
+      const uid = userId;
       if ((!text || !String(text).trim()) && !(Array.isArray(messages) && messages.length)) {
         throw new McpError(ErrorCode.InvalidParams, 'text 或 messages 至少提供一个');
       }
@@ -83,12 +71,11 @@ const tools = [
       type: 'object',
       properties: {
         event_id: { type: 'string', description: '异步任务 id（add_memory(messages) 返回）' },
-        user_id: { type: 'string', description: '用户标识（可选，仅限当前身份）' },
       },
       required: ['event_id'],
     },
-    handler: async ({ event_id, user_id }, userId) => {
-      const uid = resolveUserId(userId, user_id);
+    handler: async ({ event_id }, userId) => {
+      const uid = userId;
       const ev = repo.getEvent(event_id, uid);
       if (!ev) {
         throw new McpError(ErrorCode.InvalidParams, `event_id ${event_id} 不存在（或不属于当前用户）`);
@@ -106,7 +93,6 @@ const tools = [
       type: 'object',
       properties: {
         query: { type: 'string', description: '检索关键词' },
-        user_id: { type: 'string', description: '用户标识（可选，仅限当前身份）' },
         limit: { type: 'integer', minimum: 1, maximum: 100, description: '返回条数，默认 10' },
         threshold: {
           type: 'number',
@@ -114,17 +100,17 @@ const tools = [
         },
         filters: {
           type: 'object',
-          description: '过滤条件：user_id（仅当前身份）、metadata（键值，如 {"source":"zcode"}）、created_at/updated_at（时间范围，如 {"gte":"2026-08-01","lte":"2026-08-31"}）',
+          description: '过滤条件：metadata（键值，如 {"source":"zcode"}）、created_at/updated_at（时间范围，如 {"gte":"2026-08-01","lte":"2026-08-31"}）',
         },
       },
       required: ['query'],
     },
-    handler: async ({ query, limit, threshold, user_id, filters = {} }, userId) => {
+    handler: async ({ query, limit, threshold, filters = {} }, userId) => {
       if (!query || !String(query).trim()) {
         throw new McpError(ErrorCode.InvalidParams, 'query 不能为空');
       }
-      const uid = resolveUserId(userId, user_id);
-      const { user_id: _fuid, ...restFilters } = filters || {};
+      const uid = userId;
+      const { user_id: _ignored, ...restFilters } = filters || {}; // user_id 已不再需要，剥离以防历史客户端传入
       const results = await repo.searchMemories({ userId: uid, query: String(query), limit, threshold, filters: restFilters });
       return { content: [{ type: 'text', text: jsonText({ results }) }] };
     },
@@ -136,15 +122,14 @@ const tools = [
     inputSchema: {
       type: 'object',
       properties: {
-        user_id: { type: 'string', description: '用户标识（可选，仅限当前身份）' },
-        filters: { type: 'object', description: '过滤条件：user_id / metadata（键值）/ created_at、updated_at（时间范围）' },
+        filters: { type: 'object', description: '过滤条件：metadata（键值）/ created_at、updated_at（时间范围）' },
         page: { type: 'integer', minimum: 1, description: '页码，默认 1' },
         page_size: { type: 'integer', minimum: 1, maximum: 100, description: '每页条数，默认 10' },
       },
     },
-    handler: async ({ page, page_size, user_id, filters = {} }, userId) => {
-      const uid = resolveUserId(userId, user_id);
-      const { user_id: _fuid, ...restFilters } = filters || {};
+    handler: async ({ page, page_size, filters = {} }, userId) => {
+      const uid = userId;
+      const { user_id: _ignored, ...restFilters } = filters || {}; // user_id 已不再需要，剥离以防历史客户端传入
       const res = repo.listMemories({ userId: uid, page, pageSize: page_size, filters: restFilters });
       return { content: [{ type: 'text', text: jsonText({ results: res.results, total: res.total, page: res.page, page_size: res.page_size }) }] };
     },
@@ -157,12 +142,11 @@ const tools = [
       type: 'object',
       properties: {
         memory_id: { type: 'string', description: '记忆 id' },
-        user_id: { type: 'string', description: '用户标识（可选，仅限当前身份）' },
       },
       required: ['memory_id'],
     },
-    handler: async ({ memory_id, user_id }, userId) => {
-      const uid = resolveUserId(userId, user_id);
+    handler: async ({ memory_id }, userId) => {
+      const uid = userId;
       const mem = repo.getMemory(memory_id, uid);
       if (!mem) {
         throw new McpError(ErrorCode.InvalidParams, `memory_id ${memory_id} 不存在（或不属于当前用户）`);
@@ -180,12 +164,11 @@ const tools = [
         memory_id: { type: 'string', description: '记忆 id' },
         text: { type: 'string', description: '新内容（可选，不传则保留原值）' },
         metadata: { type: 'object', description: '新元数据（可选）' },
-        user_id: { type: 'string', description: '用户标识（可选，仅限当前身份）' },
       },
       required: ['memory_id'],
     },
-    handler: async ({ memory_id, text, metadata, user_id }, userId) => {
-      const uid = resolveUserId(userId, user_id);
+    handler: async ({ memory_id, text, metadata }, userId) => {
+      const uid = userId;
       const mem = repo.updateMemory({ id: memory_id, userId: uid, text, metadata });
       if (!mem) {
         throw new McpError(ErrorCode.InvalidParams, `memory_id ${memory_id} 不存在（或不属于当前用户）`);
@@ -201,12 +184,11 @@ const tools = [
       type: 'object',
       properties: {
         memory_id: { type: 'string', description: '记忆 id' },
-        user_id: { type: 'string', description: '用户标识（可选，仅限当前身份）' },
       },
       required: ['memory_id'],
     },
-    handler: async ({ memory_id, user_id }, userId) => {
-      const uid = resolveUserId(userId, user_id);
+    handler: async ({ memory_id }, userId) => {
+      const uid = userId;
       if (!repo.deleteMemory(memory_id, uid)) {
         throw new McpError(ErrorCode.InvalidParams, `memory_id ${memory_id} 不存在（或不属于当前用户）`);
       }
@@ -215,7 +197,7 @@ const tools = [
   },
 ];
 
-/** 为指定用户创建并注册工具的 MCP Server 实例（userId 闭包注入，天然租户隔离） */
+/** 创建并注册工具的 MCP Server 实例（userId 由 server 注入，单用户下为常量） */
 function buildServer() {
   const server = new Server(
     {
@@ -226,7 +208,7 @@ function buildServer() {
     {
       capabilities: { tools: {} },
       instructions:
-        '对每个工具调用，实现均按当前连接用户隔离数据；user_id 参数只能等于当前登录身份。',
+        '单用户部署：所有记忆归属同一身份，无需传 user_id。',
     }
   );
 
