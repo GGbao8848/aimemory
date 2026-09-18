@@ -40,14 +40,15 @@ pm2 -v                  # 需已安装：npm install -g pm2
 
 ## 第 2 步：dry-run 报告（必须先给用户确认）
 
-先探测本机有哪些 agent 数据、各占多大，**不改动任何东西**：
+先探测本机有哪些 agent 数据、各会采到多少，**不改动任何东西**：
 
 ```bash
 cd <仓库或采集器所在目录>
-AIMEMORY_COLLECTOR_AGENTS=codex,claude,zcode node collector/index.js --status
+node collector/index.js --dry-run
 ```
 
-`--status` 会显示本机**设备码与设备信息**（首次运行即生成，之后稳定不变）。每台机器
+`--dry-run` 输出各 agent 的可采记录数/批次数（游标从零起算的冷启动全量口径），
+不写 state、不上传。设备码与设备信息用 `--status` 查看（首次运行即生成，之后稳定不变）。每台机器
 部署时会得到不同的设备码，服务端据此归类——用户可在任意一台机器的 Web「会话归档」页看到每台机器
 分别做了什么。
 
