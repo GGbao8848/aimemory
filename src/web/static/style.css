@@ -725,3 +725,21 @@ input:focus, textarea:focus {
     padding-top: 0;
   }
 }
+
+/* ===== 操作审计 / L3 视图 ===== */
+.op-badge {
+  display: inline-block; padding: 2px 8px; border-radius: 6px;
+  font-size: 11px; font-weight: 600; font-family: var(--mono, monospace);
+  background: rgba(120, 170, 255, .12); color: #9fc6ff;
+}
+.op-ADD { background: rgba(94, 234, 212, .14); color: #5eead4; }
+.op-UPDATE { background: rgba(96, 165, 250, .14); color: #60a5fa; }
+.op-DELETE { background: rgba(248, 113, 113, .14); color: #f87171; }
+.op-NOOP { background: rgba(148, 163, 184, .14); color: #94a3b8; }
+.l3-list { list-style: none; margin: 0; padding: 0; }
+.l3-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 4px;
+  border-bottom: 1px dashed var(--hair, rgba(140, 175, 230, .18)); }
+.l3-item.superseded .l3-text { text-decoration: line-through; opacity: .55; }
+.l3-item .l3-body { flex: 1; }
+.l3-item .l3-text { font-size: 13px; }
+.l3-item .l3-meta { margin-top: 3px; font-size: 11px; }

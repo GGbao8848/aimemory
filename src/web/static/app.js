@@ -92,6 +92,8 @@ const VIEW_META = {
   sessions: { title: '会话归档', sub: '各设备 agent 的原始会话备份（只归档，不做 AI 加工）' },
   keys: { title: '接入 Token', sub: '为每个 agent 客户端签发独立 Token，随时单独吊销' },
   guide: { title: '接入指南', sub: 'MCP 接入步骤与工具说明' },
+  ops: { title: '记忆操作审计', sub: '冲突消解的每一次判定，被删原文可追溯' },
+  l3: { title: 'L3 画像/知识', sub: '长期成立的条目（data/l3 markdown），可直接编辑' },
 };
 
 function switchView(name) {
@@ -104,11 +106,58 @@ function switchView(name) {
   $('#view-title').textContent = VIEW_META[name].title;
   $('#view-sub').textContent = VIEW_META[name].sub;
   if (name === 'sessions') loadArchive();
+  if (name === 'ops') loadOps();
+  if (name === 'l3') loadL3();
 }
 
 document.querySelectorAll('.nav-item').forEach((btn) => {
   btn.addEventListener('click', () => switchView(btn.dataset.view));
 });
+
+
+// ===== 记忆操作审计（L2 冲突消解留痕）=====
+async function loadOps() {
+  const { results } = await api('/api/l2/ops?limit=50');
+  const tb = $('#ops-tbody');
+  tb.innerHTML = results.length ? results.map((r) => `
+    <tr>
+      <td><span class="op-badge op-${r.op}">${r.op}${r.applied === false ? '·拦截' : ''}</span></td>
+      <td class="mono">${esc((r.before_text ? `「${r.before_text.slice(0, 30)}…」→ ` : '') + (r.after_text ? `「${r.after_text.slice(0, 40)}」` : '')) || '—'}</td>
+      <td class="mono">${esc(r.source || '')}</td>
+      <td class="mono">${(r.created_at || '').slice(5, 16).replace('T', ' ')}</td>
+    </tr>`).join('') : '<tr><td colspan="4" class="muted">暂无记录</td></tr>';
+}
+
+// ===== L3 画像/知识（列表 + 正文编辑）=====
+async function loadL3() {
+  const [{ results }, stats] = await Promise.all([
+    api('/api/l3/entries?include_superseded=1'),
+    api('/api/l3/stats'),
+  ]);
+  $('#l3-stats').textContent = `active ${stats.active} · 已取代 ${stats.superseded} · 平均有效置信 ${stats.effective_confidence ?? '—'}`;
+  const list = $('#l3-list');
+  list.innerHTML = results.length ? results.map((e) => `
+    <li class="l3-item ${e.superseded_by ? 'superseded' : ''}">
+      <div class="l3-body">
+        <span class="op-badge">${esc(e.kind_label || e.kind)}</span>
+        <span class="l3-text">${esc(e.text)}</span>
+        ${e.superseded_by ? `<span class="muted">（已被 ${e.superseded_by.slice(0, 8)} 取代）</span>` : ''}
+        <div class="muted mono l3-meta">置信 ${e.confidence ?? '—'} → 有效 ${e.effective_confidence ?? '—'} · ${esc(e.source || '')}</div>
+      </div>
+      ${e.superseded_by ? '' : `<button class="btn btn-ghost" data-l3-edit="${e.id}" type="button">编辑</button>`}
+    </li>`).join('') : '<li class="muted">暂无条目——后台凝练会自动生成，也可直接在 data/l3/ 写 markdown。</li>';
+
+  list.querySelectorAll('[data-l3-edit]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.l3Edit;
+      const entry = results.find((e) => e.id === id);
+      const next = prompt('修改 L3 条目正文：', entry?.text || '');
+      if (next == null || next === entry?.text) return;
+      await api(`/api/l3/entries/${id}`, { method: 'PUT', body: JSON.stringify({ text: next }) });
+      loadL3();
+    });
+  });
+}
 
 // ===== 主题（暗/亮）=====
 
