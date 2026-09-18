@@ -802,15 +802,18 @@ const L1_FP_SQL = "COUNT(*) || ':' || COALESCE(MAX(r.version), 0) || ':' || COAL
 
 /** 全部会话的源指纹（廉价：纯 SQL 扫 l0_records，不读归档文件） */
 function l1Sources(userId) {
+  // 注意：last_received 用关联子查询，**不能** JOIN l0_batches 后取 MAX——
+  // LEFT JOIN 会让 COUNT(*) 变成「记录数 × 批次数」（实测某会话 2008 条 × 26 批
+  // = 52208），指纹随批次增加而变化，即使没有新记录也会触发重摘。
+  // 子查询写法与 l1SourceFp 的结果严格一致。
   return db
     .prepare(
       `SELECT r.device_code, r.agent, r.session_id,
               ${L1_FP_SQL} AS fp,
-              MAX(b.received_at) AS last_received
+              (SELECT MAX(b.received_at) FROM l0_batches b
+                WHERE b.user_id = r.user_id AND b.device_code = r.device_code
+                  AND b.agent = r.agent AND b.session_id = r.session_id) AS last_received
          FROM l0_records r
-         LEFT JOIN l0_batches b
-                ON b.user_id = r.user_id AND b.device_code = r.device_code
-               AND b.agent = r.agent AND b.session_id = r.session_id
         WHERE r.user_id = ?
         GROUP BY r.device_code, r.agent, r.session_id`
     )

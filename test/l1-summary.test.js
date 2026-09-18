@@ -322,3 +322,35 @@ test('指纹一致性：写入端存的 content_hash 必须等于扫描端看到
 });
 
 module.exports = {};
+
+test('指纹健壮性：批次增加不得改变指纹（防 LEFT JOIN 计数倍增）', () => {
+  // 实测踩过：l1Sources 用 LEFT JOIN l0_batches 取 last_received，导致
+  // COUNT(*) 变成「记录数 × 批次数」（某会话 2008 条 × 26 批 = 52208），
+  // 指纹随每次上传批次而变化 → 无新记录也反复重摘。
+  const repo = require('../src/db/repo');
+  const { ingestBatch } = require('../src/l0/store');
+  const u = config.userId;
+  const key = { userId: u, agent: 'codex', sessionId: 'join-test', deviceCode: 'dev_j' };
+
+  // 先落一条，再单独追加一个"只含重复内容"的批次（不产生新记录）
+  ingestBatch({ ...key, records: [rec('j1', 1, 'user', '内容A')] });
+  const fp1 = repo.l1SourceFp(u, key);
+  assert.strictEqual(fp1.split(':')[0], '1', `指纹的 count 应为真实记录数 1，实际 ${fp1}`);
+
+  ingestBatch({ ...key, records: [rec('j1', 1, 'user', '内容A')] }); // 重传，无新记录
+  const fp2 = repo.l1SourceFp(u, key);
+  assert.strictEqual(fp2, fp1, '重传相同内容（新批次、无新记录）不应改变指纹');
+
+  // 再加真新记录 → 指纹应变
+  ingestBatch({ ...key, records: [rec('j2', 1, 'user', '内容B')] });
+  const fp3 = repo.l1SourceFp(u, key);
+  assert.notStrictEqual(fp3, fp1, '真新记录应改变指纹');
+  assert.strictEqual(fp3.split(':')[0], '2', 'count 应仍等于真实记录数');
+
+  // 批扫结果必须与单查严格一致（任何 SQL 差异都会在此暴露）
+  const bulk = repo.l1Sources(u).find((x) => x.session_id === 'join-test');
+  assert.strictEqual(bulk.fp, fp3, '批扫与单查的指纹必须严格一致');
+  assert.ok(bulk.last_received, '应能取到最后接收时间（用子查询而非 JOIN）');
+});
+
+module.exports = {};
