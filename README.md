@@ -35,14 +35,12 @@ SQLite (data/aimemory.db): memories + memories_fts(FTS5) + api_keys + sessions +
         └─ llm/client.js       → OpenAI 兼容 /v1/chat/completions（提炼/infer）
 ```
 
-## Web 前端：记忆星图
+## Web 界面
 
-`/` 是**记忆星图**（`atlas/`）——把四层记忆、各模块与线路的通讯状态画成一张活体概念图：
-同心环按「由原始到凝练」排列（外圈 L0 → 内圈 L3），线路上的光点密度与流速由实时遥测驱动
-（L0 最近上传越久采集链越暗、`events` 有积压沉淀链越亮、模型服务探活失败则节点转红并让星云偏红），
-点节点看该模块的职责/实现文件/接口/参数，点底部三条「链路追踪」可把一次采集、一次沉淀、一次召回逐跳演一遍。
-零依赖零构建（纯 ESM + 手写 GLSL），未登录时自动切演示数据并明确标注。**原管理台挪到 `/admin`**。
-细节与改法见 [atlas/README.md](atlas/README.md)。
+`/admin` 是**管理控制台**：记忆列表与检索预览、Token 签发（设备流接入）、L0 会话归档下钻、
+操作审计（memory_ops）与 L3 画像条目编辑。口令登录（`.env` 的 `AIMEMORY_PASSWORD`，
+首次启动若为空会自动生成并打印）。星图前端（atlas/）与样例（samples/）已于 2026-09-19 剪枝，
+产品主前端由独立仓库另行构建——对接 REST（`/api/*`，契约见 `docs/api/openapi.json`）与 MCP（`/mcp`）。
 
 ## 快速开始
 
@@ -50,7 +48,7 @@ SQLite (data/aimemory.db): memories + memories_fts(FTS5) + api_keys + sessions +
 
 ```bash
 npm install
-cp .env.example .env            # 按需改 KEYCLOAK_URL / LLM_* / EMBEDDING_*（见 .env 注释）
+cp .env.example .env            # 按需改 LLM_* / EMBEDDING_*（见 .env 注释）
 pm2 start ecosystem.config.js && pm2 save   # 或 npm start
 ```
 

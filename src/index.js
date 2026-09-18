@@ -62,23 +62,12 @@ app.get('/skill/SKILL.md', (_req, res) => {
 });
 
 // ===== 静态资源 =====
-// `/`       记忆星图（atlas/）：把四层记忆与各线路的通讯状态画成一张活体概念图
-// `/admin`  原管理控制台（记忆列表 / Token / 会话归档下钻）
-// 管理台的资源引用是绝对路径（/style.css、/app.js、/icon-*.png），且这些文件名
-// 与 atlas/ 不冲突，因此由后面那个 static 兜底解析即可，无需改动旧页面。
-const ATLAS_DIR = path.join(config.root, 'atlas');
-if (fs.existsSync(ATLAS_DIR)) {
-  app.use(express.static(ATLAS_DIR, { index: 'index.html' }));
-  app.get('/admin', (_req, res) =>
-    res.sendFile(path.join(__dirname, 'web', 'static', 'index.html'))
-  );
-}
-// 多框架前端样例（评估用，见 samples/README.md）：/samples/three-3d/ 等。
-// 数据接口与星图同源同鉴权（未登录时样例自动切内置演示数据），纯静态直出即可。
-const SAMPLES_DIR = path.join(config.root, 'samples');
-if (fs.existsSync(SAMPLES_DIR)) {
-  app.use('/samples', express.static(SAMPLES_DIR, { index: 'index.html' }));
-}
+// `/admin`  管理控制台（记忆列表 / Token / 会话归档下钻 / 操作审计 / L3 画像）。
+// 管理台的资源引用是绝对路径（/style.css、/app.js、/icon-*.png），由下面的 static 兜底解析。
+// 产品主前端由独立仓库另行构建，直连 /api/* 与 /mcp（契约见 docs/api/openapi.json）。
+app.get('/admin', (_req, res) =>
+  res.sendFile(path.join(__dirname, 'web', 'static', 'index.html'))
+);
 app.use(express.static(path.join(__dirname, 'web', 'static')));
 
 // ===== MCP 端点（Streamable HTTP）=====
