@@ -83,6 +83,7 @@ curl http://localhost:18543/           # Web 平台（首次启动会打印自�
 | POST/GET | `/api/keys`、`/api/keys/:id/revoke` | Token 管理（多 Token 并存，单独吊销） |
 | POST | `/api/l0/ingest` | L0 原始会话批次上传（带设备三元组，幂等，仅归档不提炼） |
 | GET | `/api/l1/summaries` / `/api/l1/stats` / `POST /api/l1/run` | L1 会话摘要（清单 / 进度 / 手动触发） |
+| GET/PUT | `/api/l3/entries` / `POST /api/l3/run` / `GET /api/l3/stats` / `GET /api/l3/history` | L3 画像（条目与编辑 / 手动凝练 / 规模 / 变更历史链） |
 | GET | `/api/l0/stats` | L0 归档统计 + 设备清单 + 会话清单（`?device=`/`?agent=` 过滤） |
 | GET | `/api/l0/session` | 读单会话内容（`agent`/`device`/`session_id`，含归属校验） |
 | POST/GET | `/api/connect/start`、`/api/connect/poll`、`/api/connect/confirm` | 设备流接入 |
