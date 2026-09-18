@@ -170,7 +170,8 @@ const l0IngestHandler = wrap(async (req, res) => {
   if (b.records.length > 5000) {
     return res.status(413).json({ error: '单批次记录数超限（≤5000），请拆分上传' });
   }
-  // 设备信息：device.code 是归类主键；label/info 供跨机识别与排查
+  // 设备信息：device.code 是归类主键；fingerprint 用于"认出同一台机器"（重装后归回原设备）；
+  // label/info 供跨机识别与排查
   const dev = b.device && typeof b.device === 'object' ? b.device : {};
   const r = l0Store.ingestBatch({
     userId: req.identity.userId,
@@ -179,6 +180,8 @@ const l0IngestHandler = wrap(async (req, res) => {
     deviceCode: dev.code || b.device_code || b.collector_id,
     deviceLabel: dev.label || b.device_label,
     deviceInfo: dev.info,
+    deviceFingerprint: dev.fingerprint || b.device_fingerprint,
+    deviceFingerprintSource: dev.fingerprint_source || b.device_fingerprint_source,
     collectorId: b.collector_id,
     batchSeq: b.batch_seq,
     batchId: b.batch_id,

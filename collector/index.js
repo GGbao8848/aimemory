@@ -23,7 +23,7 @@ const os = require('os');
 const { buildConfig } = require('./config');
 const { State } = require('./lib/state');
 const { Uploader } = require('./lib/uploader');
-const { loadOrCreateDevice } = require('./lib/device');
+const { loadOrCreateDevice, adoptDeviceCode } = require('./lib/device');
 
 const ADAPTERS = {
   codex: require('./adapters/codex'),
@@ -66,6 +66,12 @@ class Collector {
     const swept = this.state.sweepSpool();
     if (swept) process.stdout.write(`[collector] 清理孤儿 spool 文件 ${swept} 个\n`);
     this.uploader = new Uploader(config, this.device);
+    // 服务端按指纹认回已有设备 → 本地设备码对齐并落盘（跨重装保持同一设备）
+    this.uploader.onAdoptCode = (code, from) => {
+      if (adoptDeviceCode(config.stateDir, code)) {
+        process.stdout.write(`[collector] 设备码已对齐服务端：${from} → ${code}（指纹命中已有设备）\n`);
+      }
+    };
     this.stats = { rounds: 0, collected: 0, sent: 0, deduped: 0, upload_errors: 0, parse_errors: 0, skipped_noise: 0 };
     this.stopping = false;
   }
@@ -151,7 +157,14 @@ class Collector {
   status() {
     return {
       collector_id: this.config.collectorId,
-      device: { code: this.device.code, label: this.device.label, first_seen: this.device.first_seen, info: this.device.info },
+      device: {
+        code: this.device.code,
+        label: this.device.label,
+        first_seen: this.device.first_seen,
+        fingerprint: this.device.fingerprint,
+        fingerprint_source: this.device.fingerprint_source,
+        info: this.device.info,
+      },
       host: os.hostname(),
       server: this.config.serverUrl,
       agents: this.config.agents,

@@ -29,8 +29,11 @@ class Uploader {
     this.config = config;
     // 设备身份（可选：测试可只传 config）。上传时随每个批次携带，
     // 服务端据此把数据归到「哪台机器的哪个 agent」。
-    this.device = device || { code: config.collectorId || 'unknown', label: '', info: {} };
+    this.device = device || { code: config.collectorId || 'unknown-device', label: '', info: {}, fingerprint: '' };
     this.lastError = null;
+    // 服务端认回的权威设备码（指纹命中已有设备时与其对齐）
+    this.authoritativeCode = null;
+    this.onAdoptCode = null;
   }
 
   /** 组一个批次对象（入队用；bytes 为估算值，服务端会重算实际落盘字节） */
@@ -65,10 +68,13 @@ class Uploader {
           agent: batch.agent,
           session_id: batch.session_id,
           collector_id: batch.collector_id,
-          // 设备三元组：设备码 + 设备信息 + agent —— 服务端据此归类
+          // 设备三元组 + 机器指纹：设备码用于归类，指纹用于"认出这是同一台机器"
+          // （重装后设备码会变，服务端凭指纹归回原设备，避免重复建一台）
           device: {
             code: batch.device_code || this.device.code,
             label: batch.device_label || this.device.label,
+            fingerprint: this.device.fingerprint || '',
+            fingerprint_source: this.device.fingerprint_source || '',
             info: this.device.info,
           },
           batch_id: batch.batch_id,
@@ -98,6 +104,16 @@ class Uploader {
       }
       const json = await res.json().catch(() => ({}));
       this.lastError = null;
+      // 服务端按机器指纹认回已有设备时，会返回权威设备码；本地跟着对齐，
+      // 这样"删掉状态目录重装"也不会分裂成两台设备。
+      if (json && json.device_code && json.device_code !== this.device.code) {
+        const from = this.device.code;
+        this.device.code = json.device_code;
+        this.authoritativeCode = json.device_code;
+        if (typeof this.onAdoptCode === 'function') {
+          try { this.onAdoptCode(json.device_code, from); } catch { /* 持久化失败不影响上传 */ }
+        }
+      }
       return { ok: true, deduped: !!json.deduped };
     } catch (e) {
       // 网络错误 / 超时 → 可重试（离线容忍）

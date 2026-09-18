@@ -266,6 +266,55 @@ test('State：sweepSpool 清理孤儿文件（崩溃残留）', () => {
 
 // ===== 设备身份 =====
 
+test('device：机器指纹稳定、来源可辨、不外传原始标识', () => {
+  const dev = require('../collector/lib/device');
+
+  const fp1 = dev.machineFingerprint();
+  const fp2 = dev.machineFingerprint();
+  assert.match(fp1.hash, /^fp_[0-9a-f]{16}$/, '指纹格式应为 fp_ + 16 hex');
+  assert.strictEqual(fp1.hash, fp2.hash, '同一台机器反复计算必须一致');
+  assert.ok(['machine-id', 'mac', 'hostname', 'random'].includes(fp1.source), `来源应可辨，实际 ${fp1.source}`);
+
+  // 原始硬件标识绝不外传：指纹里不得出现 machine-id 或 MAC 的任何片段
+  const mid = dev.readOsMachineId();
+  if (mid) assert.ok(!fp1.hash.includes(mid.slice(0, 8)), '指纹不得含 machine-id 片段');
+  const mac = dev.readPhysicalMac();
+  if (mac) assert.ok(!fp1.hash.includes(mac.replace(/:/g, '').slice(0, 8)), '指纹不得含 MAC 片段');
+});
+
+test('device：MAC 可用性判定——排除全零/组播/本地管理地址', () => {
+  const { isUsableMac } = require('../collector/lib/device');
+  assert.strictEqual(isUsableMac('00:00:00:00:00:00'), false, '全零应排除');
+  assert.strictEqual(isUsableMac('01:00:5e:00:00:01'), false, '组播位应排除');
+  assert.strictEqual(isUsableMac('02:11:22:33:44:55'), false, '本地管理位（随机化 MAC）应排除');
+  assert.strictEqual(isUsableMac('90:16:ba:36:e1:a0'), true, '正常物理 MAC 可用');
+  assert.strictEqual(isUsableMac(''), false, '空值应排除');
+});
+
+test('device：物理 MAC 取排序后第一个（不受活动网卡变化影响）', () => {
+  const { readPhysicalMac } = require('../collector/lib/device');
+  const mac = readPhysicalMac();
+  if (mac === null) return; // 无物理网卡的容器环境跳过
+  assert.match(mac, /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/, '应返回规范化的 MAC');
+  // 关键：不能取"当前活动网卡"（换根网线就变），必须排序后取第一个且多次调用一致
+  assert.strictEqual(readPhysicalMac(), mac, '多次调用结果必须一致');
+});
+
+test('device：指纹写入 device.json 并可跨重装认回（adoptDeviceCode）', () => {
+  const { loadOrCreateDevice, adoptDeviceCode } = require('../collector/lib/device');
+  const d = tmpdir('device-fp');
+  const a = loadOrCreateDevice(d, {});
+  assert.ok(a.fingerprint, '应写入机器指纹');
+  assert.ok(a.fingerprint_source, '应记录指纹来源');
+
+  // 模拟服务端按指纹认回原设备 → 本地对齐设备码
+  const changed = adoptDeviceCode(d, 'dev_original1');
+  assert.strictEqual(changed, true, '设备码不同时应写入');
+  const b = loadOrCreateDevice(d, {});
+  assert.strictEqual(b.code, 'dev_original1', '重装后应沿用服务端认回的设备码');
+  assert.strictEqual(adoptDeviceCode(d, 'dev_original1'), false, '码相同则不必写盘');
+});
+
 test('device：首次生成稳定设备码，重启后不变（同一台机器始终同一设备）', () => {
   const { loadOrCreateDevice } = require('../collector/lib/device');
   const d = tmpdir('device');

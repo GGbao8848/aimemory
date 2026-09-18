@@ -415,12 +415,17 @@ function renderDevices(devices) {
     const info = d.info || {};
     const os = [info.platform, info.os_release, info.arch].filter(Boolean).join(' ');
     const active = archiveFilter.device === d.device_code;
+    // 指纹：机器固有标识的哈希，用于"重装后仍认回同一台设备"
+    const fpLabel = { 'machine-id': '系统安装标识', mac: '物理网卡', hostname: '主机名', random: '随机' };
+    const fp = d.fingerprint
+      ? `<span class="muted small" title="机器指纹（${esc(fpLabel[d.fingerprint_source] || d.fingerprint_source || '未知来源')}）——重装采集器后仍能认回同一台设备">🔗 ${esc(d.fingerprint)}</span>`
+      : '<span class="muted small" title="未上报机器指纹：该设备无法在重装后自动认回">⚠ 无指纹</span>';
     return `
     <div class="device-item${active ? ' device-active' : ''}" data-device="${esc(d.device_code)}">
       <div class="device-main">
         <span class="device-name">${esc(d.label || d.device_code)}</span>
-        <code class="muted small">${esc(d.device_code)}</code>
-        <span class="muted small">${os ? esc(os) + ' · ' : ''}${(d.agents || []).map(agentLabel).map(esc).join(' / ')}</span>
+        <span class="muted small"><code>${esc(d.device_code)}</code>${os ? ' · ' + esc(os) : ''} · ${(d.agents || []).map(agentLabel).map(esc).join(' / ')}</span>
+        ${fp}
       </div>
       <div class="device-stats">
         <span>${d.sessions} 会话</span>

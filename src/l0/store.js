@@ -57,24 +57,49 @@ function sessionFilePath(userId, deviceCode, agent, sessionId) {
 
 /**
  * 落盘一个批次。
- * @returns {{ok:true, batch_id:string, deduped:boolean, stored:number, bytes:number, file:string}}
+ *
+ * **设备统一**：客户端上报的机器指纹若已登记过，则用已登记的设备码——这让"删状态目录
+ * 重装采集器"不会分裂成两台设备，历史归档与新数据仍在同一设备下。
+ * @returns {{ok:true, batch_id:string, deduped:boolean, stored:number, bytes:number, file:string, device_code:string, device_adopted:boolean}}
  */
-function ingestBatch({ userId, agent, sessionId, deviceCode, deviceLabel, deviceInfo, collectorId, batchSeq, batchId, records }) {
+function ingestBatch({ userId, agent, sessionId, deviceCode, deviceLabel, deviceInfo, deviceFingerprint, deviceFingerprintSource, collectorId, batchSeq, batchId, records }) {
   if (!Array.isArray(records) || records.length === 0) {
     const e = new Error('records 不能为空');
     e.status = 400;
     throw e;
   }
   // 设备码缺省回退到 collector_id（老客户端只发 collector_id）；都没有则归入 unknown-device
-  const devCode = deviceCode || collectorId || 'unknown-device';
+  let devCode = deviceCode || collectorId || 'unknown-device';
+
+  // 指纹命中已登记设备 → 采用其设备码（"统一设备"的落点）
+  let adopted = false;
+  if (deviceFingerprint) {
+    const known = repo.findDeviceByFingerprint(userId, deviceFingerprint);
+    if (known && known !== devCode) {
+      devCode = known;
+      adopted = true;
+    }
+  }
+
   const bid = batchId || computeBatchId({ deviceCode: devCode, collectorId, agent, sessionId, batchSeq, records });
 
   // 登记设备（即使批次是重传也要更新 last_seen/agent 集合）
-  repo.upsertL0Device({ userId, deviceCode: devCode, label: deviceLabel, info: deviceInfo, agent });
+  repo.upsertL0Device({
+    userId,
+    deviceCode: devCode,
+    label: deviceLabel,
+    info: deviceInfo,
+    fingerprint: deviceFingerprint,
+    fingerprintSource: deviceFingerprintSource,
+    agent,
+  });
+
+  const file = sessionFilePath(userId, devCode, agent, sessionId);
+  const result = { device_code: devCode, device_adopted: adopted };
 
   // 幂等：同批次重传直接跳过（网络重试、进程重启后重放）
   if (repo.l0BatchExists(bid)) {
-    return { ok: true, batch_id: bid, deduped: true, stored: 0, bytes: 0, skipped: 0, file: sessionFilePath(userId, devCode, agent, sessionId) };
+    return { ok: true, batch_id: bid, deduped: true, stored: 0, bytes: 0, skipped: 0, file, ...result };
   }
 
   // 记录级去重：拦掉已收过的 (rid, version)。
@@ -90,7 +115,7 @@ function ingestBatch({ userId, agent, sessionId, deviceCode, deviceLabel, device
       batchId: bid, userId, agent, sessionId, deviceCode: devCode, collectorId,
       records: 0, bytes: 0,
     });
-    return { ok: true, batch_id: bid, deduped: true, stored: 0, bytes: 0, skipped, file: sessionFilePath(userId, devCode, agent, sessionId) };
+    return { ok: true, batch_id: bid, deduped: true, stored: 0, bytes: 0, skipped, file, ...result };
   }
 
   const receivedAt = new Date().toISOString();
@@ -100,7 +125,6 @@ function ingestBatch({ userId, agent, sessionId, deviceCode, deviceLabel, device
       .map((r) => JSON.stringify({ ...r, _dev: devCode, _agent: agent, _bid: bid, _recv: receivedAt }))
       .join('\n') + '\n';
 
-  const file = sessionFilePath(userId, devCode, agent, sessionId);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.appendFileSync(file, lines, 'utf8');
 
@@ -116,7 +140,7 @@ function ingestBatch({ userId, agent, sessionId, deviceCode, deviceLabel, device
     bytes: Buffer.byteLength(lines),
   });
 
-  return { ok: true, batch_id: bid, deduped: false, stored: fresh.length, bytes: Buffer.byteLength(lines), skipped, file };
+  return { ok: true, batch_id: bid, deduped: false, stored: fresh.length, bytes: Buffer.byteLength(lines), skipped, file, ...result };
 }
 
 /** 归档概况：批次表统计 + 磁盘实际占用（口径不同，都返回便于对账） */

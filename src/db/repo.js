@@ -592,22 +592,34 @@ function insertL0Batch({ batchId, userId, agent, sessionId, deviceCode, collecto
   ).run(batchId, userId, agent, sessionId, deviceCode || null, collectorId || null, records, bytes, now());
 }
 
+/** 按机器指纹查该用户下已登记的设备码（用于重装后认回原设备） */
+function findDeviceByFingerprint(userId, fingerprint) {
+  if (!fingerprint) return null;
+  const row = db
+    .prepare('SELECT device_code FROM l0_devices WHERE user_id = ? AND fingerprint = ? ORDER BY last_seen DESC LIMIT 1')
+    .get(userId, fingerprint);
+  return row ? row.device_code : null;
+}
+
 /**
  * 登记/更新设备：首次见到插入，之后更新 label/info/last_seen 与 agent 集合。
  * agents 用集合并集（同一设备可能陆续上报多种 agent）。
+ * 指纹只在客户端提供且本地为空时才写入——不覆盖已有指纹，避免把认回关系冲掉。
  */
-function upsertL0Device({ userId, deviceCode, label, info, agent }) {
+function upsertL0Device({ userId, deviceCode, label, info, fingerprint, fingerprintSource, agent }) {
   const ts = now();
   const row = db
     .prepare('SELECT agents FROM l0_devices WHERE user_id = ? AND device_code = ?')
     .get(userId, deviceCode);
   if (!row) {
     db.prepare(
-      `INSERT INTO l0_devices (user_id, device_code, label, info, agents, first_seen, last_seen)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO l0_devices (user_id, device_code, fingerprint, fingerprint_source, label, info, agents, first_seen, last_seen)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       userId,
       deviceCode,
+      fingerprint || null,
+      fingerprintSource || null,
       label || null,
       info ? JSON.stringify(info) : null,
       JSON.stringify(agent ? [agent] : []),
@@ -619,15 +631,39 @@ function upsertL0Device({ userId, deviceCode, label, info, agent }) {
   let agents = [];
   try { agents = JSON.parse(row.agents || '[]'); } catch { agents = []; }
   if (agent && !agents.includes(agent)) agents.push(agent);
+
+  // label 覆盖策略：等于主机名的说明是"默认名"，不该覆盖用户显式设过的自定义名。
+  // （否则重装采集器时忘了带 AIMEMORY_DEVICE_LABEL，自定义名就被打回主机名。）
+  const hostname = (info && info.hostname) || null;
+  const existing = db
+    .prepare('SELECT label, info FROM l0_devices WHERE user_id = ? AND device_code = ?')
+    .get(userId, deviceCode);
+  const existingLabel = existing ? existing.label : null;
+  const existingHost = safeParse(existing && existing.info, {}).hostname || null;
+  const newLabelIsDefault = !!hostname && label === hostname;
+  const existingLabelIsCustom = !!existingLabel && existingLabel !== existingHost;
+  const effectiveLabel = newLabelIsDefault && existingLabelIsCustom ? null : (label || null);
+
   // label/info 用「有值才覆盖」，避免老客户端不带这些字段时把已有信息清掉
   db.prepare(
     `UPDATE l0_devices
-        SET label = COALESCE(?, label),
+        SET fingerprint = COALESCE(fingerprint, ?),
+            fingerprint_source = COALESCE(fingerprint_source, ?),
+            label = COALESCE(?, label),
             info = COALESCE(?, info),
             agents = ?,
             last_seen = ?
       WHERE user_id = ? AND device_code = ?`
-  ).run(label || null, info ? JSON.stringify(info) : null, JSON.stringify(agents), ts, userId, deviceCode);
+  ).run(
+    fingerprint || null,
+    fingerprintSource || null,
+    effectiveLabel,
+    info ? JSON.stringify(info) : null,
+    JSON.stringify(agents),
+    ts,
+    userId,
+    deviceCode
+  );
 }
 
 /** 设备清单（含各设备的会话/记录统计），按最近活跃倒序 */
@@ -635,6 +671,7 @@ function listL0Devices(userId) {
   return db
     .prepare(
       `SELECT d.device_code, d.label, d.info, d.agents, d.first_seen, d.last_seen,
+              d.fingerprint, d.fingerprint_source,
               COALESCE((SELECT COUNT(DISTINCT r.session_id) FROM l0_records r
                          WHERE r.user_id = d.user_id AND r.device_code = d.device_code), 0) sessions,
               COALESCE((SELECT COUNT(*) FROM l0_records r
@@ -653,6 +690,8 @@ function listL0Devices(userId) {
       agents: safeParse(r.agents, []),
       first_seen: r.first_seen,
       last_seen: r.last_seen,
+      fingerprint: r.fingerprint,
+      fingerprint_source: r.fingerprint_source,
       sessions: r.sessions,
       records: r.records,
       bytes: r.bytes,
@@ -761,6 +800,7 @@ module.exports = {
   l0Stats,
   l0Sessions,
   upsertL0Device,
+  findDeviceByFingerprint,
   listL0Devices,
   l0SessionOwned,
   createApiKey,

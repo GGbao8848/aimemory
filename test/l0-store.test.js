@@ -181,6 +181,82 @@ test('L0 store：跨设备同名会话互不干扰（去重按设备隔离）', 
   assert.strictEqual(b.stored, 1, '不同设备的同名会话是两份独立数据，不应被去重拦掉');
 });
 
+// ===== 设备统一（机器指纹认回） =====
+
+test('L0 store：重装后设备码变了，凭指纹归回原设备（不重复建一台）', () => {
+  const fp = 'fp_aaaaaaaaaaaaaaaa';
+  const rec = (i) => ({ rid: `adopt:s:${i}`, ts: 't', version: 1, role: 'user', content: `c${i}` });
+
+  // 首次：设备码 dev_first，登记指纹
+  const a = store.ingestBatch({
+    userId: 'u-adopt', agent: 'codex', sessionId: 's1',
+    deviceCode: 'dev_first', deviceLabel: '笔记本',
+    deviceFingerprint: fp, deviceFingerprintSource: 'machine-id',
+    records: [rec(1)],
+  });
+  assert.strictEqual(a.device_code, 'dev_first');
+  assert.strictEqual(a.device_adopted, false, '首次不应触发认回');
+
+  // 模拟重装：状态目录丢失 → 生成新设备码，但指纹相同
+  const b = store.ingestBatch({
+    userId: 'u-adopt', agent: 'codex', sessionId: 's2',
+    deviceCode: 'dev_second', deviceLabel: '笔记本',
+    deviceFingerprint: fp, deviceFingerprintSource: 'machine-id',
+    records: [rec(2)],
+  });
+  assert.strictEqual(b.device_code, 'dev_first', '指纹命中应归回原设备码');
+  assert.strictEqual(b.device_adopted, true, '应标记为认回');
+  assert.ok(b.file.includes(`${path.sep}dev_first${path.sep}`), `归档应落在原设备目录：${b.file}`);
+
+  // 设备表里只应有一台设备（指纹唯一指向）
+  const devs = store.listDevices('u-adopt');
+  assert.strictEqual(devs.length, 1, `不应重复建设备，实际 ${devs.map((d) => d.device_code)}`);
+  assert.strictEqual(devs[0].device_code, 'dev_first');
+  assert.strictEqual(devs[0].fingerprint, fp, '应记录指纹');
+  assert.strictEqual(devs[0].fingerprint_source, 'machine-id');
+  // 两次会话都归在同一设备下
+  assert.strictEqual(devs[0].sessions, 2);
+});
+
+test('L0 store：不同指纹互不认回（两台机器各自独立）', () => {
+  store.ingestBatch({
+    userId: 'u-fp2', agent: 'codex', sessionId: 'a',
+    deviceCode: 'dev_m1', deviceFingerprint: 'fp_1111111111111111',
+    records: [{ rid: 'f:a', ts: 't', version: 1, role: 'user', content: 'x' }],
+  });
+  const b = store.ingestBatch({
+    userId: 'u-fp2', agent: 'codex', sessionId: 'b',
+    deviceCode: 'dev_m2', deviceFingerprint: 'fp_2222222222222222',
+    records: [{ rid: 'f:b', ts: 't', version: 1, role: 'user', content: 'y' }],
+  });
+  assert.strictEqual(b.device_adopted, false, '指纹不同不应认回');
+  assert.strictEqual(store.listDevices('u-fp2').length, 2, '应是两台独立设备');
+});
+
+test('L0 store：跨用户指纹不互相认回（指纹查找限定在用户内）', () => {
+  const fp = 'fp_cccccccccccccccc';
+  store.ingestBatch({
+    userId: 'u-owner-a', agent: 'codex', sessionId: 's', deviceCode: 'dev_oa',
+    deviceFingerprint: fp, records: [{ rid: 'o:1', ts: 't', version: 1, role: 'user', content: 'x' }],
+  });
+  const b = store.ingestBatch({
+    userId: 'u-owner-b', agent: 'codex', sessionId: 's', deviceCode: 'dev_ob',
+    deviceFingerprint: fp, records: [{ rid: 'o:2', ts: 't', version: 1, role: 'user', content: 'y' }],
+  });
+  assert.strictEqual(b.device_code, 'dev_ob', '别人的设备码不得被借用');
+  assert.strictEqual(b.device_adopted, false);
+});
+
+test('L0 store：不提供指纹的老客户端照常工作（回退 collector_id）', () => {
+  const b = store.ingestBatch({
+    userId: 'u-nofp', agent: 'codex', sessionId: 's', collectorId: 'legacy-host',
+    records: [{ rid: 'n:1', ts: 't', version: 1, role: 'user', content: 'x' }],
+  });
+  assert.strictEqual(b.device_code, 'legacy-host');
+  assert.strictEqual(b.device_adopted, false);
+  assert.strictEqual(store.listDevices('u-nofp')[0].fingerprint, null, '无指纹时该列为空');
+});
+
 // ===== 设备维度（跨机归类） =====
 
 test('L0 store：同一用户两台设备，归档与会话按设备区分', () => {
@@ -260,6 +336,32 @@ test('L0 store：设备信息后续上报可补全（label/info 不被空值清�
   assert.strictEqual(d.label, '旧名', 'label 不应被空值覆盖');
   assert.strictEqual(d.info.platform, 'linux', 'info 不应被空值覆盖');
   assert.deepStrictEqual(d.agents.sort(), ['claude', 'codex'], 'agents 应取并集');
+});
+
+test('L0 store：重装时默认主机名不得打回用户自定义的设备名', () => {
+  // 首次：用户显式命名（与主机名不同 → 视为自定义名）
+  store.ingestBatch({
+    userId: 'u-lbl', agent: 'codex', sessionId: 's1', deviceCode: 'dev_lbl',
+    deviceLabel: '张三的笔记本', deviceInfo: { hostname: 'DESKTOP-ABC' },
+    records: [{ rid: 'l:1', ts: 't', version: 1, role: 'user', content: 'x' }],
+  });
+  // 重装：没带 AIMEMORY_DEVICE_LABEL → label 回落主机名（默认值）
+  store.ingestBatch({
+    userId: 'u-lbl', agent: 'codex', sessionId: 's2', deviceCode: 'dev_lbl',
+    deviceLabel: 'DESKTOP-ABC', deviceInfo: { hostname: 'DESKTOP-ABC' },
+    records: [{ rid: 'l:2', ts: 't', version: 1, role: 'user', content: 'y' }],
+  });
+  const d = store.listDevices('u-lbl').find((x) => x.device_code === 'dev_lbl');
+  assert.strictEqual(d.label, '张三的笔记本', '默认主机名不应覆盖自定义名');
+
+  // 反过来：用户显式改了名（非主机名）→ 应当生效
+  store.ingestBatch({
+    userId: 'u-lbl', agent: 'codex', sessionId: 's3', deviceCode: 'dev_lbl',
+    deviceLabel: '换了个名字', deviceInfo: { hostname: 'DESKTOP-ABC' },
+    records: [{ rid: 'l:3', ts: 't', version: 1, role: 'user', content: 'z' }],
+  });
+  const d2 = store.listDevices('u-lbl').find((x) => x.device_code === 'dev_lbl');
+  assert.strictEqual(d2.label, '换了个名字', '显式改名应生效');
 });
 
 test('L0 store：读会话内容——归属校验防跨用户越权', () => {

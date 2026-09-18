@@ -144,7 +144,9 @@ CREATE TABLE IF NOT EXISTS l0_records (
 -- L0 设备注册表：每台采集机器一条，承载设备信息（归类与跨机查询的依据）
 CREATE TABLE IF NOT EXISTS l0_devices (
   user_id      TEXT NOT NULL,
-  device_code  TEXT NOT NULL,             -- 稳定设备码（dev_xxxxxxxx，采集端首次运行生成）
+  device_code  TEXT NOT NULL,             -- 稳定设备码（dev_xxxxxxxx；可由指纹认回）
+  fingerprint  TEXT,                      -- 机器指纹（加盐哈希，机器固有属性推导）——认回同一台设备
+  fingerprint_source TEXT,                -- 指纹来源：machine-id / mac / hostname / random
   label        TEXT,                      -- 人类可读名（默认主机名，可自定义）
   info         TEXT,                      -- JSON：hostname/platform/arch/os/node/cpus/mem/user…
   agents       TEXT,                      -- JSON 数组：该设备上报过的 agent
@@ -153,6 +155,7 @@ CREATE TABLE IF NOT EXISTS l0_devices (
   PRIMARY KEY (user_id, device_code)
 );
 CREATE INDEX IF NOT EXISTS idx_l0_devices_user ON l0_devices(user_id, last_seen);
+-- 指纹索引在下方老库迁移补列之后再建（老库无 fingerprint 列时在此建索引会失败）
 
 -- L0 原始会话归档：批次去重表（幂等重传用）。
 -- 原始记录本体不落 SQLite（体量大且 append-only），存 data/l0/ 下的 jsonl 文件；
@@ -193,6 +196,17 @@ if (!l0Cols.includes('device_code')) {
 }
 // 设备维度索引须在补列之后创建（见上）
 db.exec('CREATE INDEX IF NOT EXISTS idx_l0_batches_device ON l0_batches(user_id, device_code, agent)');
+
+// 老库兼容：l0_devices 早期无指纹列 → 补充（历史设备无指纹，无法自动认回，
+// 采集器下次上报时会带上并回填）
+const devCols = db.prepare('PRAGMA table_info(l0_devices)').all().map((c) => c.name);
+if (!devCols.includes('fingerprint')) {
+  db.exec('ALTER TABLE l0_devices ADD COLUMN fingerprint TEXT');
+}
+if (!devCols.includes('fingerprint_source')) {
+  db.exec('ALTER TABLE l0_devices ADD COLUMN fingerprint_source TEXT');
+}
+db.exec('CREATE INDEX IF NOT EXISTS idx_l0_devices_fp ON l0_devices(user_id, fingerprint)');
 
 // 老库兼容：memories 早期无 embedding / facts / entities 列 → 补充
 // （float32 BLOB 向量 / infer 抽取的结构化事实 / LLM 抽取的实体，均为可空列）
