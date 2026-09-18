@@ -743,3 +743,9 @@ input:focus, textarea:focus {
 .l3-item .l3-body { flex: 1; }
 .l3-item .l3-text { font-size: 13px; }
 .l3-item .l3-meta { margin-top: 3px; font-size: 11px; }
+
+/* L3 变更历史链（/api/l3/history） */
+.l3-hist-title { margin: 18px 0 8px; font-size: 13px; color: var(--muted); font-weight: 600; }
+.l3-chain { padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; }
+.l3-chain-head { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
+.l3-chain-old { margin-top: 6px; padding-left: 10px; border-left: 2px solid var(--border); font-size: 12px; text-decoration: line-through; }

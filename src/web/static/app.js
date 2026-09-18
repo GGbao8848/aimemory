@@ -128,11 +128,12 @@ async function loadOps() {
     </tr>`).join('') : '<tr><td colspan="4" class="muted">暂无记录</td></tr>';
 }
 
-// ===== L3 画像/知识（列表 + 正文编辑）=====
+// ===== L3 画像/知识（列表 + 正文编辑 + 变更历史链）=====
 async function loadL3() {
-  const [{ results }, stats] = await Promise.all([
+  const [{ results }, stats, history] = await Promise.all([
     api('/api/l3/entries?include_superseded=1'),
     api('/api/l3/stats'),
+    api('/api/l3/history').catch(() => ({ chains: [], orphans: [] })),
   ]);
   $('#l3-stats').textContent = `active ${stats.active} · 已取代 ${stats.superseded} · 平均有效置信 ${stats.effective_confidence ?? '—'}`;
   const list = $('#l3-list');
@@ -146,6 +147,20 @@ async function loadL3() {
       </div>
       ${e.superseded_by ? '' : `<button class="btn btn-ghost" data-l3-edit="${e.id}" type="button">编辑</button>`}
     </li>`).join('') : '<li class="muted">暂无条目——后台凝练会自动生成，也可直接在 data/l3/ 写 markdown。</li>';
+
+  // 变更历史链：现行条目 + 被其取代的旧版（新→旧）；孤儿链单独警示（人工改坏链的可视信号）
+  const hist = $('#l3-history');
+  const chains = history.chains || [];
+  const orphans = history.orphans || [];
+  hist.innerHTML = (chains.length || orphans.length) ? `
+    <h3 class="l3-hist-title">变更历史（现行 ← 被取代的旧版）</h3>
+    ${chains.map((c) => `
+      <div class="l3-chain">
+        <div class="l3-chain-head"><span class="op-badge">${esc(c.active.kind_label || c.active.kind)}</span><span>${esc(c.active.text)}</span></div>
+        ${c.history.map((h) => `<div class="l3-chain-old muted mono">← ${esc(h.text)}（更新于 ${esc((h.updated_at || '').slice(0, 10))}）</div>`).join('')}
+      </div>`).join('')}
+    ${orphans.length ? `<div class="l3-chain"><div class="muted">⚠ ${orphans.length} 条孤儿链（取代者不存在，疑似人工改坏，请检查 data/l3/）：${orphans.map((o) => o.id.slice(0, 8)).join('、')}</div></div>` : ''}
+  ` : '';
 
   list.querySelectorAll('[data-l3-edit]').forEach((btn) => {
     btn.addEventListener('click', async () => {
