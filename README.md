@@ -120,6 +120,15 @@ rsync -av aimemory/ user@new-server:/opt/aimemory/
 
 最新：[docs/测试报告-2026-09-07-v0.2-素材提炼与端到端.md](docs/测试报告-2026-09-07-v0.2-素材提炼与端到端.md)（单测 10/10 + MCP/REST 端到端全通过）。
 
+## 四层记忆架构
+
+本项目按 **L0 原始会话 → L1 会话摘要 → L2 事实记忆 → L3 画像/知识** 四层组织，L0 是唯一事实源，
+上层均可从 L0 重放重建。当前 L0、L2 已落地，L1/L3 待建：
+
+- **[docs/四层记忆架构与进展.md](docs/四层记忆架构与进展.md)** —— 总览与进度台账（建议先读）
+- [docs/调研报告-2026-07-会话与记忆管理系统.md](docs/调研报告-2026-07-会话与记忆管理系统.md) —— 架构源起（L0-L3 模型出自该文）
+- [docs/L0-原始会话归档.md](docs/L0-原始会话归档.md) —— L0 实现细节
+
 ## 关联项目
 
 - **配套 Skills**：本仓库 `skills/` 目录（aimemory 管理 / aimemory-recall 召回 / aimemory-remember 沉淀 / aimemory-collector 会话备份部署），Web「接入指南」页可下载 zip，或直接取用仓库源（https://github.com/GGbao8848/aimemory）。已取消插件打包与插件市场分发，接入只走 skill + MCP API 两条路。
