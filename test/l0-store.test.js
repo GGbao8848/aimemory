@@ -302,7 +302,9 @@ test('L0 store：归档路径含设备维度，且行内自述来源', () => {
     records: [{ rid: 'r', ts: 't', role: 'user', content: 'x' }],
   });
   // 路径形如 <root>/<user>/<device>/<agent>/<session>.jsonl
-  const rel = path.relative(L0_ROOT, r.file).split(path.sep);
+  // 两侧都要 realpath：macOS 的 os.tmpdir() 是 /var/...，realpath 后是 /private/var/...，
+  // 只解析一边会让 path.relative 算成 "../../.." 的穿越路径（与第 77 行同一处理）
+  const rel = path.relative(L0_ROOT, fs.realpathSync(r.file)).split(path.sep);
   assert.deepStrictEqual(rel, ['u-path', 'dev_abc', 'codex', 's1.jsonl']);
 
   // 每一行都带 _dev / _agent，文件被单独取走也能自述来源（可审计）
