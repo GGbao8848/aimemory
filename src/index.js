@@ -58,7 +58,18 @@ app.get('/skill/SKILL.md', (_req, res) => {
   res.type('text/markdown; charset=utf-8').sendFile(MAIN_SKILL_MD);
 });
 
-// ===== 静态管理页面 =====
+// ===== 静态资源 =====
+// `/`       记忆星图（atlas/）：把四层记忆与各线路的通讯状态画成一张活体概念图
+// `/admin`  原管理控制台（记忆列表 / Token / 会话归档下钻）
+// 管理台的资源引用是绝对路径（/style.css、/app.js、/icon-*.png），且这些文件名
+// 与 atlas/ 不冲突，因此由后面那个 static 兜底解析即可，无需改动旧页面。
+const ATLAS_DIR = path.join(config.root, 'atlas');
+if (fs.existsSync(ATLAS_DIR)) {
+  app.use(express.static(ATLAS_DIR, { index: 'index.html' }));
+  app.get('/admin', (_req, res) =>
+    res.sendFile(path.join(__dirname, 'web', 'static', 'index.html'))
+  );
+}
 app.use(express.static(path.join(__dirname, 'web', 'static')));
 
 // ===== MCP 端点（Streamable HTTP）=====

@@ -34,6 +34,15 @@ SQLite (data/aimemory.db): memories + memories_fts(FTS5) + api_keys + sessions +
         └─ llm/client.js       → OpenAI 兼容 /v1/chat/completions（提炼/infer）
 ```
 
+## Web 前端：记忆星图
+
+`/` 是**记忆星图**（`atlas/`）——把四层记忆、各模块与线路的通讯状态画成一张活体概念图：
+同心环按「由原始到凝练」排列（外圈 L0 → 内圈 L3），线路上的光点密度与流速由实时遥测驱动
+（L0 最近上传越久采集链越暗、`events` 有积压沉淀链越亮、模型服务探活失败则节点转红并让星云偏红），
+点节点看该模块的职责/实现文件/接口/参数，点底部三条「链路追踪」可把一次采集、一次沉淀、一次召回逐跳演一遍。
+零依赖零构建（纯 ESM + 手写 GLSL），未登录时自动切演示数据并明确标注。**原管理台挪到 `/admin`**。
+细节与改法见 [atlas/README.md](atlas/README.md)。
+
 ## 快速开始
 
 前置：Node.js 20+ 以及一个 OpenAI 兼容的 LLM 服务（素材提炼用；embedding 可选）。**无需任何外部登录服务**。

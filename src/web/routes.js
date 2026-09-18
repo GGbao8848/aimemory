@@ -241,6 +241,27 @@ apiRouter.get('/l1/stats', requireAuth, wrap(async (req, res) => {
   res.json(repo.l1Stats(req.identity.userId));
 }));
 
+// ===== 记忆星图：聚合概览 =====
+// 概念图只关心「规模 / 积压 / 连通性」三类数字，这里一次往返取齐，
+// 避免前端串行打 4 个接口。连通性由公开的 /healthz 提供，不在此重复探测模型服务。
+apiRouter.get('/atlas/overview', requireAuth, wrap(async (req, res) => {
+  const userId = req.identity.userId;
+  const stats = repo.stats(userId);
+  const l1 = repo.l1Stats(userId);
+  res.json({
+    identity: userId,
+    username: req.identity.username || null,
+    stats,
+    keys: { active: stats.keys },
+    l1: { ...l1, backlog: (l1.pending || 0) + (l1.running || 0) },
+    events: repo.eventStats(userId),
+    l0: {
+      ...l0Store.archiveStats(userId),
+      devices_list: l0Store.listDevices(userId),
+    },
+  });
+}));
+
 // 手动触发：立即为「已静默」的会话排队并处理一小批（不等后台轮询）
 apiRouter.post('/l1/run', requireAuth, wrap(async (req, res) => {
   const l1Scheduler = require('../l1/scheduler');

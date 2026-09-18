@@ -992,6 +992,32 @@ function resetStuckL1() {
   return db.prepare("UPDATE l1_summaries SET status='pending' WHERE status='running'").run().changes;
 }
 
+/**
+ * 素材提炼队列（events 表）的积压统计。
+ * 供星图「通讯状态」用——待处理数量直接决定沉淀链路上数据包的密度与流速。
+ */
+function eventStats(userId) {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) total,
+              SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) pending,
+              SUM(CASE WHEN status='processing' THEN 1 ELSE 0 END) processing,
+              SUM(CASE WHEN status='done' THEN 1 ELSE 0 END) done,
+              SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) failed,
+              MAX(created_at) last_at
+         FROM events WHERE user_id = ?`
+    )
+    .get(userId);
+  return {
+    total: row.total || 0,
+    pending: row.pending || 0,
+    processing: row.processing || 0,
+    done: row.done || 0,
+    failed: row.failed || 0,
+    last_at: row.last_at || null,
+  };
+}
+
 // ============ 统计 / 健康 ============
 
 /** 记忆统计（健康检查与页面展示用） */
@@ -1023,6 +1049,7 @@ module.exports = {
   listL1Summaries,
   getL1Summary,
   l1Stats,
+  eventStats,
   resetStuckL1,
   l0BatchExists,
   l0FilterNewRecords,
