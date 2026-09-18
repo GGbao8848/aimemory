@@ -267,6 +267,18 @@ function parseSummary(text) {
  * @returns {{ok:boolean, skipped?:string, error?:string, summary?:object}}
  */
 async function summarizeOne({ userId, deviceCode, agent, sessionId }) {
+  // 源指纹：与调度器（repo.l1Sources）同源同式，必须取「读文件之前」的值。
+  // 时序很关键：若先读文件再取指纹，摘要期间新到的记录会让指纹"看起来没变"，
+  // 从而漏掉更新；先取指纹则是保守的——期间有新内容会被下一轮正确重摘。
+  const sourceFp = repo.l1SourceFp(userId, { deviceCode, agent, sessionId });
+
+  // 幂等保护：已摘过且源指纹未变 → 跳过。
+  // 这同时让「多个进程/重复触发」变得无害（曾实测手动 tick 与常驻进程并发）。
+  const existing = repo.getL1Summary(userId, { deviceCode, agent, sessionId });
+  if (sourceFp && existing && existing.status === 'done' && existing.content_hash === sourceFp) {
+    return { ok: true, skipped: '内容未变，已有最新摘要' };
+  }
+
   const converged = loadConverged(userId, deviceCode, agent, sessionId);
   if (!converged) {
     repo.markL1Failed({ userId, deviceCode, agent, sessionId, error: '归档文件不存在（可能已被清理）', permanent: true });
@@ -278,7 +290,7 @@ async function summarizeOne({ userId, deviceCode, agent, sessionId }) {
   }
   if (!llm.enabled()) return { ok: false, skipped: 'LLM 未启用' };
 
-  const hash = contentHash(converged);
+  const hash = sourceFp || contentHash(converged);
   const stats = {
     records: converged.records.length,
     first_ts: converged.first_ts,

@@ -247,3 +247,78 @@ test('repo：pickL1Pending 尊重重试上限，避免永久重试', () => {
 });
 
 module.exports = {};
+
+// ===== 5. 指纹一致性（写入端 vs 扫描端）=====
+
+test('指纹一致性：写入端存的 content_hash 必须等于扫描端看到的 fp', async () => {
+  // 这是实测踩过的严重 bug：写入端存 sha256(rid+version)，扫描端比对 count:max:sum，
+  // 两者永不相等 → 每个已摘要的会话每轮扫描都被判为"内容已变"，反复重摘、白烧 LLM。
+  const repo = require('../src/db/repo');
+  const llmClient = require('../src/llm/client');
+  const { ingestBatch } = require('../src/l0/store');
+
+  const key = { userId: config.userId, deviceCode: 'dev_fpc', agent: 'codex', sessionId: 'fpc-test' };
+  ingestBatch({
+    userId: key.userId, agent: key.agent, sessionId: key.sessionId, deviceCode: key.deviceCode,
+    records: [rec('fpc1', 1, 'user', '帮我做一件事'), rec('fpc2', 1, 'assistant', '好的')],
+  });
+
+  // 不变量 A：单会话指纹 == 批量扫描里的同一会话指纹
+  const bulk = repo.l1Sources(key.userId).find((s) => s.session_id === 'fpc-test' && s.device_code === 'dev_fpc');
+  const single = repo.l1SourceFp(key.userId, key);
+  assert.ok(bulk, '应能扫到该会话');
+  assert.strictEqual(single, bulk.fp, '单查与批扫的指纹必须一致');
+
+  // 用打桩的 LLM 跑一次真实摘要流程
+  const orig = llmClient.complete;
+  llmClient.complete = async () => '{"overview":"测试摘要","decisions":["d1"],"pending":[],"artifacts":["a1"]}';
+  let first;
+  try {
+    repo.ensureL1Pending(key);
+    first = await l1.summarizeOne(key);
+  } finally {
+    llmClient.complete = orig;
+  }
+  assert.strictEqual(first.ok, true, `摘要应成功：${JSON.stringify(first)}`);
+
+  // 不变量 B（核心）：存下的指纹 == 扫描端当前看到的指纹
+  const saved = repo.getL1Summary(key.userId, key);
+  const afterFp = repo.l1Sources(key.userId)
+    .find((s) => s.session_id === 'fpc-test' && s.device_code === 'dev_fpc').fp;
+  assert.strictEqual(saved.status, 'done');
+  assert.strictEqual(saved.content_hash, afterFp,
+    '存下的 content_hash 必须等于扫描端 fp；不等则每轮都会被判定重摘（曾发生）');
+
+  // 不变量 C：内容未变时再次调用应跳过（幂等，防重复触发做无用功）
+  llmClient.complete = async () => { throw new Error('不应被调用'); };
+  let second;
+  try {
+    second = await l1.summarizeOne(key);
+  } finally {
+    llmClient.complete = orig;
+  }
+  assert.strictEqual(second.ok, true);
+  assert.ok(second.skipped, `内容未变应跳过，实际 ${JSON.stringify(second)}`);
+
+  // 不变量 D：内容变化后指纹改变，且不再跳过
+  ingestBatch({
+    userId: key.userId, agent: key.agent, sessionId: key.sessionId, deviceCode: key.deviceCode,
+    records: [rec('fpc3', 1, 'user', '又加了一件事')],
+  });
+  const changedFp = repo.l1SourceFp(key.userId, key);
+  assert.notStrictEqual(changedFp, afterFp, '新记录应改变指纹');
+
+  llmClient.complete = async () => '{"overview":"更新后的摘要","decisions":[],"pending":[],"artifacts":[]}';
+  try {
+    const third = await l1.summarizeOne(key);
+    assert.strictEqual(third.ok, true);
+    assert.strictEqual(third.skipped, undefined, '内容变化后不应跳过');
+  } finally {
+    llmClient.complete = orig;
+  }
+  const updated = repo.getL1Summary(key.userId, key);
+  assert.strictEqual(updated.content_hash, repo.l1SourceFp(key.userId, key));
+  assert.strictEqual(updated.overview, '更新后的摘要');
+});
+
+module.exports = {};

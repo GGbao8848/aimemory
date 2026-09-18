@@ -786,11 +786,26 @@ function safeParse(s, fallback) {
  *
  * @returns {Array<{device_code, agent, session_id, fp, last_received}>}
  */
+/**
+ * 源指纹表达式：**全项目唯一的一处定义**。
+ *
+ * count + max + sum 三者组合即可覆盖 L0 的全部变化（L0 是 append-only，无删除）：
+ *   - 新增记录 → count 变
+ *   - 某条 version 涨到最大 → max 变
+ *   - 非最大记录 version 上涨（如 A=100,B=200 时 A→150）→ count/max 不变但 sum 变
+ *
+ * ⚠️ 必须与写入端（l1/summarize.js 存 content_hash）用同一个表达式。
+ * 曾经踩过：写入端用 sha256(rid+version)，扫描端用 count:max:sum——两者永不相等，
+ * 导致每个已摘要的会话每次扫描都被判为"内容已变"，反复重摘、白烧 LLM 配额。
+ */
+const L1_FP_SQL = "COUNT(*) || ':' || COALESCE(MAX(r.version), 0) || ':' || COALESCE(SUM(r.version), 0)";
+
+/** 全部会话的源指纹（廉价：纯 SQL 扫 l0_records，不读归档文件） */
 function l1Sources(userId) {
   return db
     .prepare(
       `SELECT r.device_code, r.agent, r.session_id,
-              COUNT(*) || ':' || COALESCE(MAX(r.version), 0) || ':' || COALESCE(SUM(r.version), 0) AS fp,
+              ${L1_FP_SQL} AS fp,
               MAX(b.received_at) AS last_received
          FROM l0_records r
          LEFT JOIN l0_batches b
@@ -800,6 +815,17 @@ function l1Sources(userId) {
         GROUP BY r.device_code, r.agent, r.session_id`
     )
     .all(userId);
+}
+
+/** 单个会话的源指纹（写入端存 content_hash 用，与 l1Sources 同源同式） */
+function l1SourceFp(userId, { deviceCode, agent, sessionId }) {
+  const row = db
+    .prepare(
+      `SELECT ${L1_FP_SQL} AS fp FROM l0_records r
+        WHERE r.user_id = ? AND r.device_code = ? AND r.agent = ? AND r.session_id = ?`
+    )
+    .get(userId, deviceCode, agent, sessionId);
+  return row && row.fp ? String(row.fp) : null;
 }
 
 /** 现有摘要的指纹与状态（用于比对） */
@@ -918,7 +944,7 @@ function getL1Summary(userId, { deviceCode, agent, sessionId }) {
   const row = db
     .prepare(
       `SELECT device_code, agent, session_id, status, overview, decisions, pending, artifacts,
-              records, first_ts, last_ts, model, error, attempts, updated_at
+              records, first_ts, last_ts, model, error, attempts, content_hash, updated_at
          FROM l1_summaries
         WHERE user_id=? AND device_code=? AND agent=? AND session_id=?`
     )
@@ -983,6 +1009,7 @@ module.exports = {
   deleteMemory,
   stats,
   l1Sources,
+  l1SourceFp,
   l1Existing,
   ensureL1Pending,
   pickL1Pending,
