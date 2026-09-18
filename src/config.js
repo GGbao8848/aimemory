@@ -69,7 +69,8 @@ const llm = {
   enabled: process.env.LLM_ENABLED === '1',
   baseUrl: (process.env.LLM_BASE_URL || 'http://10.10.10.146:8001/v1').replace(/\/$/, ''),
   model: process.env.LLM_MODEL || 'qwen3.8-27b',
-  apiKey: process.env.LLM_API_KEY || 'dc5bcb91f400e8b3b40d9156ddc9a1ef60c2ea953f46f359',
+  // 密钥只从 .env 读取，绝不硬编码默认值（历史教训见 docs/复盘-2026-09-19-剪枝.md）
+  apiKey: process.env.LLM_API_KEY || '',
   timeoutMs: parseInt(process.env.LLM_TIMEOUT_MS || '30000', 10),
 };
 
