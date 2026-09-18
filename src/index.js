@@ -10,6 +10,7 @@ const repo = require('./db/repo');
 const { handleMcpRequest } = require('./mcp/server');
 const tokens = require('./auth/tokens');
 const web = require('./web/routes');
+const l1Scheduler = require('./l1/scheduler');
 
 const app = express();
 app.disable('x-powered-by');
@@ -337,6 +338,9 @@ setInterval(() => repo.cleanupConnectRequests(), 600_000).unref();
 repo.processPendingEvents();
 setInterval(() => repo.processPendingEvents(), 2000).unref();
 setInterval(() => repo.cleanupEvents(), 3600_000).unref();
+
+// L1 会话摘要（sleep-time）：后台把静默的归档会话摘成情景记忆，不阻塞在线请求
+l1Scheduler.start();
 
 app.listen(config.port, '0.0.0.0', () => {
   console.log(`[aimemory] MCP + API + Web 已启动: http://0.0.0.0:${config.port}`);

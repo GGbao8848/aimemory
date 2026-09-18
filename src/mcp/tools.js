@@ -2,8 +2,10 @@
 
 /**
  * MCP 工具定义与处理器。
- * 核心 7 工具：add_memory / get_event_status / search_memories / get_memories / get_memory /
- * update_memory / delete_memory。
+ * 共 9 工具：
+ * - L2 事实记忆（7）：add_memory / get_event_status / search_memories / get_memories /
+ *   get_memory / update_memory / delete_memory
+ * - L1 会话摘要（2）：list_session_summaries / get_session_summary（后台从 L0 归档生成）
  * - 写入语义：所有 add_memory 输入都是"素材"（text/messages），一律异步受理返回 event_id，
  *   后台内部 LLM 提炼成结构化记忆入库（不存原文）；get_event_status 查进度。
  * - 已裁剪：批量导入、整库/实体管理、agent/run 作用域。单用户部署：所有数据归属同一身份，无需传 user_id。
@@ -195,6 +197,86 @@ const tools = [
       return { content: [{ type: 'text', text: jsonText({ success: true }) }] };
     },
   },
+
+  {
+    name: 'list_session_summaries',
+    description:
+      '列出会话摘要（L1 情景记忆）：后台把归档的 agent 会话（L0 原始归档）提炼成结构化摘要——'
+      + '概述、关键决定、未决事项、产出物。用于回答"我最近/某台机器做了什么"这类跨会话、'
+      + '跨设备的问题（区别于 search_memories 查的是提炼后的长期事实）。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        device: { type: 'string', description: '按设备码过滤（可选，见返回里的 device_code）' },
+        agent: { type: 'string', description: '按 agent 过滤：codex / claude / zcode（可选）' },
+        query: { type: 'string', description: '在摘要正文/决定/产出物里做关键词过滤（可选）' },
+        limit: { type: 'integer', minimum: 1, maximum: 50, description: '返回条数，默认 10' },
+      },
+    },
+    handler: async ({ device, agent, query, limit = 10 }, userId) => {
+      const list = repo.listL1Summaries(userId, { deviceCode: device, agent, limit: 200 });
+      let out = list;
+      if (query) {
+        const q = String(query).toLowerCase();
+        out = list.filter((s) =>
+          [s.overview, ...(s.decisions || []), ...(s.artifacts || []), ...(s.pending || [])]
+            .filter(Boolean)
+            .some((t) => String(t).toLowerCase().includes(q))
+        );
+      }
+      const results = out.slice(0, Math.min(limit, 50)).map((s) => ({
+        session_id: s.session_id,
+        device_code: s.device_code,
+        agent: s.agent,
+        time: s.last_ts,
+        overview: s.overview,
+        decisions: s.decisions,
+        pending: s.pending,
+        artifacts: s.artifacts,
+      }));
+      return { content: [{ type: 'text', text: jsonText({ results, total: results.length }) }] };
+    },
+  },
+
+  {
+    name: 'get_session_summary',
+    description: '查看某个会话的摘要详情（L1）。用 list_session_summaries 拿到 session_id / device_code / agent 后调用。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        session_id: { type: 'string', description: '会话 id' },
+        device_code: { type: 'string', description: '设备码（同名会话可能存在于多台设备，建议带上）' },
+        agent: { type: 'string', description: 'agent：codex / claude / zcode' },
+      },
+      required: ['session_id'],
+    },
+    handler: async ({ session_id: sessionId, device_code: deviceCode, agent }, userId) => {
+      // 允许只给 session_id（单用户下会话 id 基本唯一），但要能唯一定位
+      const list = repo.listL1Summaries(userId, { limit: 500 });
+      const match = list.filter((s) =>
+        s.session_id === sessionId
+        && (!deviceCode || s.device_code === deviceCode)
+        && (!agent || s.agent === agent)
+      );
+      if (!match.length) {
+        // 可能尚未生成（还在排队）或会话不存在
+        const raw = repo.getL1Summary(userId, { deviceCode: deviceCode || '', agent: agent || '', sessionId });
+        return {
+          content: [{
+            type: 'text',
+            text: jsonText({
+              found: false,
+              hint: raw
+                ? `该会话摘要状态为 ${raw.status}${raw.error ? `（${raw.error}）` : ''}，尚未完成。`
+                : '没有该会话的摘要：可能尚未生成（后台按静默时间排队），或 session_id 有误。',
+            }),
+          }],
+        };
+      }
+      const s = match[0];
+      return { content: [{ type: 'text', text: jsonText(s) }] };
+    },
+  },
 ];
 
 /** 创建并注册工具的 MCP Server 实例（userId 由 server 注入，单用户下为常量） */
@@ -203,12 +285,15 @@ function buildServer() {
     {
       name: 'aimemory',
       version: '0.2.0',
-      description: '企业级自托管 AI 记忆库（mem0 兼容 MCP）',
+      description: '个人自托管 AI 记忆库（mem0 兼容 MCP）',
     },
     {
       capabilities: { tools: {} },
       instructions:
-        '单用户部署：所有记忆归属同一身份，无需传 user_id。',
+        '单用户部署：所有记忆归属同一身份，无需传 user_id。'
+        + '两层记忆各有用途——search_memories 查长期事实（L2，由 add_memory 素材提炼而来）；'
+        + 'list_session_summaries 查"某个会话做了什么"（L1，由 agent 会话归档自动摘要）。'
+        + '问"我最近做了什么/某台机器做了什么"用后者，问"关于 X 我知道什么"用前者。',
     }
   );
 

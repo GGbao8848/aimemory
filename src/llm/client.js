@@ -61,8 +61,13 @@ function enabled() {
   return config.llm.enabled;
 }
 
-/** 单次对话补全。返回 content 字符串；失败/熔断返回 null，不抛错。 */
-async function complete(messages, { maxTokens = 512, temperature = 0 } = {}) {
+/**
+ * 单次对话补全。返回 content 字符串；失败/熔断返回 null，不抛错。
+ * @param {object} opts
+ * @param {number} [opts.timeoutMs] 覆盖默认超时——大输入的摘要任务需要显著更长时间
+ *   （实测 24K 字符输入、思考模型约需 90s，而默认 30s 会超时）
+ */
+async function complete(messages, { maxTokens = 512, temperature = 0, timeoutMs } = {}) {
   const cfg = config.llm;
   if (!cfg.enabled) return null;
   if (blocked()) return null;
@@ -82,7 +87,7 @@ async function complete(messages, { maxTokens = 512, temperature = 0 } = {}) {
         max_tokens: maxTokens,
         temperature,
       }),
-      signal: AbortSignal.timeout(cfg.timeoutMs),
+      signal: AbortSignal.timeout(timeoutMs || cfg.timeoutMs),
     });
   } catch (e) {
     recordFailure();

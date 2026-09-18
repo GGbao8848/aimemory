@@ -209,7 +209,43 @@ apiRouter.get('/l0/session', requireAuth, wrap(async (req, res) => {
     sessionId: String(sessionId),
   });
   if (!r) return res.status(404).json({ error: '会话不存在或无权访问' });
-  res.json({ agent, device: device || null, session_id: sessionId, ...r });
+  // 顺带带上该会话的 L1 摘要（可能尚未生成 → null）
+  const summary = repo.getL1Summary(req.identity.userId, {
+    deviceCode: device ? String(device) : '',
+    agent: String(agent),
+    sessionId: String(sessionId),
+  });
+  res.json({ agent, device: device || null, session_id: sessionId, ...r, summary: summary || null });
+}));
+
+// ===== L1 会话摘要（情景记忆，后台从 L0 归档生成） =====
+
+// 摘要清单：支持 ?device= / ?agent= / ?q= 过滤
+apiRouter.get('/l1/summaries', requireAuth, wrap(async (req, res) => {
+  const deviceCode = req.query.device ? String(req.query.device) : null;
+  const agent = req.query.agent ? String(req.query.agent) : null;
+  const query = req.query.q ? String(req.query.q) : null;
+  let list = repo.listL1Summaries(req.identity.userId, { deviceCode, agent, limit: 500 });
+  if (query) {
+    const q = query.toLowerCase();
+    list = list.filter((s) =>
+      [s.overview, ...(s.decisions || []), ...(s.artifacts || []), ...(s.pending || [])]
+        .filter(Boolean).some((t) => String(t).toLowerCase().includes(q))
+    );
+  }
+  res.json({ results: list, total: list.length, ...repo.l1Stats(req.identity.userId) });
+}));
+
+// 摘要进度（运维：还有多少没跑、失败多少）
+apiRouter.get('/l1/stats', requireAuth, wrap(async (req, res) => {
+  res.json(repo.l1Stats(req.identity.userId));
+}));
+
+// 手动触发：立即为「已静默」的会话排队并处理一小批（不等后台轮询）
+apiRouter.post('/l1/run', requireAuth, wrap(async (req, res) => {
+  const l1Scheduler = require('../l1/scheduler');
+  const r = await l1Scheduler.tick();
+  res.json(r || { processed: 0 });
 }));
 
 // ===== 设备流连接（零粘贴：发起 → 授权页确认 → 轮询拿 key）=====

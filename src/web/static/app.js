@@ -542,11 +542,33 @@ async function openSession(agent, device, sessionId) {
     $('#l0-detail-meta').textContent =
       `${agentLabel(agent)} · ${device || '未标注设备'} · 共 ${d.total || recs.length} 条` +
       (d.truncated ? `（仅显示前 ${recs.length} 条）` : '');
+
+    // L1 摘要（若已生成）：放在逐条原文之前——看会话先看"做了什么"，需要细节再往下翻
+    const sm = d.summary;
+    let summaryHtml = '';
+    if (sm && sm.status === 'done' && sm.overview) {
+      const list = (title, arr) => (arr && arr.length)
+        ? `<div class="sd-sum-block"><span class="sd-sum-label">${title}</span><ul>${
+            arr.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>` : '';
+      summaryHtml = `
+      <div class="session-summary">
+        <div class="sd-head"><span class="sd-role">📋 会话摘要</span>
+          <span class="muted small">${esc(sm.model || '')} · ${sm.records || 0} 条记录收敛</span></div>
+        <p class="sd-sum-overview">${esc(sm.overview)}</p>
+        ${list('关键决定', sm.decisions)}
+        ${list('未决事项', sm.pending)}
+        ${list('产出物', sm.artifacts)}
+      </div>`;
+    } else if (sm && sm.status && sm.status !== 'done') {
+      const label = { pending: '排队中', running: '生成中', failed: `失败${sm.error ? '：' + sm.error : ''}` }[sm.status] || sm.status;
+      summaryHtml = `<div class="session-summary muted small">📋 会话摘要：${esc(label)}（后台自动生成，稍后刷新可见）</div>`;
+    }
+
     if (!recs.length) {
-      host.innerHTML = '<p class="muted">该会话暂无内容（归档文件可能已被清理）。</p>';
+      host.innerHTML = summaryHtml + '<p class="muted">该会话暂无归档内容（文件可能已被清理）。</p>';
       return;
     }
-    host.innerHTML = recs.map((r) => {
+    host.innerHTML = summaryHtml + recs.map((r) => {
       const role = r.role || 'meta';
       const content = r.content ? esc(r.content) : '<span class="muted">（无正文）</span>';
       const meta = r.meta && Object.keys(r.meta).length

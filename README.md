@@ -7,7 +7,8 @@
 
 - **素材提炼型写入（核心）**：`add_memory` 的输入一律视为素材（`text` / `messages`），**不直接落库**——后台内部 LLM 提炼成多条自包含结构化记忆后入库；异步受理 + 队列串行，本地低并发 LLM 下不阻塞调用；提炼失败不落库
 - **语义 + 关键词混合检索**：embedding 向量召回（同义/口语化可命中）+ SQLite FTS5 trigram 关键词召回（中文子串）；embedding 不可用时自动回退纯关键词
-- **7 个核心 MCP 工具**：`add_memory` / `get_event_status` / `search_memories` / `get_memories` / `get_memory` / `update_memory` / `delete_memory`——刻意不提供批量导入、整库/实体管理、agent/run 维度
+- **9 个 MCP 工具**：记忆类 7 个（`add_memory` / `get_event_status` / `search_memories` / `get_memories` / `get_memory` / `update_memory` / `delete_memory`）+ 会话摘要 2 个（`list_session_summaries` / `get_session_summary`）——刻意不提供批量导入、整库/实体管理、agent/run 维度
+- **三层记忆**：L0 原始会话归档（采集器自动备份）→ L1 会话摘要（后台自动生成，可查"某个会话/某台机器做了什么"）→ L2 事实记忆（素材提炼）。详见 [docs/四层记忆架构与进展.md](docs/四层记忆架构与进展.md)
 - **L0 原始会话归档**：各机安装采集器（pm2），把 Codex / Claude Code / ZCode 的原始会话追加归档到 `data/l0/<设备>/<agent>/`；上传带**设备码 + 设备信息 + agent**，Web「会话归档」页按**设备 → agent → 会话 → 详情**逐级下钻，可在任意机器查看其他机器的会话；只采集上传、不做提炼（详见 [docs/L0-原始会话归档.md](docs/L0-原始会话归档.md)）。**当前服务器本机已部署**（设备「服务器本机 / user2」）。
 - **单用户**：一个个人账本，多设备多 agent 共享；Web 用本地口令登录（无外部 SSO 依赖）
 - **接入**：Web 自助签发多枚 `m0-xxx` Token（按客户端命名分发、单独吊销，明文页面随时可查）+ 设备流浏览器免粘贴授权；Web 页支持导出全量记忆（JSON）
@@ -71,6 +72,7 @@ curl http://localhost:18543/           # Web 平台（首次启动会打印自�
 | GET | `/api/stats` / `/api/me` | 统计 / 当前身份 |
 | POST/GET | `/api/keys`、`/api/keys/:id/revoke` | Token 管理（多 Token 并存，单独吊销） |
 | POST | `/api/l0/ingest` | L0 原始会话批次上传（带设备三元组，幂等，仅归档不提炼） |
+| GET | `/api/l1/summaries` / `/api/l1/stats` / `POST /api/l1/run` | L1 会话摘要（清单 / 进度 / 手动触发） |
 | GET | `/api/l0/stats` | L0 归档统计 + 设备清单 + 会话清单（`?device=`/`?agent=` 过滤） |
 | GET | `/api/l0/session` | 读单会话内容（`agent`/`device`/`session_id`，含归属校验） |
 | POST/GET | `/api/connect/start`、`/api/connect/poll`、`/api/connect/confirm` | 设备流接入 |

@@ -42,18 +42,8 @@ CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
   INSERT INTO memories_fts(rowid, text) VALUES (new.rowid, new.text);
 END;
 
--- 记忆修改历史（update/delete 前快照，供 get_memory 返回时间线）
-CREATE TABLE IF NOT EXISTS memories_history (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  memory_id     TEXT NOT NULL,
-  user_id       TEXT NOT NULL,
-  event_type    TEXT NOT NULL,            -- UPDATE | DELETE
-  prev_text     TEXT NOT NULL,
-  prev_metadata TEXT NOT NULL,
-  prev_updated_at TEXT,
-  created_at    TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_history_memory ON memories_history(memory_id, id);
+-- 注：早期版本的 memories_history（记忆修改时间线）已废弃——此处不再建表，
+-- 由下方 v0.2 瘦身迁移 DROP 掉。曾出现「同一文件里先 CREATE 又 DROP」的自相矛盾写法。
 
 -- API Token：token_hash 用于鉴权校验，token_plain 供 Web 端随时回看明文
 -- （明文需长期可查，故与哈希一并存储；名称由调用方强制提供，不设默认值）
@@ -125,6 +115,33 @@ CREATE TABLE IF NOT EXISTS events (
   updated_at  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_events_user ON events(user_id, created_at);
+
+-- L1 会话摘要（情景记忆）：每个归档会话一条，由后台 LLM 从 L0 归档生成。
+-- 与 L0 的关系：L0 是事实源、只追加；L1 是可再生的派生视图——清掉某行的
+-- content_hash 即会重新生成（想换摘要算法就从 L0 重跑）。故这里不存原文。
+CREATE TABLE IF NOT EXISTS l1_summaries (
+  user_id      TEXT NOT NULL,
+  device_code  TEXT NOT NULL,
+  agent        TEXT NOT NULL,            -- codex / claude / zcode
+  session_id   TEXT NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'pending',  -- pending | running | done | failed
+  content_hash TEXT,                     -- 收敛后内容的指纹：变了才需重跑
+  attempts     INTEGER NOT NULL DEFAULT 0,
+  error        TEXT,
+  overview     TEXT,                     -- 摘要正文
+  decisions    TEXT,                     -- JSON 数组：关键决定
+  pending      TEXT,                     -- JSON 数组：未决事项
+  artifacts    TEXT,                     -- JSON 数组：产出物
+  records      INTEGER,                  -- 参与摘要的收敛后记录数
+  first_ts     TEXT,                     -- 会话时间跨度
+  last_ts      TEXT,
+  model        TEXT,                     -- 生成所用模型
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL,
+  PRIMARY KEY (user_id, device_code, agent, session_id)
+);
+CREATE INDEX IF NOT EXISTS idx_l1_user_time ON l1_summaries(user_id, last_ts DESC);
+CREATE INDEX IF NOT EXISTS idx_l1_status ON l1_summaries(status, updated_at);
 
 -- L0 已收记录索引：按 (会话, rid, version) 去重。
 -- 为什么不能只靠批次指纹：指纹对整个批次内容敏感，同一批记录若因分块方式不同
