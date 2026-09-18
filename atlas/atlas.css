@@ -832,6 +832,28 @@ body.zoomed-out .ringbadge__box span { display: none; }
   color: var(--dim);
   margin-right: 3px;
 }
+#theme-switch button {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--hair);
+  background: rgba(120, 170, 255, .07);
+  color: #cfdcf0;
+  font-family: var(--sans);
+  font-size: 11.5px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .18s, border-color .18s, color .18s, box-shadow .18s;
+}
+#theme-switch button:hover {
+  background: rgba(120, 170, 255, .18);
+  border-color: var(--hair-strong, rgba(140, 175, 230, .4));
+}
+#theme-switch button.is-on {
+  background: rgba(125, 211, 252, .16);
+  border-color: rgba(125, 211, 252, .55);
+  color: #eaf4ff;
+  box-shadow: 0 0 18px -4px rgba(125, 211, 252, .5);
+}
 #trace-actions button {
   padding: 6px 12px;
   border-radius: 8px;

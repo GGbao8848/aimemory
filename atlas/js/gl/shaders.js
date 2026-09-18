@@ -31,6 +31,14 @@ uniform vec3  uTint;       // 主色调：随系统健康度漂移
 uniform vec3  uAccent;     // 次色调
 uniform vec2  uMouse;      // -1..1 视差
 uniform float uEnergy;     // 0..1 系统整体活跃度 → 星云湍流强度
+// ---- 主题形态参数（见 main.js 的 THEMES）：全默认即原始星云
+uniform float uNebula;     // 星云强度
+uniform float uStars;      // 星场强度
+uniform float uSweep;      // 雷达扫掠
+uniform float uCoreGlow;   // 中心辉光
+uniform float uGrid;       // 蓝图网格
+uniform float uScan;       // 扫描线（磷光屏）
+uniform vec3  uBase;       // 底色
 
 float hash21(vec2 p) {
   p = fract(p * vec2(123.34, 456.21));
@@ -82,31 +90,57 @@ void main() {
   // ---- 视差：远景移动少，近景移动多
   vec2 par = uMouse * 0.02;
 
-  // ---- 域扭曲星云
-  vec2 q = p * 1.9 + par * 0.5;
-  float w1 = fbm(q + uTime * 0.012);
-  float w2 = fbm(q + vec2(5.2, 1.3) - uTime * 0.009);
-  vec2 warp = vec2(w1, w2);
-  float f = fbm(q + 3.2 * warp + vec2(0.0, uTime * 0.006));
+  vec3 col = uBase;
 
-  // 星云只在中心区外沿分布（中心要留给图形），并随 uEnergy 增亮
-  float shell = smoothstep(0.06, 0.62, r) * (1.0 - smoothstep(1.05, 2.35, r));
-  float density = smoothstep(0.32, 0.90, f) * shell;
-  vec3 neb = mix(uAccent * 0.55, uTint, smoothstep(0.3, 0.85, f));
-  vec3 col = neb * density * (0.42 + 0.72 * uEnergy);
+  // ---- 域扭曲星云（uNebula=0 时整段跳过，flat/蓝图/磷光不付这笔采样钱）
+  if (uNebula > 0.001) {
+    vec2 q = p * 1.9 + par * 0.5;
+    float w1 = fbm(q + uTime * 0.012);
+    float w2 = fbm(q + vec2(5.2, 1.3) - uTime * 0.009);
+    vec2 warp = vec2(w1, w2);
+    float f = fbm(q + 3.2 * warp + vec2(0.0, uTime * 0.006));
+
+    // 星云只在中心区外沿分布（中心要留给图形），并随 uEnergy 增亮
+    float shell = smoothstep(0.06, 0.62, r) * (1.0 - smoothstep(1.05, 2.35, r));
+    float density = smoothstep(0.32, 0.90, f) * shell;
+    vec3 neb = mix(uAccent * 0.55, uTint, smoothstep(0.3, 0.85, f));
+    col += neb * density * (0.42 + 0.72 * uEnergy) * uNebula;
+  }
 
   // ---- 星场（三层深度）
-  col += vec3(0.72, 0.82, 1.00) * starLayer(uv + par * 0.35, 26.0, 3.1, 0.965, 0.020) * 0.75;
-  col += vec3(0.85, 0.90, 1.00) * starLayer(uv + par * 0.75, 52.0, 17.9, 0.978, 0.014) * 1.05;
-  col += vec3(1.00, 0.96, 0.90) * starLayer(uv + par * 1.20, 96.0, 71.3, 0.986, 0.010) * 1.45;
+  if (uStars > 0.001) {
+    col += vec3(0.72, 0.82, 1.00) * starLayer(uv + par * 0.35, 26.0, 3.1, 0.965, 0.020) * 0.75 * uStars;
+    col += vec3(0.85, 0.90, 1.00) * starLayer(uv + par * 0.75, 52.0, 17.9, 0.978, 0.014) * 1.05 * uStars;
+    col += vec3(1.00, 0.96, 0.90) * starLayer(uv + par * 1.20, 96.0, 71.3, 0.986, 0.010) * 1.45 * uStars;
+  }
 
   // ---- 极坐标雷达扫掠：强化「反应堆」意象（极弱）
-  float ang = atan(p.y, p.x);
-  float sweep = pow(max(0.0, cos(ang - uTime * 0.22)), 28.0);
-  col += uAccent * sweep * exp(-r * 1.25) * 0.20;
+  if (uSweep > 0.001) {
+    float ang = atan(p.y, p.x);
+    float sweep = pow(max(0.0, cos(ang - uTime * 0.22)), 28.0);
+    col += uAccent * sweep * exp(-r * 1.25) * 0.20 * uSweep;
+  }
+
+  // ---- 蓝图网格：主/次两级刻度线，随视差轻移（制图感）
+  if (uGrid > 0.001) {
+    vec2 g1p = (gl_FragCoord.xy - 0.5 * uRes) / 46.0 + par * 5.0;
+    vec2 g1 = abs(fract(g1p) - 0.5) / fwidth(g1p);
+    float minor = 1.0 - min(min(g1.x, g1.y), 1.0);
+    vec2 g2p = (gl_FragCoord.xy - 0.5 * uRes) / 230.0 + par * 5.0;
+    vec2 g2 = abs(fract(g2p) - 0.5) / fwidth(g2p);
+    float major = 1.0 - min(min(g2.x, g2.y), 1.0);
+    vec3 gridCol = mix(uTint, vec3(0.85, 0.92, 1.0), 0.5);
+    col += gridCol * (minor * 0.035 + major * 0.085) * uGrid;
+  }
+
+  // ---- 磷光屏扫描线：横向明暗纹（CRT 气质）
+  if (uScan > 0.001) {
+    float scan = 0.5 + 0.5 * sin(gl_FragCoord.y * 2.35);
+    col *= 1.0 - uScan * 0.24 * scan;
+  }
 
   // ---- 内核辉光：中心一圈微亮，衬托记忆内核
-  col += uTint * exp(-r * 3.0) * 0.17;
+  col += uTint * exp(-r * 3.0) * 0.17 * uCoreGlow;
 
   // ---- 暗角 + 颗粒 + 抖动（暗部渐变防色带）
   float vig = smoothstep(1.55, 0.28, r);

@@ -17,6 +17,22 @@ import { TRACES } from './topology.js';
 
 const $ = (id) => document.getElementById(id);
 
+// ---------------------------------------------------------------- 主题形态
+// 中间形态的审美很主观，先做 4 种实例放在 dock 里随时切换对比，选中记入 localStorage。
+// 形态参数见 renderer.applyTheme：背景成分开关（星云/星场/扫掠/网格/扫描线）+
+// 底色 + 单色调和（mono/monoK）+ 后期（bloom/exposure/aberration）。
+// 注意：start() 在模块顶部就被调用，这批常量必须声明在它之前（否则 TDZ 报错）。
+const THEMES = [
+  { id: 'nebula', label: '星云' },
+  { id: 'calm', label: '极简', nebula: 0, stars: 0.16, sweep: 0, coreGlow: 0.05,
+    base: [0.010, 0.014, 0.026], bloom: 0.5, exposure: 1.0, aberration: 0.0006 },
+  { id: 'blueprint', label: '蓝图', nebula: 0, stars: 0, sweep: 0, coreGlow: 0.12, grid: 1,
+    base: [0.030, 0.062, 0.145], mono: [0.80, 0.88, 1], monoK: 0.72, bloom: 0.35, exposure: 1.04, aberration: 0 },
+  { id: 'phosphor', label: '磷光', nebula: 0, stars: 0.10, sweep: 0, coreGlow: 0.14, scan: 0.55,
+    base: [0.004, 0.010, 0.005], mono: [0.30, 1, 0.52], monoK: 0.85, bloom: 0.85, exposure: 1.05, aberration: 0.0008 },
+];
+const THEME_KEY = 'atlas-theme';
+
 // ---------------------------------------------------------------- 启动日志
 const bootLog = $('boot-log');
 const BOOT_LINES = [
@@ -126,6 +142,7 @@ function start() {
   bindPointer();
   bindKeys();
   bindDock();
+  bindThemeSwitch();
 
   window.addEventListener('resize', onResize);
   onResize();
@@ -538,6 +555,35 @@ function bindDock() {
   });
 }
 
+// ---------------------------------------------------------------- 主题形态（切换逻辑）
+// 常量 THEMES/THEME_KEY 在模块顶部（start() 之前），这里只有行为。
+
+function applyTheme(id, { persist = true } = {}) {
+  const t = THEMES.find((x) => x.id === id) || THEMES[0];
+  renderer.applyTheme(t);
+  lastSig = null; // 颜色烘焙在线/节点缓冲里 → 强制 syncScene 重建
+  document.body.dataset.theme = t.id;
+  document.querySelectorAll('#theme-switch button').forEach((b) => b.classList.toggle('is-on', b.dataset.id === t.id));
+  if (persist) {
+    localStorage.setItem(THEME_KEY, t.id);
+    log('info', `主题形态：${t.label}`);
+  }
+}
+
+function bindThemeSwitch() {
+  const host = document.getElementById('theme-switch');
+  if (!host) return;
+  for (const t of THEMES) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.dataset.id = t.id;
+    b.textContent = t.label;
+    b.addEventListener('click', () => applyTheme(t.id));
+    host.appendChild(b);
+  }
+  applyTheme(localStorage.getItem(THEME_KEY) || 'nebula', { persist: false });
+}
+
 function bindKeys() {
   document.addEventListener('keydown', (e) => {
     if (e.target && /input|textarea/i.test(e.target.tagName)) return;
@@ -563,6 +609,8 @@ window.__atlas = {
   get graph() { return graph; },
   get renderer() { return renderer; },
   get model() { return model; },
+  get themes() { return THEMES.map((t) => t.id); },
+  theme: (id) => applyTheme(id, { persist: false }),
   camera: () => ({
     zoom: renderer.cam.zoom,
     targetZoom: renderer.cam.targetZoom,

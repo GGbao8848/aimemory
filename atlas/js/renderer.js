@@ -275,11 +275,11 @@ export function createRenderer(canvas, { onContextLost } = {}) {
     };
     for (const ring of g.rings) {
       const st = ringStyle[ring.id] || ringStyle.edge;
-      const col = ring.id === 'l3' ? [0.55, 0.62, 0.78]
+      const col = tintCol(ring.id === 'l3' ? [0.55, 0.62, 0.78]
         : ring.id === 'l2' ? [0.37, 0.92, 0.83]
           : ring.id === 'l1' ? [0.38, 0.65, 0.98]
             : ring.id === 'l0' ? [0.22, 0.74, 0.97]
-              : [0.13, 0.83, 0.93];
+              : [0.13, 0.83, 0.93]);
       const pts = circlePoints(ring.radius, 260, 0, TAU);
       push(`ring:${ring.id}`, flatLines(pts, col, st.alpha), {
         width: st.width, dashScale: st.dash, speed: st.speed, dashAmt: st.amt, alphaMul: 1,
@@ -294,7 +294,7 @@ export function createRenderer(canvas, { onContextLost } = {}) {
       const dim = dimLinks && dimLinks.has(key);
       const pending = l.kind === 'pending';
 
-      const [r, gg, b] = LINK_COLORS[l.kind] || LINK_COLORS.data;
+      const [r, gg, b] = tintCol(LINK_COLORS[l.kind] || LINK_COLORS.data);
       // 基础透明度压低（0.16+0.5act → 0.08+0.34act）：三十条线常亮时视觉噪音过大，
       // 让线路网退成背景；悬停/追踪的 hot 增强不变，需要看时依然醒目。
       let alpha = (pending ? 0.13 : 0.08 + 0.34 * act) * (l.weight || 1);
@@ -376,7 +376,7 @@ export function createRenderer(canvas, { onContextLost } = {}) {
       if (n.kind === 'pending') state = 2;
       if (st === 'error') { state = 3; glow = 0.5; }
       if (st === 'dim') state = 2;
-      const [r, gg, b] = hex(n.accent || '#7dd3fc');
+      const [r, gg, b] = tintCol(hex(n.accent || '#7dd3fc'));
       const size = nodeSize(n.kind);
       const o = i * NODE_STRIDE;
       arr[o] = n.x;
@@ -409,7 +409,7 @@ export function createRenderer(canvas, { onContextLost } = {}) {
       if (hot) count = Math.max(count, 9);
       if (dim) count = Math.min(count, 1);
 
-      const [r, gg, b] = LINK_COLORS[l.kind] || LINK_COLORS.data;
+      const [r, gg, b] = tintCol(LINK_COLORS[l.kind] || LINK_COLORS.data);
       const speed = (l.speed || 0.5) * (0.35 + 0.9 * act) * (hot ? 1.35 : 1);
       const size = hot ? 9.5 : 5.2 + act * 1.6;
       const alpha = (pending ? 0.30 : 0.42 + act * 0.5) * (hot ? 1.5 : 1) * (dim ? 0.25 : 1);
@@ -471,7 +471,44 @@ export function createRenderer(canvas, { onContextLost } = {}) {
     knee: 0.28,
     aberration: 0.0022,
     paused: false,
+    // 主题形态（applyTheme 写入；默认 = 原始星云）
+    nebula: 1,
+    stars: 1,
+    sweep: 1,
+    coreGlow: 1,
+    grid: 0,
+    scan: 0,
+    base: [0, 0, 0],
+    mono: null,   // 非空时把线/环/节点颜色向该单色调靠拢（磷光/蓝图用）
+    monoK: 0.8,
   };
+
+  /** 主题单色化：磷光/蓝图下全线统一色相，但保留原有 alpha 层次 */
+  function tintCol([r, g, b]) {
+    const m = state.mono;
+    if (!m) return [r, g, b];
+    const k = state.monoK;
+    return [r + (m[0] - r) * k, g + (m[1] - g) * k, b + (m[2] - b) * k];
+  }
+
+  /**
+   * 应用主题形态（背景成分开关 / 底色 / 单色调 / 后期参数）。
+   * 颜色烘焙在线缓冲里，调用方随后需触发 rebuildLines/rebuildNodes（main.js 置空 lastSig）。
+   */
+  function applyTheme(t) {
+    state.nebula = t.nebula ?? 1;
+    state.stars = t.stars ?? 1;
+    state.sweep = t.sweep ?? 1;
+    state.coreGlow = t.coreGlow ?? 1;
+    state.grid = t.grid ?? 0;
+    state.scan = t.scan ?? 0;
+    state.base = t.base || [0, 0, 0];
+    state.mono = t.mono || null;
+    state.monoK = t.monoK ?? 0.8;
+    if (t.bloom !== undefined) state.bloom = t.bloom;
+    if (t.exposure !== undefined) state.exposure = t.exposure;
+    if (t.aberration !== undefined) state.aberration = t.aberration;
+  }
 
   function render(dt, g, activity, highlightLinks, dimLinks) {
     if (!state.paused) state.time += dt;
@@ -491,6 +528,13 @@ export function createRenderer(canvas, { onContextLost } = {}) {
     gl.uniform3fv(prog.bg.u.uAccent, state.accent);
     gl.uniform2fv(prog.bg.u.uMouse, state.mouse);
     gl.uniform1f(prog.bg.u.uEnergy, state.energy);
+    gl.uniform1f(prog.bg.u.uNebula, state.nebula);
+    gl.uniform1f(prog.bg.u.uStars, state.stars);
+    gl.uniform1f(prog.bg.u.uSweep, state.sweep);
+    gl.uniform1f(prog.bg.u.uCoreGlow, state.coreGlow);
+    gl.uniform1f(prog.bg.u.uGrid, state.grid);
+    gl.uniform1f(prog.bg.u.uScan, state.scan);
+    gl.uniform3fv(prog.bg.u.uBase, state.base);
     bindQuad();
     gl.enable(gl.BLEND);
 
@@ -621,6 +665,7 @@ export function createRenderer(canvas, { onContextLost } = {}) {
     fitZoom,
     setSafeArea,
     applyFraming,
+    applyTheme,
     render,
     rebuildLines,
     rebuildNodes,
