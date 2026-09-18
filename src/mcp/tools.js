@@ -2,10 +2,11 @@
 
 /**
  * MCP 工具定义与处理器。
- * 共 9 工具：
+ * 共 10 工具：
  * - L2 事实记忆（7）：add_memory / get_event_status / search_memories / get_memories /
  *   get_memory / update_memory / delete_memory
  * - L1 会话摘要（2）：list_session_summaries / get_session_summary（后台从 L0 归档生成）
+ * - L3 画像/知识（1）：recall_context（只读召回，供 agent 开场注入长期上下文）
  * - 写入语义：所有 add_memory 输入都是"素材"（text/messages），一律异步受理返回 event_id，
  *   后台内部 LLM 提炼成结构化记忆入库（不存原文）；get_event_status 查进度。
  * - 已裁剪：批量导入、整库/实体管理、agent/run 作用域。单用户部署：所有数据归属同一身份，无需传 user_id。
@@ -15,6 +16,7 @@ const { McpError, ErrorCode, ListToolsRequestSchema, CallToolRequestSchema } =
   require('@modelcontextprotocol/sdk/types.js');
 const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
 const repo = require('../db/repo');
+const l3recall = require('../l3/recall');
 
 function jsonText(obj) {
   return JSON.stringify(obj, null, 2);
@@ -115,6 +117,31 @@ const tools = [
       const { user_id: _ignored, ...restFilters } = filters || {}; // user_id 已不再需要，剥离以防历史客户端传入
       const results = await repo.searchMemories({ userId: uid, query: String(query), limit, threshold, filters: restFilters });
       return { content: [{ type: 'text', text: jsonText({ results }) }] };
+    },
+  },
+
+  {
+    name: 'recall_context',
+    description:
+      '召回「长期成立的上下文」：L3 画像/约束/教训条目（按类分组）+ 可选相关 L2 事实。' +
+      '只读、零 LLM、任何环境可用，适合会话开场直接注入（agent 的自我介绍）。' +
+      'query 提供时按相关度排序并附带 top-K 相关事实；省略则按置信度返回每类前几条。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '当前任务描述，用于相关度排序与相关事实召回；可省略' },
+        per_kind: { type: 'integer', minimum: 1, maximum: 12, description: '每类条目最多返回几条，默认 6' },
+        facts: { type: 'integer', minimum: 0, maximum: 20, description: '相关 L2 事实条数，默认 5；0 = 不带事实' },
+      },
+    },
+    handler: async ({ query = '', per_kind, facts }, userId) => {
+      const r = await l3recall.recallContext({
+        userId,
+        query: String(query || ''),
+        perKind: per_kind,
+        facts,
+      });
+      return { content: [{ type: 'text', text: jsonText(r) }] };
     },
   },
 
