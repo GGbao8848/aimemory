@@ -546,6 +546,54 @@ function cleanupConnectRequests() {
   db.prepare("DELETE FROM connect_requests WHERE status != 'pending' OR expires_at <= ?").run(now());
 }
 
+// ============ L0 原始会话归档（批次去重） ============
+
+/** 批次是否已收到过（幂等重传判定） */
+function l0BatchExists(batchId) {
+  return !!db.prepare('SELECT 1 FROM l0_batches WHERE batch_id = ?').get(batchId);
+}
+
+function insertL0Batch({ batchId, userId, agent, sessionId, collectorId, records, bytes }) {
+  db.prepare(
+    `INSERT OR IGNORE INTO l0_batches
+     (batch_id, user_id, agent, session_id, collector_id, records, bytes, received_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(batchId, userId, agent, sessionId, collectorId || null, records, bytes, now());
+}
+
+/** L0 归档统计（Web / 采集器 status 用） */
+function l0Stats(userId) {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) batches, COUNT(DISTINCT session_id) sessions, COUNT(DISTINCT agent) agents,
+              COALESCE(SUM(records),0) records, COALESCE(SUM(bytes),0) bytes, MAX(received_at) last_received
+       FROM l0_batches WHERE user_id = ?`
+    )
+    .get(userId);
+  return {
+    batches: row.batches,
+    sessions: row.sessions,
+    agents: row.agents,
+    records: row.records,
+    bytes: row.bytes,
+    last_received: row.last_received || null,
+  };
+}
+
+/** 归档会话清单（按最后接收时间倒序） */
+function l0Sessions(userId, limit = 200) {
+  return db
+    .prepare(
+      `SELECT agent, session_id, collector_id, COUNT(*) batches, SUM(records) records,
+              SUM(bytes) bytes, MIN(received_at) first_received, MAX(received_at) last_received
+       FROM l0_batches WHERE user_id = ?
+       GROUP BY agent, session_id
+       ORDER BY last_received DESC
+       LIMIT ?`
+    )
+    .all(userId, limit);
+}
+
 // ============ 统计 / 健康 ============
 
 /** 记忆统计（健康检查与页面展示用） */
@@ -565,6 +613,10 @@ module.exports = {
   updateMemory,
   deleteMemory,
   stats,
+  l0BatchExists,
+  insertL0Batch,
+  l0Stats,
+  l0Sessions,
   createApiKey,
   listApiKeys,
   findUserIdByTokenHash,

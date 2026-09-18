@@ -125,6 +125,22 @@ CREATE TABLE IF NOT EXISTS events (
   updated_at  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_events_user ON events(user_id, created_at);
+
+-- L0 原始会话归档：批次去重表（幂等重传用）。
+-- 原始记录本体不落 SQLite（体量大且 append-only），存 data/l0/ 下的 jsonl 文件；
+-- 本表只记批次指纹，重复上传同一批次直接跳过。
+CREATE TABLE IF NOT EXISTS l0_batches (
+  batch_id    TEXT PRIMARY KEY,          -- sha256(collector|agent|session|batch_seq|records)
+  user_id     TEXT NOT NULL,
+  agent       TEXT NOT NULL,
+  session_id  TEXT NOT NULL,
+  collector_id TEXT,
+  records     INTEGER NOT NULL,
+  bytes       INTEGER NOT NULL,
+  received_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_l0_batches_user ON l0_batches(user_id, received_at);
+CREATE INDEX IF NOT EXISTS idx_l0_batches_session ON l0_batches(session_id);
 `);
 
 // 老库兼容：sessions 表早期无 username 列 → 补充（幂等）

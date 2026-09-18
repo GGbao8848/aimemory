@@ -8,6 +8,7 @@
 const express = require('express');
 const repo = require('../db/repo');
 const tokens = require('../auth/tokens');
+const l0Store = require('../l0/store');
 const config = require('../config');
 
 const apiRouter = express.Router();
@@ -152,6 +153,43 @@ apiRouter.post('/keys/:id/revoke', requireAuth, wrap(async (req, res) => {
   res.json({ success: true });
 }));
 
+// ===== L0 原始会话归档（采集器上传；只落盘，不做提炼） =====
+
+// 采集器上传一个批次（同批次重传按 batch_id 幂等跳过）。
+// 注意：本端点的 body 上限单独放宽（见 index.js 的 per-route parser）——原始会话
+// 批次远大于普通 API 请求，若沿用全局 1mb 会持续 413。
+const l0IngestHandler = wrap(async (req, res) => {
+  const b = req.body || {};
+  const agent = String(b.agent || '').trim();
+  const sessionId = String(b.session_id || '').trim();
+  if (!agent) return res.status(400).json({ error: '缺少 agent' });
+  if (!sessionId) return res.status(400).json({ error: '缺少 session_id' });
+  if (!Array.isArray(b.records) || b.records.length === 0) {
+    return res.status(400).json({ error: 'records 不能为空' });
+  }
+  if (b.records.length > 5000) {
+    return res.status(413).json({ error: '单批次记录数超限（≤5000），请拆分上传' });
+  }
+  const r = l0Store.ingestBatch({
+    userId: req.identity.userId,
+    agent,
+    sessionId,
+    collectorId: b.collector_id,
+    batchSeq: b.batch_seq,
+    batchId: b.batch_id,
+    records: b.records,
+  });
+  res.status(r.deduped ? 200 : 201).json(r);
+});
+
+// 鉴权 + 处理：index.js 以 [parser, ...l0IngestRoute] 形式挂载，先于全局 1mb parser
+const l0IngestRoute = [requireAuth, l0IngestHandler];
+
+// 归档概况 + 会话清单（Web 展示 / 采集器 status 自检）
+apiRouter.get('/l0/stats', requireAuth, wrap(async (req, res) => {
+  res.json({ ...l0Store.archiveStats(req.identity.userId), sessions_list: l0Store.listSessions(req.identity.userId, 50) });
+}));
+
 // ===== 设备流连接（零粘贴：发起 → 授权页确认 → 轮询拿 key）=====
 
 // agent 端发起连接请求（匿名，不绑定用户）→ 返回 request_id 供浏览器授权页 + 轮询
@@ -191,4 +229,4 @@ apiRouter.post('/connect/confirm', requireAuth, wrap(async (req, res) => {
   res.status(201).json({ token: r.token, key_name: r.key_name, api_key_id: r.api_key_id });
 }));
 
-module.exports = { apiRouter, resolveIdentity, buildRedirectUri };
+module.exports = { apiRouter, resolveIdentity, buildRedirectUri, l0IngestRoute };

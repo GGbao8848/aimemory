@@ -14,13 +14,20 @@ const web = require('./web/routes');
 
 const app = express();
 app.disable('x-powered-by');
-app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 
+// L0 采集上传：必须在全局 json parser 之前挂载，并使用放宽的 body 上限。
+// 原始会话批次远大于普通 API 请求（含完整工具输出），沿用 1mb 会持续 413。
+app.post('/api/l0/ingest', express.json({ limit: config.l0MaxBody }), ...web.l0IngestRoute);
+
+// 其余 API 维持 1mb 上限
+app.use(express.json({ limit: '1mb' }));
+
 // ===== 配套技能（下载/预览，公开）=====
-// 三个记忆 skill 源目录（skills/）：aimemory（管理）/ aimemory-recall（召回）/ aimemory-remember（沉淀）
+// 记忆 skill 源目录（skills/）：aimemory（管理）/ aimemory-recall（召回）/ aimemory-remember（沉淀）
+// / aimemory-collector（会话备份采集器部署）
 const SKILLS_DIR = path.join(config.root, 'skills');
-const SKILL_NAMES = ['aimemory', 'aimemory-recall', 'aimemory-remember'];
+const SKILL_NAMES = ['aimemory', 'aimemory-recall', 'aimemory-remember', 'aimemory-collector'];
 const MAIN_SKILL_MD = path.join(SKILLS_DIR, 'aimemory', 'SKILL.md');
 
 // 技能 zip 包下载：aimemory-skills.zip（zip 内为三个 skill 目录，解压后放入 skills/ 或上传安装）

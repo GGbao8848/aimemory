@@ -5,3 +5,5 @@ data/*.db
 data/*.db-*
 .zcode/
 data/*.bak*
+# L0 原始会话归档（含员工会话原文，绝不可入库）
+data/l0/

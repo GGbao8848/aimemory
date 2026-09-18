@@ -69,6 +69,10 @@ module.exports = {
   root,
   dataDir: path.dirname(dbPath),
   dbPath,
+  // L0 原始会话归档目录（append-only jsonl，按 用户/agent/会话 分文件；不参与提炼）
+  l0Dir: process.env.AIMEMORY_L0_DIR || path.join(path.dirname(dbPath), 'l0'),
+  // L0 上传批次体积上限（原始会话批次远大于普通 API 请求，单独放宽）
+  l0MaxBody: process.env.AIMEMORY_L0_MAX_BODY || '64mb',
   port: parseInt(process.env.PORT || '18543', 10),
   publicBaseUrl: (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, ''),
   keycloak: {

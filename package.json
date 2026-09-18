@@ -8,6 +8,8 @@
   "scripts": {
     "start": "node src/index.js",
     "setup-keycloak": "node scripts/setup-keycloak.mjs",
+    "collector": "node collector/index.js",
+    "collector:status": "node collector/index.js --status",
     "test": "node --test"
   },
   "engines": {
