@@ -68,9 +68,8 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
 -- 硬约束：同一用户未吊销的密钥名称必须唯一（重名创建直接报错；吊销后可复用）
 CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_user_name ON api_keys(user_id, name) WHERE revoked_at IS NULL;
 
--- 单 key 策略：每个用户同时最多一条生效密钥。旧 key 由 repo.createApiKey 自动吊销（轮换），
--- 此唯一索引兜底防并发双写，防止历史数据/旁路插入出现一人多 key。
-CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_user_active ON api_keys(user_id) WHERE revoked_at IS NULL;
+-- 迁移：旧版「一人最多一条生效密钥」的硬约束已随多 Token 策略移除（幂等 DROP 兼容存量库）
+DROP INDEX IF EXISTS idx_api_keys_user_active;
 
 -- Web 登录会话（Keycloak 登录成功后建立，HttpOnly cookie 引用 sid）
 CREATE TABLE IF NOT EXISTS sessions (

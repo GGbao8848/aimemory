@@ -5,8 +5,8 @@
 const $ = (sel) => document.querySelector(sel);
 
 let currentUser = null;   // { userId, via }
-let selectedKey = null;   // 当前 MCP JSON 里使用的密钥（单 key 策略下即唯一生效密钥）
-let keyToken = null;      // 密钥明文（本会话内展示，sessionStorage 持久）
+let selectedKey = null;   // MCP JSON 配置里嵌入的 Token（优先本会话已知明文的最新一枚）
+let keyToken = null;      // selectedKey 对应明文（仅本会话内可见）
 let page = 1;
 const PAGE_SIZE = 10;
 let searchQuery = '';
@@ -99,7 +99,7 @@ function showApp() {
 
 const VIEW_META = {
   memories: { title: '我的记忆', sub: '管理 agent 为你沉淀的记忆，跨会话复用' },
-  keys: { title: '接入密钥', sub: '生成密钥，把 aimemory 接进你的 agent' },
+  keys: { title: '接入 Token', sub: '为每个 agent 客户端签发独立 Token，随时单独吊销' },
   guide: { title: '接入指南', sub: 'MCP 接入步骤与工具说明' },
 };
 
@@ -294,90 +294,95 @@ $('#memory-list').addEventListener('click', async (e) => {
   }
 });
 
-// ===== API Key（单 key：一个用户只有一条生效密钥；页面常显，明文在本浏览器会话内可重复查看） =====
+// ===== API Token（一名用户可持有多条命名 Token；明文只在创建时展示一次，本会话内可复看） =====
 
-// 明文只存前端 sessionStorage（仅本标签页会话）：刷新/切页不丢；关浏览器即清（下次重新签发查看）
-function persistToken(token) {
-  try { sessionStorage.setItem('aimemory_key_plain', token); } catch (e) {}
+// 明文只存前端 sessionStorage（仅本标签页会话）：{ keyId: token }；关浏览器即清
+function loadPlainMap() {
+  try { return JSON.parse(sessionStorage.getItem('aimemory_key_plain') || '{}'); } catch (e) { return {}; }
 }
-function restoreToken() {
-  try { return sessionStorage.getItem('aimemory_key_plain') || null; } catch (e) { return null; }
+function persistToken(id, token) {
+  try {
+    const map = loadPlainMap();
+    map[id] = token;
+    sessionStorage.setItem('aimemory_key_plain', JSON.stringify(map));
+  } catch (e) {}
 }
-function clearToken() {
-  try { sessionStorage.removeItem('aimemory_key_plain'); } catch (e) {}
+function restoreToken(id) { return loadPlainMap()[id] || null; }
+function clearToken(id) {
+  try {
+    const map = loadPlainMap();
+    delete map[id];
+    sessionStorage.setItem('aimemory_key_plain', JSON.stringify(map));
+  } catch (e) {}
 }
 
 async function loadKeys() {
   try {
     const data = await api('/api/keys');
     let keys = data.results;
-    // 兜底：完全没有生效密钥（异常态）→ 自动签发一条并展示明文
+    // 兜底：一枚 Token 都没有（新用户/曾全部吊销）→ 自动签发 default 并展示明文
     if (keys.length === 0) {
       const k = await api('/api/keys', { method: 'POST', body: JSON.stringify({ name: 'default' }) });
-      selectedKey = { id: k.id, name: k.name, created_at: k.created_at };
-      keyToken = k.token;
-      persistToken(k.token);
-      renderActiveKey(selectedKey, keyToken);
-      renderJson();
+      persistToken(k.id, k.token);
+      toast('已为你签发首枚 Token（default），明文仅本次展示');
+      loadKeys();
       return;
     }
-    // 单 key 下生效密钥至多一条
-    if (selectedKey && !keys.some((k) => k.id === selectedKey.id)) { selectedKey = null; keyToken = null; }
-    if (!selectedKey) selectedKey = keys[0];
-    keyToken = restoreToken(); // 本会话内已看过明文 → 恢复常显；否则只显示元信息
-    renderActiveKey(selectedKey, keyToken);
-    renderJson();
+    renderKeys(keys);
   } catch (e) { toast(e.message); }
 }
 
-// 渲染当前生效密钥卡片：始终显示；明文可得时直接展示，否则给「显示密钥」按钮（重新签发）
-function renderActiveKey(k, plain) {
+// 渲染 Token 列表（后端按创建时间倒序）：本会话创建过的直接展示明文，其余仅元信息
+function renderKeys(keys) {
   const list = $('#key-list');
-  if (!k) { list.innerHTML = '<li class="muted">暂无生效密钥。</li>'; return; }
-  list.innerHTML = `
+  if (!keys.length) { list.innerHTML = '<li class="muted">暂无生效 Token。</li>'; renderJson(); return; }
+  // MCP JSON 里嵌入哪枚？优先本会话已知明文的最新一枚，否则最新一枚（占位提示）
+  const sel = keys.find((k) => restoreToken(k.id)) || keys[0];
+  selectedKey = sel;
+  keyToken = restoreToken(sel.id);
+  list.innerHTML = keys.map((k) => {
+    const plain = restoreToken(k.id);
+    return `
     <li class="key-item">
       <div class="key-main">
         <span class="key-name">${esc(k.name)}</span>
-        <span class="muted">· 生效中 · ${esc(new Date(k.created_at).toLocaleDateString())} 生成</span>
+        <span class="muted">· ${esc(new Date(k.created_at).toLocaleDateString())} 创建${k.id === sel.id ? ' · 用于下方配置' : ''}</span>
         ${plain
-          ? `<code class="key-plain">${esc(plain)}</code>`
-          : '<button class="btn btn-ghost" id="btn-show-key" type="button">显示密钥</button>'}
+          ? `<code class="key-plain">${esc(plain)}</code><button class="btn btn-ghost" data-copy-token="${esc(plain)}">复制</button>`
+          : '<span class="muted small">明文仅在创建时展示一次</span>'}
       </div>
       <button class="btn btn-ghost danger" data-revoke="${esc(k.id)}">吊销</button>
     </li>`;
-  const copyBtn = $('#copy-visible-key');
-  if (copyBtn) copyBtn.dataset.token = plain || '';
-  const showBtn = $('#btn-show-key');
-  if (showBtn) {
-    showBtn.onclick = async () => {
+  }).join('');
+  list.querySelectorAll('[data-copy-token]').forEach((b) => {
+    b.onclick = () => copyText(b.dataset.copyToken).then(() => toast('已复制'));
+  });
+  list.querySelectorAll('[data-revoke]').forEach((b) => {
+    b.onclick = async () => {
+      if (!confirm('吊销后该 Token 立即失效（正在使用它的 agent 会 401），确定？')) return;
       try {
-        const k2 = await api('/api/keys', { method: 'POST', body: JSON.stringify({ name: k.name }) });
-        keyToken = k2.token;
-        selectedKey = { id: k2.id, name: k2.name, created_at: k2.created_at };
-        persistToken(k2.token);
-        renderActiveKey(selectedKey, keyToken); // 显示新明文；旧 key 已被吊销
-        renderJson();
-        toast('已生成并显示新密钥（旧密钥已自动吊销）');
+        await api(`/api/keys/${b.dataset.revoke}/revoke`, { method: 'POST' });
+        clearToken(b.dataset.revoke);
+        if (selectedKey && selectedKey.id === b.dataset.revoke) { selectedKey = null; keyToken = null; }
+        toast('已吊销');
+        loadKeys();
       } catch (e2) { toast(e2.message); }
     };
-  }
-  const revokeBtn = list.querySelector('[data-revoke]');
-  if (revokeBtn) {
-    revokeBtn.onclick = async () => {
-      if (!confirm('吊销后该密钥立即失效，确定？')) return;
-      try {
-        await api(`/api/keys/${revokeBtn.dataset.revoke}/revoke`, { method: 'POST' });
-        clearToken(); keyToken = null; selectedKey = null;
-        toast('已吊销'); loadKeys();
-      } catch (e2) { toast(e2.message); }
-    };
-  }
+  });
+  renderJson();
 }
 
-$('#copy-visible-key').addEventListener('click', (e) => {
-  const token = e.target.dataset.token;
-  if (!token) return;
-  copyText(token).then(() => toast('密钥已复制'));
+// 新建 Token（名称可留空 → default；明文仅本次展示，请立即复制）
+$('#key-create-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = $('#key-name-input').value.trim();
+  try {
+    const k = await api('/api/keys', { method: 'POST', body: JSON.stringify({ name }) });
+    persistToken(k.id, k.token);
+    $('#key-name-input').value = '';
+    toast('Token 已创建。明文仅本次展示，请立即复制保存');
+    loadKeys();
+  } catch (e2) { toast(e2.message); }
 });
 
 // ===== MCP 配置 JSON =====
@@ -401,7 +406,7 @@ function renderJson() {
     json.mcpServers.aimemory.headers = { Authorization: `Token ${keyToken}` };
     $('#copy-json').textContent = '复制 JSON（含密钥）';
   } else if (selectedKey) {
-    // 无明文 → 占位符提示（生成密钥后明文只显示一次，刷新需重新生成）
+    // 无明文 → 占位符提示（明文只在创建时展示一次）
     json.mcpServers.aimemory.headers = { Authorization: 'Token <在此粘贴你的 m0-xxx 密钥>' };
     $('#copy-json').textContent = '复制 JSON 模板';
   } else {
@@ -417,7 +422,7 @@ function renderJson() {
   } else if (selectedKey) {
     $('#manual-header-value').textContent = 'Token <在此粘贴你的 m0-xxx 密钥>';
   } else {
-    $('#manual-header-value').textContent = 'Token m0-xxx（密钥已自动生成，刷新页面查看）';
+    $('#manual-header-value').textContent = 'Token m0-xxx（在「接入 Token」页新建一枚并粘贴）';
   }
 }
 
@@ -444,8 +449,8 @@ document.querySelectorAll('[data-copy]').forEach((b) => {
 
 $('#copy-json').addEventListener('click', async () => {
   if (!keyToken) {
-    // 明文不可得（换了浏览器/清了缓存）→ 需先「显示密钥」重新签发
-    return toast('请先点击「显示密钥」生成并查看密钥，再复制完整配置');
+    // 明文不可得（本会话没创建过 Token）→ 先新建一枚拿到明文
+    return toast('请先在「接入 Token」页新建一枚 Token（明文会展示），再复制完整配置');
   }
   renderJson(); // 确保复制的是最新内容
   copyText($('#mcp-json').textContent).then(() => {

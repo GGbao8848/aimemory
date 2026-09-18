@@ -415,7 +415,7 @@ function cleanupEvents() {
   db.prepare("DELETE FROM events WHERE status IN ('done','failed') AND created_at <= ?").run(cutoff);
 }
 
-// ============ API Key（单 key 策略） ============
+// ============ API Token（多 Token 并存：按客户端签发，单独吊销） ============
 
 function createApiKey({ userId, name = 'default', tokenHash }) {
   const row = {
@@ -426,13 +426,10 @@ function createApiKey({ userId, name = 'default', tokenHash }) {
     created_at: now(),
     revoked_at: null,
   };
-  db.transaction(() => {
-    // 单 key 策略：签发新密钥前吊销该用户所有未吊销旧密钥（换设备/换客户端 = 旧 key 立即失效）
-    db.prepare('UPDATE api_keys SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL').run(now(), userId);
-    db.prepare(
-      'INSERT INTO api_keys (id, user_id, name, token_hash, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(row.id, row.user_id, row.name, row.token_hash, row.created_at, row.revoked_at);
-  })();
+  // 多 Token 并存：每条独立签发、单独吊销，签发不影响该用户已有 Token
+  db.prepare(
+    'INSERT INTO api_keys (id, user_id, name, token_hash, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(row.id, row.user_id, row.name, row.token_hash, row.created_at, row.revoked_at);
   return row;
 }
 
@@ -519,7 +516,7 @@ function confirmConnectRequest(requestId, userId, name) {
     db.prepare("UPDATE connect_requests SET status='expired' WHERE request_id=?").run(requestId);
     return null;
   }
-  // 单 key 策略：授权即签发新密钥（createApiKey 自动吊销旧 key）
+  // 授权即签发新 Token（多 Token 并存，已有 Token 不受影响）
   const safeName = (name || '').trim().slice(0, 50) || 'zcode';
   const { token, id: keyId } = require('../auth/tokens').createApiKey(userId, safeName);
   db.prepare(

@@ -129,11 +129,13 @@ apiRouter.delete('/memories/:id', requireAuth, wrap(async (req, res) => {
   res.json({ success: true });
 }));
 
-// ===== API Key（单 key 策略：一个用户只有一条生效密钥，生成新 key 自动吊销旧的） =====
+// ===== API Token（一名用户可持有多条命名 Token：按客户端分别签发、单独吊销） =====
 
 apiRouter.post('/keys', requireAuth, wrap(async (req, res) => {
-  const name = String((req.body || {}).name || 'default').trim().slice(0, 50);
-  // 重名但已吊销的旧密钥可直接覆盖（系统本就只保留一条生效密钥），无需用户先手动吊销
+  const name = String((req.body || {}).name || '').trim().slice(0, 50) || 'default';
+  // 同名生效 Token 拒绝签发，避免列表歧义；同名但已吊销的不受影响
+  const dup = tokens.listApiKeys(req.identity.userId).some((k) => k.name === name);
+  if (dup) return res.status(409).json({ error: `同名 Token 已存在：${name}（请换个名称，或先吊销旧的）` });
   const key = tokens.createApiKey(req.identity.userId, name);
   res.status(201).json(key);
 }));

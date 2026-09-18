@@ -49,7 +49,7 @@
         </button>
         <button class="nav-item" data-view="keys">
           <svg viewBox="0 0 16 16" class="nav-ico" aria-hidden="true"><circle cx="5.5" cy="10.5" r="3.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 8 13.5 2.5M11 5l2 2M12.5 3.5l1.5 1.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          <span>接入密钥</span>
+          <span>接入 Token</span>
         </button>
         <button class="nav-item" data-view="guide">
           <svg viewBox="0 0 16 16" class="nav-ico" aria-hidden="true"><path d="M3 2.5h7a2 2 0 0 1 2 2V13a1.5 1.5 0 0 0-1.5-1.5H3z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M10 4.5v6.5" stroke="currentColor" stroke-width="1.4"/></svg>
@@ -106,13 +106,16 @@
         </div>
       </section>
 
-      <!-- 视图：接入密钥 -->
+      <!-- 视图：接入 Token -->
       <section id="view-keys" class="view">
         <div class="card">
-          <h2>🔑 接入密钥</h2>
-          <p class="muted">这是你当前的接入密钥，登录后自动生成、全程唯一。明文会在页面直接展示，复制填入 MCP 客户端即可；换设备时点「显示密钥」重新生成，旧密钥自动作废。</p>
+          <h2>🔑 接入 Token</h2>
+          <p class="muted">一枚 Token 对应一个 agent 客户端（如 zcode / claude-code 各一枚），互不影响、可单独吊销。明文只在创建时展示一次，请立即复制保存。</p>
+          <form id="key-create-form" class="key-create">
+            <input id="key-name-input" type="text" placeholder="Token 名称（如 zcode / claude-code），留空为 default" maxlength="50" />
+            <button class="btn btn-primary" type="submit">➕ 新建 Token</button>
+          </form>
           <ul id="key-list" class="key-list"></ul>
-          <button id="copy-visible-key" class="btn btn-primary" type="button">复制当前密钥</button>
         </div>
 
         <div class="card">
@@ -144,7 +147,7 @@
               <div class="row"><span class="hd-label">Header 名称</span><code id="manual-header-name">Authorization</code><button class="btn btn-ghost" type="button" data-copy="manual-header-name">复制</button></div>
               <div class="row"><span class="hd-label">Header 值</span><code id="manual-header-value"></code><button class="btn btn-ghost" type="button" data-copy="manual-header-value">复制</button></div>
             </div>
-            <p class="muted small">按上面的「服务器名称 / 传输类型 / 服务器 URL / 自定义 Headers」对应填入你的 MCP 客户端（如 BR-Agent 自定义连接器、Claude Code 等）。Token 明文只显示一次，刷新后需用已保存密钥的占位提示。</p>
+            <p class="muted small">按上面的「服务器名称 / 传输类型 / 服务器 URL / 自定义 Headers」对应填入你的 MCP 客户端（如 BR-Agent 自定义连接器、Claude Code 等）。Token 明文只在创建时展示一次；之后可在「接入 Token」页复制（本会话内）或另建一枚。</p>
           </div>
         </div>
       </section>
@@ -153,7 +156,7 @@
       <section id="view-guide" class="view">
         <div class="card">
           <h2>📦 配套技能下载</h2>
-          <p class="muted">零内部代码、零敏感配置，只描述记忆库工具编排与沉淀/召回流程。下载后放入 skills 目录或上传安装，agent 即自动获得记忆读写能力（含 <code>aimemory</code> 管理 / <code>aimemory-recall</code> 自动召回 / <code>aimemory-remember</code> 自动沉淀 三个技能）。</p>
+          <p class="muted">零内部代码、零敏感配置，只描述记忆库工具编排与沉淀/召回流程。下载后放入 skills 目录或上传安装，agent 即自动获得记忆读写能力（含 <code>aimemory</code> 管理 / <code>aimemory-recall</code> 自动召回 / <code>aimemory-remember</code> 自动沉淀 三个技能）。技能源码同仓维护：<a href="https://github.com/GGbao8848/aimemory" target="_blank" rel="noopener">GitHub · skills/</a></p>
           <div class="skill-dl-actions">
             <a class="btn btn-primary" href="/skill/download" download>⬇ 下载 Skill（zip）</a>
             <a class="btn btn-ghost" href="/skill/SKILL.md" target="_blank" rel="noopener">查看 SKILL.md</a>
@@ -163,12 +166,12 @@
         <div class="card">
           <h2>🔌 MCP 接入步骤</h2>
           <ol class="steps">
-            <li><b>查看接入密钥</b>：登录后切到「接入密钥」，密钥已自动生成并在页面展示（<code>m0-xxx</code> 明文），复制即可。<b>换设备时点「显示密钥」重新生成，旧密钥自动作废</b></li>
-            <li><b>复制配置</b>：「MCP 配置」里复制完整 JSON（含密钥），或切「手动模式」按字段复制</li>
+            <li><b>签发 Token</b>：登录后切到「接入 Token」，新账号已自动生成一枚 <code>default</code>；建议为每个客户端分别新建（命名区分），<b>明文只在创建时展示一次</b>，立即复制保存</li>
+            <li><b>复制配置</b>：「MCP 配置」里复制完整 JSON（含本会话已知明文的 Token），或切「手动模式」按字段复制</li>
             <li><b>填入客户端</b>：把 JSON 或字段粘贴到你的 agent 的 MCP 客户端配置（Claude Code / Codex / BR-Agent 自定义连接器…）</li>
             <li><b>验证</b>：agent 调用 <code>add_memory</code> 提交一条素材（等 AI 提炼完成后），再到本平台「我的记忆」确认</li>
           </ol>
-          <p class="muted small">每个员工密钥互不可见、数据互相隔离；一个账号同一时间只有一条生效密钥，新生成即吊销旧的。MCP 端点：<code>http://&lt;服务器内网IP&gt;:18543/mcp</code></p>
+          <p class="muted small">每个员工 Token 互不可见、数据互相隔离；一名员工可同时持有多枚 Token，按客户端分发、单独吊销。MCP 端点：<code>http://&lt;服务器内网IP&gt;:18543/mcp</code></p>
         </div>
 
         <div class="card">

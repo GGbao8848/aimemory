@@ -9,7 +9,7 @@
 - **语义 + 关键词混合检索**：embedding 向量召回（同义/口语化可命中）+ SQLite FTS5 trigram 关键词召回（中文子串）；embedding 不可用时自动回退纯关键词
 - **7 个核心 MCP 工具**：`add_memory` / `get_event_status` / `search_memories` / `get_memories` / `get_memory` / `update_memory` / `delete_memory`——刻意不提供批量导入、整库/实体管理、agent/run 维度
 - **多租户隔离**：数据按员工隔离，跨用户访问直接拒绝（MCP 与 REST 均验证）
-- **接入**：Web 生成 `m0-xxx` 密钥（仅存 sha256）+ 设备流浏览器免粘贴授权；Web 页支持导出全量记忆（JSON）
+- **接入**：Web 自助签发多枚 `m0-xxx` Token（仅存 sha256，按客户端分发、单独吊销）+ 设备流浏览器免粘贴授权；Web 页支持导出全量记忆（JSON）
 - **半熔断容错**：LLM/embedding 服务抖动自动熔断降级、恢复自动探测回补，无需重启
 - **单端口 18543**：`/mcp` + `/api/*` + Web 管理页 + `/healthz`
 
@@ -52,7 +52,7 @@ curl http://localhost:18543/           # Web 平台（Keycloak 登录）
 
 ## 使用方式
 
-- **MCP 接入**：`url: http://<内网IP>:18543/mcp`，`headers: { "Authorization": "Token m0-xxx" }`。员工在 Web「接入密钥」页拿 key / 或走设备流一键授权。
+- **MCP 接入**：`url: http://<内网IP>:18543/mcp`，`headers: { "Authorization": "Token m0-xxx" }`。员工在 Web「接入 Token」页签发 / 或走设备流一键授权。
 - **写入（素材）**：`add_memory { text }` 或 `add_memory { messages: [{role,content}...] }` → 返回 `{event_id, status:"pending"}`；轮询 `get_event_status` 至 `done`（含提炼产物）或 `failed`（素材未入库）。**返回≠已入库，务必查状态。**
 - **查询**：`search_memories { query, limit?, threshold? }` 语义检索；`get_memories` / `get_memory` 列表/单条；`update_memory` / `delete_memory` 修改/删除。
 
@@ -69,7 +69,7 @@ curl http://localhost:18543/           # Web 平台（Keycloak 登录）
 | GET | `/api/memories/export` | 导出当前员工全部记忆（JSON 附件） |
 | GET | `/api/events/:id` | 查素材提炼状态 |
 | GET | `/api/stats` / `/api/me` | 统计 / 当前身份 |
-| POST/GET | `/api/keys`、`/api/keys/:id/revoke` | 密钥管理 |
+| POST/GET | `/api/keys`、`/api/keys/:id/revoke` | Token 管理（多 Token 并存，单独吊销） |
 | POST/GET | `/api/connect/start`、`/api/connect/poll`、`/api/connect/confirm` | 设备流接入 |
 
 鉴权：`Authorization: Token m0-xxx` 或 Web 会话 cookie。
@@ -102,7 +102,7 @@ rsync -av aimemory/ user@new-server:/opt/aimemory/
 ## 数据与安全
 
 - 库内只存**提炼产物**（结构化记忆），素材原文不入库；`text` 明文存储无加密——**不写入完整密码等敏感明文**（skill 有约束）。
-- 密钥仅存 sha256 哈希；单 key 策略（换设备自动吊销旧 key）。
+- Token 仅存 sha256 哈希，明文只在签发时返回一次；每员工可持有多枚命名 Token，按客户端签发、单独吊销。
 - 记忆按员工隔离，导出仅限本人；删除需 Web 或 MCP `delete_memory` 单条确认。
 
 ## 容量与运维
@@ -118,5 +118,5 @@ rsync -av aimemory/ user@new-server:/opt/aimemory/
 
 ## 关联项目
 
-- **插件**（skill + hooks + 自动授权脚本，唯一事实源）：本仓库 `plugin/` 目录；公司市场分发见 br-ai-portal。
+- **配套 Skills**：本仓库 `skills/` 目录（aimemory / aimemory-recall / aimemory-remember），Web「接入指南」页可下载 zip，或直接取用仓库源（https://github.com/GGbao8848/aimemory）。已取消插件打包与插件市场分发，接入只走 skill + MCP API 两条路。
 - **Keycloak 部署**：mykeycloak（统一登录平台）。

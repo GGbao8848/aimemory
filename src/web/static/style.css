@@ -528,6 +528,9 @@ input:focus, textarea:focus {
   font-family: var(--font-sans);
 }
 .key-list { list-style: none; margin: 0; padding: 0; }
+.key-create { display: flex; gap: 8px; margin: 12px 0 4px; flex-wrap: wrap; }
+.key-create input { flex: 1 1 220px; min-width: 160px; width: auto; }
+.key-create .btn { flex-shrink: 0; }
 .key-item {
   display: flex;
   justify-content: space-between;

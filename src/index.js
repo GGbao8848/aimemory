@@ -18,15 +18,15 @@ app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 
 // ===== 配套技能（下载/预览，公开）=====
-// 三个记忆 skill 源目录（plugin/skills）：aimemory（管理）/ aimemory-recall（召回）/ aimemory-remember（沉淀）
-const SKILLS_DIR = path.join(config.root, 'plugin', 'skills');
+// 三个记忆 skill 源目录（skills/）：aimemory（管理）/ aimemory-recall（召回）/ aimemory-remember（沉淀）
+const SKILLS_DIR = path.join(config.root, 'skills');
 const SKILL_NAMES = ['aimemory', 'aimemory-recall', 'aimemory-remember'];
 const MAIN_SKILL_MD = path.join(SKILLS_DIR, 'aimemory', 'SKILL.md');
 
 // 技能 zip 包下载：aimemory-skills.zip（zip 内为三个 skill 目录，解压后放入 skills/ 或上传安装）
 app.get('/skill/download', (_req, res) => {
   if (!fs.existsSync(MAIN_SKILL_MD)) {
-    res.status(404).send('配套技能 plugin/skills 不存在（请检查服务器部署目录）');
+    res.status(404).send('配套技能 skills/ 不存在（请检查服务器部署目录）');
     return;
   }
   const zip = new AdmZip();
@@ -45,7 +45,7 @@ app.get('/skill/download', (_req, res) => {
 // 单文件预览/另存：主管理技能（aimemory/SKILL.md）
 app.get('/skill/SKILL.md', (_req, res) => {
   if (!fs.existsSync(MAIN_SKILL_MD)) {
-    res.status(404).send('配套技能 plugin/skills/aimemory/SKILL.md 不存在（请检查服务器部署目录）');
+    res.status(404).send('配套技能 skills/aimemory/SKILL.md 不存在（请检查服务器部署目录）');
     return;
   }
   res.type('text/markdown; charset=utf-8').sendFile(MAIN_SKILL_MD);
@@ -91,8 +91,8 @@ app.get('/auth/callback', async (req, res) => {
     // 建立本地会话
     const sid = require('crypto').randomBytes(24).toString('hex');
     repo.createSession(sid, user.id, config.sessionTtlMs, user.username);
-    // 单 key 策略 + 「进来自动有密钥」：登录即确保该用户存在一条生效密钥。
-    // 新用户/密钥曾被吊销 → 自动签发；已有一条生效密钥 → 保持不变（避免每次登录都轮换）。
+    // 「进来自动有 Token」：登录即确保该用户至少有一枚生效 Token。
+    // 新用户/Token 曾全部吊销 → 自动签发 default；已有 Token → 保持不变（多 Token 并存，互不影响）。
     const existing = repo.listApiKeys(user.id);
     if (existing.length === 0) {
       tokens.createApiKey(user.id, 'default');
@@ -192,15 +192,15 @@ app.get('/connect', (req, res) => {
     <div id="form-area">
       <label>连接请求</label>
       <div class="reqbox" id="reqbox">${requestId ? esc(requestId.slice(0,8)) + '…' : '（缺少请求标识，请从 agent 端重新发起）'}</div>
-      <label>密钥名称（可选；重置密钥会自动吊销你名下其他生效密钥）</label>
+      <label>Token 名称（可选，便于区分客户端）</label>
       <input type="text" id="key-name" placeholder="如 zcode / claude-code" maxlength="50" />
-      <button class="btn" id="confirm-btn" ${requestId ? '' : 'disabled'}>确认并重置密钥</button>
+      <button class="btn" id="confirm-btn" ${requestId ? '' : 'disabled'}>确认并签发 Token</button>
       <p class="err" id="err"></p>
     </div>
 
     <div class="done" id="done">
       <div class="ok">✓ 已授权，可回到 agent 继续</div>
-      <div class="hint">密钥已自动发送到你的 agent，无需复制粘贴。你名下其他生效密钥已被自动吊销。本页可关闭。</div>
+      <div class="hint">Token 已自动发送到你的 agent，无需复制粘贴；你名下已有 Token 不受影响。本页可关闭。</div>
     </div>
   </div>
   <script>

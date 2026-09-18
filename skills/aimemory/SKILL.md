@@ -14,9 +14,10 @@ aimemory 是自托管的 AI 记忆库（mem0 兼容 MCP），多租户隔离、�
 > ⚠️ 依赖已连接的 MCP 服务 `aimemory`（`http://<内网IP>:18543/mcp`）。
 > ⚠️ 数据按用户隔离：只能操作当前登录用户自己的记忆，跨用户访问会被拒绝。
 
-> 🧩 **工具名匹配**：实际注册的 MCP 工具名为 `mcp__<server名>__<工具名>`。插件安装时 server 名带前缀
-> （如 `mcp__plugin_aimemory_aimemory__search_memories`），用户级直连时无前缀（`mcp__aimemory__search_memories`）。
+> 🧩 **工具名匹配**：实际注册的 MCP 工具名为 `mcp__<server名>__<工具名>`，如 server 名为 `aimemory` 时
+> 检索工具注册为 `mcp__aimemory__search_memories`（若你的客户端安装时给 server 名加了前缀，则以实际注册名为准）。
 > 下表统一用**裸工具名**（`search_memories` 等）表示，调用时按 `__` 后的工具名匹配实际注册名即可，无需关心 server 前缀。
+
 ## 意图 → 工具映射
 
 | 用户说 | 调用 | 说明 |
