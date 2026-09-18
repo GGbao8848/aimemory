@@ -5,8 +5,8 @@
 const $ = (sel) => document.querySelector(sel);
 
 let currentUser = null;   // { userId, via }
-let selectedKey = null;   // MCP JSON 配置里嵌入的 Token（优先本会话已知明文的最新一枚）
-let keyToken = null;      // selectedKey 对应明文（仅本会话内可见）
+let selectedKey = null;   // MCP JSON 配置里嵌入的 Token（默认最新一枚）
+let keyToken = null;      // selectedKey 的明文（服务端提供，随时可见）
 let page = 1;
 const PAGE_SIZE = 10;
 let searchQuery = '';
@@ -294,64 +294,43 @@ $('#memory-list').addEventListener('click', async (e) => {
   }
 });
 
-// ===== API Token（一名用户可持有多条命名 Token；明文只在创建时展示一次，本会话内可复看） =====
-
-// 明文只存前端 sessionStorage（仅本标签页会话）：{ keyId: token }；关浏览器即清
-function loadPlainMap() {
-  try { return JSON.parse(sessionStorage.getItem('aimemory_key_plain') || '{}'); } catch (e) { return {}; }
-}
-function persistToken(id, token) {
-  try {
-    const map = loadPlainMap();
-    map[id] = token;
-    sessionStorage.setItem('aimemory_key_plain', JSON.stringify(map));
-  } catch (e) {}
-}
-function restoreToken(id) { return loadPlainMap()[id] || null; }
-function clearToken(id) {
-  try {
-    const map = loadPlainMap();
-    delete map[id];
-    sessionStorage.setItem('aimemory_key_plain', JSON.stringify(map));
-  } catch (e) {}
-}
+// ===== API Token（一名用户可持有多条命名 Token；明文由服务端保存，列表内随时可看可复制） =====
 
 async function loadKeys() {
   try {
     const data = await api('/api/keys');
-    let keys = data.results;
-    // 兜底：一枚 Token 都没有（新用户/曾全部吊销）→ 自动签发 default 并展示明文
-    if (keys.length === 0) {
-      const k = await api('/api/keys', { method: 'POST', body: JSON.stringify({ name: 'default' }) });
-      persistToken(k.id, k.token);
-      toast('已为你签发首枚 Token（default），明文仅本次展示');
-      loadKeys();
-      return;
-    }
-    renderKeys(keys);
+    renderKeys(data.results);
   } catch (e) { toast(e.message); }
 }
 
-// 渲染 Token 列表（后端按创建时间倒序）：本会话创建过的直接展示明文，其余仅元信息
+// 渲染 Token 列表（后端按创建时间倒序）：每枚都常显明文，可直接复制
 function renderKeys(keys) {
   const list = $('#key-list');
-  if (!keys.length) { list.innerHTML = '<li class="muted">暂无生效 Token。</li>'; renderJson(); return; }
-  // MCP JSON 里嵌入哪枚？优先本会话已知明文的最新一枚，否则最新一枚（占位提示）
-  const sel = keys.find((k) => restoreToken(k.id)) || keys[0];
-  selectedKey = sel;
-  keyToken = restoreToken(sel.id);
+  if (!keys.length) {
+    list.innerHTML = '<li class="muted">暂无 Token，请在上方命名新建。</li>';
+    selectedKey = null;
+    keyToken = null;
+    renderJson();
+    return;
+  }
+  // MCP JSON 默认嵌入最新一枚（列表首条）；有明文才能拼出可直接用的完整配置
+  selectedKey = keys[0];
+  keyToken = selectedKey.token || null;
   list.innerHTML = keys.map((k) => {
-    const plain = restoreToken(k.id);
+    const plain = k.token || '';
     return `
     <li class="key-item">
       <div class="key-main">
         <span class="key-name">${esc(k.name)}</span>
-        <span class="muted">· ${esc(new Date(k.created_at).toLocaleDateString())} 创建${k.id === sel.id ? ' · 用于下方配置' : ''}</span>
+        <span class="muted">· ${esc(new Date(k.created_at).toLocaleDateString())} 创建${k.id === selectedKey.id ? ' · 用于下方配置' : ''}</span>
         ${plain
-          ? `<code class="key-plain">${esc(plain)}</code><button class="btn btn-ghost" data-copy-token="${esc(plain)}">复制</button>`
-          : '<span class="muted small">明文仅在创建时展示一次</span>'}
+          ? `<code class="key-plain">${esc(plain)}</code>`
+          : '<span class="muted small">早期签发的 Token 未存明文，无法回显（请吊销后新建）</span>'}
       </div>
-      <button class="btn btn-ghost danger" data-revoke="${esc(k.id)}">吊销</button>
+      <div class="key-ops">
+        ${plain ? `<button class="btn btn-ghost" data-copy-token="${esc(plain)}">复制</button>` : ''}
+        <button class="btn btn-ghost danger" data-revoke="${esc(k.id)}">吊销</button>
+      </div>
     </li>`;
   }).join('');
   list.querySelectorAll('[data-copy-token]').forEach((b) => {
@@ -362,8 +341,6 @@ function renderKeys(keys) {
       if (!confirm('吊销后该 Token 立即失效（正在使用它的 agent 会 401），确定？')) return;
       try {
         await api(`/api/keys/${b.dataset.revoke}/revoke`, { method: 'POST' });
-        clearToken(b.dataset.revoke);
-        if (selectedKey && selectedKey.id === b.dataset.revoke) { selectedKey = null; keyToken = null; }
         toast('已吊销');
         loadKeys();
       } catch (e2) { toast(e2.message); }
@@ -372,15 +349,15 @@ function renderKeys(keys) {
   renderJson();
 }
 
-// 新建 Token（名称可留空 → default；明文仅本次展示，请立即复制）
+// 新建 Token（名称必填；明文持久化，列表中随时可看）
 $('#key-create-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const name = $('#key-name-input').value.trim();
+  if (!name) return toast('请先填写 Token 名称');
   try {
-    const k = await api('/api/keys', { method: 'POST', body: JSON.stringify({ name }) });
-    persistToken(k.id, k.token);
+    await api('/api/keys', { method: 'POST', body: JSON.stringify({ name }) });
     $('#key-name-input').value = '';
-    toast('Token 已创建。明文仅本次展示，请立即复制保存');
+    toast(`Token「${name}」已创建`);
     loadKeys();
   } catch (e2) { toast(e2.message); }
 });
@@ -402,15 +379,15 @@ function renderJson() {
     },
   };
   if (keyToken) {
-    // 有明文（刚生成/本会话内创建）→ 生成可直接使用的完整配置
+    // 有明文 → 生成可直接使用的完整配置
     json.mcpServers.aimemory.headers = { Authorization: `Token ${keyToken}` };
-    $('#copy-json').textContent = '复制 JSON（含密钥）';
+    $('#copy-json').textContent = '复制 JSON（含 Token）';
   } else if (selectedKey) {
-    // 无明文 → 占位符提示（明文只在创建时展示一次）
-    json.mcpServers.aimemory.headers = { Authorization: 'Token <在此粘贴你的 m0-xxx 密钥>' };
+    // 早期 Token 未存明文 → 占位提示，引导新建
+    json.mcpServers.aimemory.headers = { Authorization: 'Token <在此粘贴你的 m0-xxx Token>' };
     $('#copy-json').textContent = '复制 JSON 模板';
   } else {
-    // 无任何密钥 → 空 headers 模板
+    // 尚无 Token → 空 headers 模板
     $('#copy-json').textContent = '复制 JSON 模板';
   }
   $('#mcp-json').textContent = JSON.stringify(json, null, 2);
@@ -420,9 +397,9 @@ function renderJson() {
   if (keyToken) {
     $('#manual-header-value').textContent = `Token ${keyToken}`;
   } else if (selectedKey) {
-    $('#manual-header-value').textContent = 'Token <在此粘贴你的 m0-xxx 密钥>';
+    $('#manual-header-value').textContent = 'Token <在此粘贴你的 m0-xxx Token>';
   } else {
-    $('#manual-header-value').textContent = 'Token m0-xxx（在「接入 Token」页新建一枚并粘贴）';
+    $('#manual-header-value').textContent = 'Token m0-xxx（请先在上方新建 Token）';
   }
 }
 
@@ -449,8 +426,8 @@ document.querySelectorAll('[data-copy]').forEach((b) => {
 
 $('#copy-json').addEventListener('click', async () => {
   if (!keyToken) {
-    // 明文不可得（本会话没创建过 Token）→ 先新建一枚拿到明文
-    return toast('请先在「接入 Token」页新建一枚 Token（明文会展示），再复制完整配置');
+    // 明文不可得（早期 Token 未存明文，或尚无 Token）→ 引导新建一枚
+    return toast('请先在上方新建一枚 Token，再复制完整配置');
   }
   renderJson(); // 确保复制的是最新内容
   copyText($('#mcp-json').textContent).then(() => {

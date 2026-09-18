@@ -1,8 +1,8 @@
 'use strict';
 
 /**
- * API Key（m0- 前缀，与 mem0 云 key 形态一致）：
- * 生成 / 哈希 / 校验。明文只落一次，数据库存 sha256。
+ * API Token（m0- 前缀，与 mem0 云 key 形态一致）：
+ * 生成 / 哈希 / 校验。校验走 sha256（token_hash），明文另存 token_plain 供 Web 端随时回看。
  */
 const crypto = require('crypto');
 const repo = require('../db/repo');
@@ -17,10 +17,10 @@ function hashToken(token) {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
-/** 创建 key，返回 { token(明文，仅此一次), id, name, created_at } */
-function createApiKey(userId, name = 'default') {
+/** 创建 Token，返回 { token(明文), id, name, created_at }；name 必填（调用方校验非空） */
+function createApiKey(userId, name) {
   const token = generateApiKey();
-  const row = repo.createApiKey({ userId, name, tokenHash: hashToken(token) });
+  const row = repo.createApiKey({ userId, name, tokenHash: hashToken(token), tokenPlain: token });
   return {
     token,
     id: row.id,
@@ -29,8 +29,25 @@ function createApiKey(userId, name = 'default') {
   };
 }
 
+/** 列出该用户的生效 Token（含明文，供 Web 端随时回看） */
 function listApiKeys(userId) {
-  return repo.listApiKeys(userId).map(({ id, name, created_at }) => ({ id, name, created_at }));
+  return repo.listApiKeys(userId).map(({ id, name, token_plain, created_at }) => ({
+    id,
+    name,
+    token: token_plain,
+    created_at,
+  }));
+}
+
+/** 生成不与现有生效 Token 重名的名称：base、base-2、base-3…（无人值守授权路径用） */
+function uniqueName(userId, base) {
+  const taken = new Set(repo.listApiKeys(userId).map((k) => k.name));
+  if (!taken.has(base)) return base;
+  for (let i = 2; i < 1000; i++) {
+    const candidate = `${base}-${i}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  return `${base}-${Date.now()}`;
 }
 
 function revokeApiKey(id, userId) {
@@ -43,4 +60,4 @@ function verify(token) {
   return repo.findUserIdByTokenHash(hashToken(token));
 }
 
-module.exports = { createApiKey, listApiKeys, revokeApiKey, verify, hashToken };
+module.exports = { createApiKey, listApiKeys, uniqueName, revokeApiKey, verify, hashToken };

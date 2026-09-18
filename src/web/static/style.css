@@ -545,6 +545,7 @@ input:focus, textarea:focus {
   background: var(--surface-2, rgba(127,127,127,.08)); border: 1px solid var(--border, rgba(127,127,127,.2));
   border-radius: 6px; padding: 4px 8px; font-size: 12px; word-break: break-all; color: var(--text, inherit); }
 .key-item .btn.danger { align-self: flex-start; }
+.key-ops { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
 
 .key-name { font-weight: 600; }
 .link-btn {

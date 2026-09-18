@@ -110,9 +110,9 @@
       <section id="view-keys" class="view">
         <div class="card">
           <h2>🔑 接入 Token</h2>
-          <p class="muted">一枚 Token 对应一个 agent 客户端（如 zcode / claude-code 各一枚），互不影响、可单独吊销。明文只在创建时展示一次，请立即复制保存。</p>
+          <p class="muted">一枚 Token 对应一个 agent 客户端（如 zcode / claude-code 各一枚），互不影响、可单独吊销。名称为必填项；明文长期保存，页面随时可查可复制。</p>
           <form id="key-create-form" class="key-create">
-            <input id="key-name-input" type="text" placeholder="Token 名称（如 zcode / claude-code），留空为 default" maxlength="50" />
+            <input id="key-name-input" type="text" placeholder="Token 名称（必填，如 zcode / claude-code）" maxlength="50" required />
             <button class="btn btn-primary" type="submit">➕ 新建 Token</button>
           </form>
           <ul id="key-list" class="key-list"></ul>
@@ -147,7 +147,7 @@
               <div class="row"><span class="hd-label">Header 名称</span><code id="manual-header-name">Authorization</code><button class="btn btn-ghost" type="button" data-copy="manual-header-name">复制</button></div>
               <div class="row"><span class="hd-label">Header 值</span><code id="manual-header-value"></code><button class="btn btn-ghost" type="button" data-copy="manual-header-value">复制</button></div>
             </div>
-            <p class="muted small">按上面的「服务器名称 / 传输类型 / 服务器 URL / 自定义 Headers」对应填入你的 MCP 客户端（如 BR-Agent 自定义连接器、Claude Code 等）。Token 明文只在创建时展示一次；之后可在「接入 Token」页复制（本会话内）或另建一枚。</p>
+            <p class="muted small">按上面的「服务器名称 / 传输类型 / 服务器 URL / 自定义 Headers」对应填入你的 MCP 客户端（如 BR-Agent 自定义连接器、Claude Code 等）。Token 明文长期保存，可随时回「接入 Token」页复制。</p>
           </div>
         </div>
       </section>
@@ -166,8 +166,8 @@
         <div class="card">
           <h2>🔌 MCP 接入步骤</h2>
           <ol class="steps">
-            <li><b>签发 Token</b>：登录后切到「接入 Token」，新账号已自动生成一枚 <code>default</code>；建议为每个客户端分别新建（命名区分），<b>明文只在创建时展示一次</b>，立即复制保存</li>
-            <li><b>复制配置</b>：「MCP 配置」里复制完整 JSON（含本会话已知明文的 Token），或切「手动模式」按字段复制</li>
+            <li><b>签发 Token</b>：登录后切到「接入 Token」，<b>填写名称</b>（必填）新建一枚；建议为每个客户端分别新建（命名区分），明文可随时复制</li>
+            <li><b>复制配置</b>：「MCP 配置」里复制完整 JSON（默认含最新一枚 Token 明文），或切「手动模式」按字段复制</li>
             <li><b>填入客户端</b>：把 JSON 或字段粘贴到你的 agent 的 MCP 客户端配置（Claude Code / Codex / BR-Agent 自定义连接器…）</li>
             <li><b>验证</b>：agent 调用 <code>add_memory</code> 提交一条素材（等 AI 提炼完成后），再到本平台「我的记忆」确认</li>
           </ol>

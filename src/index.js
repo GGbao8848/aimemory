@@ -91,12 +91,6 @@ app.get('/auth/callback', async (req, res) => {
     // 建立本地会话
     const sid = require('crypto').randomBytes(24).toString('hex');
     repo.createSession(sid, user.id, config.sessionTtlMs, user.username);
-    // 「进来自动有 Token」：登录即确保该用户至少有一枚生效 Token。
-    // 新用户/Token 曾全部吊销 → 自动签发 default；已有 Token → 保持不变（多 Token 并存，互不影响）。
-    const existing = repo.listApiKeys(user.id);
-    if (existing.length === 0) {
-      tokens.createApiKey(user.id, 'default');
-    }
     res.cookie('aim_session', sid, {
       httpOnly: true, sameSite: 'lax', maxAge: config.sessionTtlMs,
     });
@@ -142,7 +136,9 @@ app.get('/connect', (req, res) => {
   // 有登录会话且 token 匹配即直接确认并关窗（无任何页面文字，用户无感）。
   // 无 confirm_token 或校验不过 → 回退下方手动确认页（安全兜底，防 CSRF 诱导换发）。
   if (requestId && confirmToken && repo.canAutoConfirm(requestId, confirmToken)) {
-    const r = repo.confirmConnectRequest(requestId, id.userId, 'zcode');
+    // 免按钮路径没有用户输入 → 自动命名（agent / agent-2…），避免与已有 Token 重名
+    const autoName = tokens.uniqueName(id.userId, 'agent');
+    repo.confirmConnectRequest(requestId, id.userId, autoName);
     res.type('html').send('<!DOCTYPE html><html><head><meta charset="UTF-8" /><script>try{window.close()}catch(e){};setTimeout(function(){location.replace("about:blank")},200);<\/script></head><body></body></html>');
     return;
   }
@@ -192,7 +188,7 @@ app.get('/connect', (req, res) => {
     <div id="form-area">
       <label>连接请求</label>
       <div class="reqbox" id="reqbox">${requestId ? esc(requestId.slice(0,8)) + '…' : '（缺少请求标识，请从 agent 端重新发起）'}</div>
-      <label>Token 名称（可选，便于区分客户端）</label>
+      <label>Token 名称（必填，便于日后识别与吊销）</label>
       <input type="text" id="key-name" placeholder="如 zcode / claude-code" maxlength="50" />
       <button class="btn" id="confirm-btn" ${requestId ? '' : 'disabled'}>确认并签发 Token</button>
       <p class="err" id="err"></p>
@@ -209,13 +205,15 @@ app.get('/connect', (req, res) => {
     const formEl = document.getElementById('form-area');
     document.getElementById('confirm-btn').onclick = async () => {
       const btn = document.getElementById('confirm-btn');
-      btn.disabled = true; btn.textContent = '授权中…';
       const errEl = document.getElementById('err'); errEl.style.display = 'none';
+      const keyName = document.getElementById('key-name').value.trim();
+      if (!keyName) { errEl.textContent = '请填写 Token 名称'; errEl.style.display = 'block'; return; }
+      btn.disabled = true; btn.textContent = '授权中…';
       try {
         const r = await fetch('/api/connect/confirm', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ request_id: requestId, name: document.getElementById('key-name').value.trim() }),
+          body: JSON.stringify({ request_id: requestId, name: keyName }),
         });
         const d = await r.json();
         if (!r.ok) throw new Error(d.error || '授权失败');
@@ -230,7 +228,7 @@ app.get('/connect', (req, res) => {
         setTimeout(() => { try { window.close(); } catch (e) {} }, 1200);
       } catch (e) {
         errEl.textContent = e.message; errEl.style.display = 'block';
-        btn.disabled = false; btn.textContent = '确认授权';
+        btn.disabled = false; btn.textContent = '确认并签发 Token';
       }
     };
   </script>

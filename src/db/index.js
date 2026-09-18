@@ -55,14 +55,16 @@ CREATE TABLE IF NOT EXISTS memories_history (
 );
 CREATE INDEX IF NOT EXISTS idx_history_memory ON memories_history(memory_id, id);
 
--- API Key（只存 sha256 哈希，明文不落库）
+-- API Token：token_hash 用于鉴权校验，token_plain 供 Web 端随时回看明文
+-- （明文需长期可查，故与哈希一并存储；名称由调用方强制提供，不设默认值）
 CREATE TABLE IF NOT EXISTS api_keys (
-  id         TEXT PRIMARY KEY,
-  user_id    TEXT NOT NULL,
-  name       TEXT NOT NULL DEFAULT 'default',
-  token_hash TEXT NOT NULL UNIQUE,
-  created_at TEXT NOT NULL,
-  revoked_at TEXT
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL,
+  name        TEXT NOT NULL,
+  token_hash  TEXT NOT NULL UNIQUE,
+  token_plain TEXT,
+  created_at  TEXT NOT NULL,
+  revoked_at  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
 -- 硬约束：同一用户未吊销的密钥名称必须唯一（重名创建直接报错；吊销后可复用）
@@ -129,6 +131,13 @@ CREATE INDEX IF NOT EXISTS idx_events_user ON events(user_id, created_at);
 const sessionCols = db.prepare("PRAGMA table_info(sessions)").all().map((c) => c.name);
 if (!sessionCols.includes('username')) {
   db.exec('ALTER TABLE sessions ADD COLUMN username TEXT');
+}
+
+// 老库兼容：api_keys 早期只存哈希 → 补 token_plain 列。
+// 历史 Token 的明文无法从哈希逆推，该列留空，前端会提示吊销后重建。
+const apiKeyCols = db.prepare("PRAGMA table_info(api_keys)").all().map((c) => c.name);
+if (!apiKeyCols.includes('token_plain')) {
+  db.exec('ALTER TABLE api_keys ADD COLUMN token_plain TEXT');
 }
 
 // 老库兼容：memories 早期无 embedding / facts / entities 列 → 补充

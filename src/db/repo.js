@@ -417,25 +417,26 @@ function cleanupEvents() {
 
 // ============ API Token（多 Token 并存：按客户端签发，单独吊销） ============
 
-function createApiKey({ userId, name = 'default', tokenHash }) {
+function createApiKey({ userId, name, tokenHash, tokenPlain }) {
   const row = {
     id: uuid(),
     user_id: userId,
     name,
     token_hash: tokenHash,
+    token_plain: tokenPlain,
     created_at: now(),
     revoked_at: null,
   };
   // 多 Token 并存：每条独立签发、单独吊销，签发不影响该用户已有 Token
   db.prepare(
-    'INSERT INTO api_keys (id, user_id, name, token_hash, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(row.id, row.user_id, row.name, row.token_hash, row.created_at, row.revoked_at);
+    'INSERT INTO api_keys (id, user_id, name, token_hash, token_plain, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(row.id, row.user_id, row.name, row.token_hash, row.token_plain, row.created_at, row.revoked_at);
   return row;
 }
 
 function listApiKeys(userId) {
   return db
-    .prepare('SELECT id, user_id, name, created_at, revoked_at FROM api_keys WHERE user_id = ? AND revoked_at IS NULL ORDER BY created_at DESC')
+    .prepare('SELECT id, user_id, name, token_plain, created_at, revoked_at FROM api_keys WHERE user_id = ? AND revoked_at IS NULL ORDER BY created_at DESC')
     .all(userId);
 }
 
@@ -516,8 +517,9 @@ function confirmConnectRequest(requestId, userId, name) {
     db.prepare("UPDATE connect_requests SET status='expired' WHERE request_id=?").run(requestId);
     return null;
   }
-  // 授权即签发新 Token（多 Token 并存，已有 Token 不受影响）
-  const safeName = (name || '').trim().slice(0, 50) || 'zcode';
+  // 授权即签发新 Token（多 Token 并存，已有 Token 不受影响）；名称必填，由调用方保证非空
+  const safeName = String(name || '').trim().slice(0, 50);
+  if (!safeName) return null;
   const { token, id: keyId } = require('../auth/tokens').createApiKey(userId, safeName);
   db.prepare(
     `UPDATE connect_requests SET status='authorized', user_id=?, key_name=?, api_key_id=?, token_plain=?, confirmed_at=? WHERE request_id=?`

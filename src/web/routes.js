@@ -132,7 +132,8 @@ apiRouter.delete('/memories/:id', requireAuth, wrap(async (req, res) => {
 // ===== API Token（一名用户可持有多条命名 Token：按客户端分别签发、单独吊销） =====
 
 apiRouter.post('/keys', requireAuth, wrap(async (req, res) => {
-  const name = String((req.body || {}).name || '').trim().slice(0, 50) || 'default';
+  const name = String((req.body || {}).name || '').trim().slice(0, 50);
+  if (!name) return res.status(400).json({ error: 'Token 名称不能为空' });
   // 同名生效 Token 拒绝签发，避免列表歧义；同名但已吊销的不受影响
   const dup = tokens.listApiKeys(req.identity.userId).some((k) => k.name === name);
   if (dup) return res.status(409).json({ error: `同名 Token 已存在：${name}（请换个名称，或先吊销旧的）` });
@@ -179,11 +180,13 @@ apiRouter.get('/connect/poll', wrap(async (req, res) => {
   res.json({ status: 'authorized', token: r.token, key_name: r.key_name, api_key_id: r.api_key_id });
 }));
 
-// 授权页「确认授权」：绑定当前登录用户 + 生成密钥（命名自动去重）
+// 授权页「确认授权」：绑定当前登录用户 + 签发 Token（名称必填）
 apiRouter.post('/connect/confirm', requireAuth, wrap(async (req, res) => {
   const { request_id, name } = req.body || {};
   if (!request_id) return res.status(400).json({ error: '缺少 request_id' });
-  const r = repo.confirmConnectRequest(String(request_id), req.identity.userId, name);
+  const cleanName = String(name || '').trim();
+  if (!cleanName) return res.status(400).json({ error: 'Token 名称不能为空' });
+  const r = repo.confirmConnectRequest(String(request_id), req.identity.userId, cleanName);
   if (!r) return res.status(400).json({ error: '授权请求无效、已处理或已过期，请从 agent 端重新发起' });
   res.status(201).json({ token: r.token, key_name: r.key_name, api_key_id: r.api_key_id });
 }));
