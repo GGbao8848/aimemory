@@ -120,6 +120,10 @@ apiRouter.patch('/memories/:id', requireAuth, wrap(async (req, res) => {
   const { text, metadata } = req.body || {};
   const mem = repo.updateMemory({ id: req.params.id, userId: req.identity.userId, text, metadata });
   if (!mem) return res.status(404).json({ error: '记忆不存在' });
+  // 改了文本才值得重消解；后台异步，绝不阻塞响应、失败静默（评估轮 Q5）
+  if (text !== undefined) {
+    require('../l2/reconcile').reconcileAfterUpdate({ userId: req.identity.userId, memoryId: mem.id }).catch(() => {});
+  }
   res.json(mem);
 }));
 

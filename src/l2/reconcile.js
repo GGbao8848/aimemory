@@ -319,7 +319,77 @@ async function reconcileFacts({ userId, facts, source = 'add_memory', metadata =
   }
 }
 
+// ============ 更新后局部重消解（update_memory 路径） ============
+
+/**
+ * update_memory 改文本后，与邻居记忆做一次「同一事实」检测：
+ * 更新后的文本若与某候选表达同一事实（模型判定，temperature 0），删掉**旧候选**、
+ * 保留刚更新的这条（用户刚写的永远是幸存者）。
+ *
+ * 设计约束：
+ * - 异步 fire-and-forget，绝不阻塞更新响应；进程崩溃丢一次机会无妨——
+ *   下次任何写入的候选召回仍会把这些重复撞出来。
+ * - 单次最多合并 1 条；目标必须在候选集内（防幻觉 id）；取值不同的"新旧版本"不算重复
+ *   （那是 UPDATE/DELETE 语义，属于写入路径的消解）；LLM 失败/输出不可解析 → 静默跳过。
+ * - 删除走 store.deleteFact（memory_ops 审计 beforeText 可复原）；source='update_reconcile'。
+ * - 开关沿用 L2_RECONCILE；LLM 不可用 → 直接跳过（0 token）。
+ *
+ * @returns {Promise<{checked:boolean, merged:number, skipped:boolean}>}
+ */
+async function reconcileAfterUpdate({ userId, memoryId }) {
+  const out = { checked: false, merged: 0, skipped: false };
+  try {
+    if (!L2.reconcile || !llm.enabled()) return { ...out, skipped: true };
+    const mem = db
+      .prepare('SELECT id, text FROM memories WHERE id = ? AND user_id = ?')
+      .get(memoryId, userId);
+    if (!mem || !String(mem.text || '').trim()) return { ...out, skipped: true };
+
+    const candidates = findCandidates(userId, mem.text, L2.maxCandidates)
+      .filter((c) => c.id !== memoryId);
+    if (!candidates.length) return { ...out, checked: true }; // 无邻居可比，0 token
+
+    const prompt =
+      '你是记忆库的消解器。用户刚把一条记忆更新为下面的文本。' +
+      '候选是库里的其他记忆。判断更新后的文本是否与某条候选表达**同一事实**（仅措辞/详略不同，取值必须一致）。' +
+      '注意：取值不同的新旧版本不算重复（如"端口 A"改成了"端口 B"而候选说"端口 B"以外的值）。' +
+      `\n\n更新后的记忆：${clip(mem.text, L2.clip)}` +
+      `\n\n候选：\n${candidates.map((c) => `id=${c.id}\n${clip(c.text, L2.clip)}`).join('\n---\n')}` +
+      '\n\n只输出 JSON：{"duplicate_of": "<候选 id>"} 或 {"duplicate_of": null}。拿不准一律 null。';
+
+    const raw = await llm.complete(prompt, { maxTokens: 200, temperature: 0 });
+    out.checked = true;
+    if (!raw) return { ...out, skipped: true };
+    let verdict = null;
+    try {
+      const m = String(raw).match(/\{[\s\S]*\}/);
+      verdict = JSON.parse(m ? m[0] : String(raw));
+    } catch {
+      verdict = null;
+    }
+    const dupId = verdict && typeof verdict.duplicate_of === 'string' ? verdict.duplicate_of : null;
+    if (!dupId) return out;
+    // 安全阀：目标必须在候选集内（模型幻觉 id 一律无视）
+    if (!candidates.some((c) => c.id === dupId)) return out;
+    const before = store.deleteFact({ userId, id: dupId });
+    if (before == null) return out; // 目标已被并发删除，无从合并
+    out.merged = 1;
+    store.recordOp({
+      userId,
+      memoryId: dupId,
+      op: 'DELETE',
+      beforeText: before,
+      candidates: candidates.map((c) => c.id),
+      source: 'update_reconcile',
+    });
+    return out;
+  } catch (e) {
+    console.warn(`[l2] 更新后重消解失败（忽略，不影响更新本身）：${e.message}`);
+    return { ...out, skipped: true };
+  }
+}
+
 module.exports = {
   reconcileFacts, extractTokens, findCandidates, gatherCandidates,
-  buildPrompt, parseOps, applyOps, insertAll,
+  buildPrompt, parseOps, applyOps, insertAll, reconcileAfterUpdate,
 };

@@ -19,6 +19,7 @@ const { McpError, ErrorCode, ListToolsRequestSchema, CallToolRequestSchema } =
 const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
 const repo = require('../db/repo');
 const llm = require('../llm/client');
+const l2reconcile = require('../l2/reconcile');
 const l3recall = require('../l3/recall');
 
 function jsonText(obj) {
@@ -243,6 +244,10 @@ const tools = [
       const mem = repo.updateMemory({ id: memory_id, userId: uid, text, metadata });
       if (!mem) {
         throw toolError(`memory_id ${memory_id} 不存在或不属于当前用户——可先 get_memories 列出有效 id。`)
+      }
+      // 改了文本才值得重消解；后台异步，绝不阻塞响应、失败静默（评估轮 Q5）
+      if (text !== undefined) {
+        l2reconcile.reconcileAfterUpdate({ userId: uid, memoryId: mem.id }).catch(() => {});
       }
       return { content: [{ type: 'text', text: jsonText({ id: mem.id, text: mem.text }) }] };
     },
