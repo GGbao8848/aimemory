@@ -35,6 +35,21 @@ const MAX_ATTEMPTS = parseInt(process.env.AIMEMORY_L1_MAX_ATTEMPTS || '3', 10);
 let ticking = false;
 
 /**
+ * pick 出来的是 DB 行（snake_case），而状态函数按 camelCase 解构。
+ * 直接传 job 会因字段名不匹配被绑成 NULL——better-sqlite3 不报错，
+ * `WHERE user_id = NULL` 匹配 0 行，于是**静默失效**：状态不置 running、
+ * attempts 也不递增（实测：永远达不到重试上限，坏会话会被无限重试、持续烧 LLM 调用）。
+ * 故统一显式映射一次。
+ */
+const jobRef = (job) => ({
+  userId: job.user_id,
+  deviceCode: job.device_code,
+  agent: job.agent,
+  sessionId: job.session_id,
+  contentHash: job.content_hash,
+});
+
+/**
  * 扫描归档 → 为「已静默且未摘要（或已变化）」的会话排队。
  * @returns {{scanned:number, queued:number, requeued:number, skipped:number}}
  */
@@ -95,7 +110,7 @@ async function processBatch() {
   let failed = 0;
 
   for (const job of jobs) {
-    repo.markL1Running(job);
+    repo.markL1Running(jobRef(job));
     try {
       const r = await summarizeOne({
         userId: job.user_id,
@@ -115,7 +130,7 @@ async function processBatch() {
       }
     } catch (e) {
       failed += 1;
-      repo.markL1Failed({ ...job, error: `异常：${e.message}` });
+      repo.markL1Failed({ ...jobRef(job), error: `异常：${e.message}` });
       console.error(`[l1] 摘要异常：${e.message}`);
     }
   }
