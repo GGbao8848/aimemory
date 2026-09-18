@@ -164,17 +164,18 @@ function getEntry(id) {
   return null;
 }
 
-/** 新增条目（凝练产物或人工添加）。返回 id。 */
-function appendEntry({ kind, text, source = null, confidence = null, validFrom = null }) {
+/** 新增条目（凝练产物或人工添加）。返回 id。可传 id（导入回放用，保持身份稳定可幂等）。 */
+function appendEntry({ kind, text, source = null, confidence = null, validFrom = null, id = null }) {
   const meta = kindMeta(kind);
   if (!meta) throw new Error(`未知的 L3 条目类型：${kind}`);
   const t = String(text || '').trim();
   if (!t) throw new Error('L3 条目正文不能为空');
-  const id = newId();
+  const eid = id || crypto.randomBytes(4).toString('hex');
   const ts = nowIso();
   mutateKind(kind, (entries) => {
+    if (entries.some((x) => x.id === eid)) throw new Error(`L3 条目 id 已存在：${eid}`);
     entries.push({
-      id,
+      id: eid,
       valid_from: validFrom || ts.slice(0, 10),
       created_at: ts,
       updated_at: ts,
@@ -184,13 +185,14 @@ function appendEntry({ kind, text, source = null, confidence = null, validFrom =
       text: t.slice(0, MAX_TEXT),
     });
   });
-  return id;
+  return eid;
 }
 
-/** 标记被取代（不删除）。返回是否找到旧条目。 */
+/** 标记被取代（不删除）。返回是否找到旧条目；已是同一取代者则幂等返回 true。 */
 function markSuperseded(oldId, newId) {
   const old = getEntry(oldId);
   if (!old) return false;
+  if (old.superseded_by === newId) return true;
   mutateKind(old.kind, (entries) => {
     const hit = entries.find((e) => e.id === oldId);
     if (hit) hit.superseded_by = newId;
