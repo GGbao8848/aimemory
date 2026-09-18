@@ -1,6 +1,6 @@
 {
   "name": "aimemory",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "aimemory —— 个人自托管的 AI 记忆库：mem0 兼容 MCP 服务 + 四层记忆（L0 会话归档 / L2 事实记忆）+ Web 管理平台",
   "private": true,
   "type": "commonjs",

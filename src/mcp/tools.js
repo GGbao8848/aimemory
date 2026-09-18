@@ -361,7 +361,7 @@ function buildServer() {
   const server = new Server(
     {
       name: 'aimemory',
-      version: '0.2.0',
+      version: require('../../package.json').version,
       description: '个人自托管 AI 记忆库（mem0 兼容 MCP）',
     },
     {
