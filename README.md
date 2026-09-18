@@ -49,6 +49,7 @@ SQLite (data/aimemory.db): memories + memories_fts(FTS5) + api_keys + sessions +
 ```bash
 npm install
 cp .env.example .env            # 按需改 LLM_* / EMBEDDING_*（见 .env 注释）
+npm run doctor                  # 首启自检：依赖/目录/数据库/LLM 配置一次查清，缺什么给一行修复命令
 pm2 start ecosystem.config.js && pm2 save   # 或 npm start
 ```
 
