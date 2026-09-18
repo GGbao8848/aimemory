@@ -13,6 +13,7 @@ const crypto = require('crypto');
 const db = require('./index');
 const llm = require('../llm/client'); // 对象引用（便于测试 stub）
 const emb = require('../embeddings/client');
+const vec = require('../l2/vec'); // 向量索引；不可用时其函数返回 null/false，自动退回全扫
 
 const now = () => new Date().toISOString();
 const uuid = () => crypto.randomUUID();
@@ -66,8 +67,9 @@ function createMemory({ userId, text, messages, metadata = {} }) {
 /**
  * 后台执行素材提炼入库（processEvent 调用，不阻塞 MCP 调用）。
  * kind='messages'：input 为 [{role,content}] → 拼成对话文本；kind='text'：input 为原文。
- * 提炼产物逐条入库（每条只补 embedding，不再二次 LLM 抽 facts——产物本身已是结构化记忆）。
- * 提炼无产物/失败 → 抛错（调用方标记事件 failed，素材不落库）。
+ * 流程：LLM 提炼成事实 → **与已有记忆冲突消解**（ADD/UPDATE/DELETE/NOOP，见 src/l2/reconcile.js）→ 入库。
+ * 提炼无产物/失败 → 抛错（调用方标记事件 failed，素材不落库）；
+ * 消解失败则降级为纯追加，绝不让事实丢失。
  */
 async function processMemoryMaterial({ userId, kind, input, metadata = {} }) {
   const source = kind === 'messages' && Array.isArray(input)
@@ -76,22 +78,11 @@ async function processMemoryMaterial({ userId, kind, input, metadata = {} }) {
   if (!source.trim()) throw new Error('素材为空');
   const extracted = await extractMemories(source);
   if (!extracted.length) throw new Error('LLM 未能从素材提炼出有效记忆（无产物，素材未入库）');
-  const created = [];
-  for (const item of extracted) {
-    created.push(insertMemory({ userId, text: item, metadata }));
-  }
-  return created;
-}
-
-/** 写一条提炼产物的记忆：入库 + 异步补向量（提炼产物本身即结构化记忆，无需再抽 facts） */
-function insertMemory({ userId, text, metadata }) {
-  const id = uuid();
-  const ts = now();
-  db.prepare(
-    'INSERT INTO memories (id, user_id, text, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(id, userId, String(text).slice(0, 8000), JSON.stringify(metadata || {}), ts, ts);
-  syncEmbedding(id, String(text).slice(0, 8000)); // 异步补向量，失败静默（检索降级关键词）
-  return toObj(getMemoryRow(id, userId));
+  // 延迟 require：l2 侧要用到本模块的记忆读取，写在顶部会形成循环依赖
+  const { reconcileFacts } = require('../l2/reconcile');
+  const r = await reconcileFacts({ userId, facts: extracted, source: 'add_memory', metadata, mode: 'material' });
+  const created = r.memoryIds.map((id) => getMemory(id, userId)).filter(Boolean);
+  return { created, ops: r };
 }
 
 /**
@@ -118,7 +109,7 @@ async function extractMemories(source) {
 
 /**
  * 异步 LLM 抽取 facts/entities：仅用于 update_memory（用户手动编辑最终文本后重抽，供语义召回增强）。
- * 失败静默。新写入的提炼产物不走此路径（见 insertMemory）。
+ * 失败静默。新写入的提炼产物不走此路径（见 src/l2/store.js 的 insertFact）。
  */
 function syncFacts(id, text) {
   const prompt = `从下面的文本中提取 JSON（不要其他内容）：
@@ -258,12 +249,35 @@ async function searchMemories({ userId, query, limit = 10, threshold = 0, filter
   return merged.slice(0, limit).map(toObj);
 }
 
-/** 向量候选：查询向量化后与全部带向量记忆做余弦相似度，取 topN */
+/** 向量候选：查询向量化后取 topN。优先走 sqlite-vec 索引，不可用时退回全扫 + JS 余弦。 */
 function getVecCandidates(userId, query, topN, threshold, fsql, fparams) {
   const cfg = require('../config').embedding;
   if (!cfg.enabled) return [];
   return emb.embed(query).then((qVec) => {
     if (!qVec) return [];
+
+    // 向量索引：语义与全扫一致（余弦 + 阈值），但不随记忆条数变慢。
+    // 有附加过滤（metadata/时间范围）时不走——索引只能按 rowid 预过滤，表达不了这些条件。
+    if (!fsql) {
+      const hits = vec.search(userId, qVec, Math.max(topN * 2, 50), threshold);
+      if (hits) {
+        if (!hits.length) return [];
+        const ph = hits.map(() => '?').join(',');
+        const rows = db
+          .prepare(
+            `SELECT m.id, m.text, m.metadata, m.facts, m.entities, m.created_at, m.updated_at, m.embedding
+               FROM memories m WHERE m.user_id = ? AND m.id IN (${ph})`
+          )
+          .all(userId, ...hits.map((h) => h.id));
+        const simById = new Map(hits.map((h) => [h.id, h.similarity]));
+        return rows
+          .map((r) => ({ ...r, similarity: simById.get(r.id) }))
+          .sort((a, b) => b.similarity - a.similarity)
+          .slice(0, topN);
+      }
+      // hits === null：向量层不可用 → 落到下面的全扫
+    }
+
     const rows = db
       .prepare(
         `SELECT m.id, m.text, m.metadata, m.facts, m.entities, m.created_at, m.updated_at, m.embedding
@@ -380,10 +394,16 @@ async function processEvent(event) {
   const p = JSON.parse(event.payload || '{}');
   db.prepare("UPDATE events SET status='processing', updated_at=? WHERE id=?").run(now(), id);
   try {
-    const created = await processMemoryMaterial({
+    const { created, ops } = await processMemoryMaterial({
       userId, kind: p.kind, input: p.input, metadata: p.metadata,
     });
-    const result = { count: created.length, memories: created };
+    // ops 记录消解明细：count=0 时也能看出"不是没干活，而是素材里的东西都已记住"，
+    // 前端/agent 可据此区分「已存在（NOOP）」与「空产出」。
+    const result = {
+      count: created.length,
+      memories: created,
+      ops: { added: ops.added, updated: ops.updated, deleted: ops.deleted, noop: ops.noop, degraded: ops.degraded },
+    };
     db.prepare("UPDATE events SET status='done', result=?, updated_at=? WHERE id=?")
       .run(JSON.stringify(result), now(), id);
   } catch (e) {

@@ -11,6 +11,9 @@ const { handleMcpRequest } = require('./mcp/server');
 const tokens = require('./auth/tokens');
 const web = require('./web/routes');
 const l1Scheduler = require('./l1/scheduler');
+const l2Scheduler = require('./l2/scheduler');
+const l3Scheduler = require('./l3/scheduler');
+const vec = require('./l2/vec');
 
 const app = express();
 app.disable('x-powered-by');
@@ -352,6 +355,26 @@ setInterval(() => repo.cleanupEvents(), 3600_000).unref();
 
 // L1 会话摘要（sleep-time）：后台把静默的归档会话摘成情景记忆，不阻塞在线请求
 l1Scheduler.start();
+
+// L2 派生（sleep-time）：把已完成的 L1 摘要派生成长期事实（带冲突消解），
+// 依赖 L1 的产物，故在它之后启动。关闭用 L2_DERIVE=0。
+l2Scheduler.start();
+
+// L3 凝练（低频）：攒够新消化会话才跑一轮（默认 5 个），从 L1 摘要沉淀画像/约束/教训。
+// 依赖 L2 的派生游标，最后启动。关闭用 L3_DERIVE=0。
+l3Scheduler.start();
+
+// L2 向量索引（sqlite-vec，可选）：仅在索引落后于已有向量时补齐，不阻塞启动。
+// 不可用（未装/维度不匹配/L2_VEC=0）时静默跳过，检索自动退回关键词+全扫。
+setTimeout(() => {
+  try {
+    const r = vec.ensureIndexed({ userId: config.userId });
+    if (r.ok && !r.skipped) console.log(`[l2] 向量索引补齐：${r.indexed}/${r.scanned}（维度 ${r.dim}）`);
+    else if (!r.ok) console.log(`[l2] 向量索引未启用：${r.reason}`);
+  } catch (e) {
+    console.error(`[l2] 向量索引补齐失败（不影响使用）：${e.message}`);
+  }
+}, 100).unref();
 
 app.listen(config.port, '0.0.0.0', () => {
   console.log(`[aimemory] MCP + API + Web 已启动: http://0.0.0.0:${config.port}`);

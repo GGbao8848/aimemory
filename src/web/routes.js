@@ -255,6 +255,9 @@ apiRouter.get('/atlas/overview', requireAuth, wrap(async (req, res) => {
     keys: { active: stats.keys },
     l1: { ...l1, backlog: (l1.pending || 0) + (l1.running || 0) },
     events: repo.eventStats(userId),
+    // L2 派生进度 + 四操作计数；L3 规模。星图按 metric 路径取数（Object.assign 进模型，新增字段自动可用）
+    l2: { ...require('../l2/store').l2Stats(userId), ops: require('../l2/store').opStats(userId) },
+    l3: require('../l3/store').l3Stats(),
     l0: {
       ...l0Store.archiveStats(userId),
       devices_list: l0Store.listDevices(userId),
@@ -267,6 +270,82 @@ apiRouter.post('/l1/run', requireAuth, wrap(async (req, res) => {
   const l1Scheduler = require('../l1/scheduler');
   const r = await l1Scheduler.tick();
   res.json(r || { processed: 0 });
+}));
+
+// ===== L2 事实记忆：派生状态 / 冲突消解审计 / 向量层 =====
+// 供前端与人工排查消费；MCP 工具面保持不变（add_memory 的回执里已带 ops 明细）。
+
+/** 一次取齐：记忆规模 + 派生进度 + 四操作计数 + 向量层状态 */
+apiRouter.get('/l2/stats', requireAuth, wrap(async (req, res) => {
+  const userId = req.identity.userId;
+  const l2Store = require('../l2/store');
+  const vec = require('../l2/vec');
+  res.json({
+    ...l2Store.l2Stats(userId),
+    ops: l2Store.opStats(userId),
+    memories: repo.stats(userId).memories,
+    vec: vec.status(),
+    embedding: { enabled: config.embedding.enabled },
+  });
+}));
+
+/** 冲突消解审计（新→旧）：回答"这条记忆为什么被改 / 被删" */
+apiRouter.get('/l2/ops', requireAuth, wrap(async (req, res) => {
+  const l2Store = require('../l2/store');
+  res.json({ results: l2Store.listOps(req.identity.userId, Number(req.query.limit) || 50) });
+}));
+
+/** 派生明细：哪些会话派生过、产生了多少事实 */
+apiRouter.get('/l2/sources', requireAuth, wrap(async (req, res) => {
+  const l2Store = require('../l2/store');
+  res.json({ results: l2Store.listL2Sources(req.identity.userId, Number(req.query.limit) || 200) });
+}));
+
+/** 手动触发一轮派生（不等后台轮询），与 /l1/run 对称 */
+apiRouter.post('/l2/run', requireAuth, wrap(async (req, res) => {
+  const l2Scheduler = require('../l2/scheduler');
+  const r = await l2Scheduler.tick();
+  res.json(r || { processed: 0 });
+}));
+
+/** 重建向量索引（换 embedding 模型导致维度变化时必须重建；reset=true 先清表） */
+apiRouter.post('/l2/vec/rebuild', requireAuth, wrap(async (req, res) => {
+  const vec = require('../l2/vec');
+  res.json(vec.rebuild({ userId: req.identity.userId, reset: req.body?.reset === true }));
+}));
+
+// ===== L3 画像／知识（第一阶段，docs/L3-画像与知识层.md）=====
+
+/** 条目清单：?kind=profile|constraints|lessons，?include_superseded=1 连被取代的一起返回 */
+apiRouter.get('/l3/entries', requireAuth, wrap(async (req, res) => {
+  const l3Store = require('../l3/store');
+  res.json({
+    results: l3Store.listEntries({
+      kind: req.query.kind || null,
+      includeSuperseded: req.query.include_superseded === '1',
+    }),
+  });
+}));
+
+/** 人工编辑正文（双时间轴与来源不动；被取代状态需人工改文件复原） */
+apiRouter.put('/l3/entries/:id', requireAuth, wrap(async (req, res) => {
+  const l3Store = require('../l3/store');
+  const entry = l3Store.updateBody(req.params.id, (req.body || {}).text);
+  if (!entry) return res.status(404).json({ error: '条目不存在' });
+  res.json(entry);
+}));
+
+/** 手动触发一轮凝练（force=true 时无新增也取最近几条跑） */
+apiRouter.post('/l3/run', requireAuth, wrap(async (req, res) => {
+  const l3Scheduler = require('../l3/scheduler');
+  res.json(await l3Scheduler.tick({ force: (req.body || {}).force !== false }));
+}));
+
+/** 规模统计（含待凝练的新会话数，给星图内圈与排查用） */
+apiRouter.get('/l3/stats', requireAuth, wrap(async (req, res) => {
+  const l3Store = require('../l3/store');
+  const l3Scheduler = require('../l3/scheduler');
+  res.json({ ...l3Store.l3Stats(), pending: l3Scheduler.pendingCount() });
 }));
 
 // ===== 设备流连接（零粘贴：发起 → 授权页确认 → 轮询拿 key）=====

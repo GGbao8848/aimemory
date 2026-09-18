@@ -191,6 +191,63 @@ CREATE TABLE IF NOT EXISTS l0_batches (
 CREATE INDEX IF NOT EXISTS idx_l0_batches_user ON l0_batches(user_id, received_at);
 CREATE INDEX IF NOT EXISTS idx_l0_batches_session ON l0_batches(session_id);
 -- 注意：设备维度索引在下方老库迁移补列之后再建（老库无 device_code 时建索引会失败）
+
+-- L2 冲突消解审计：每次「新事实 vs 已有记忆」的判定都留痕；DELETE 另记被删文本（误删可复原）。
+-- 为什么不加列到 memories 上：memories 是可从 L1/L0 重派生的视图，审计是过程记录，
+-- 生命周期与用途都不同；且加列需要迁移存量库。详见 docs/L2-事实记忆与冲突消解.md。
+CREATE TABLE IF NOT EXISTS memory_ops (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id     TEXT NOT NULL,
+  memory_id   TEXT,                        -- 目标记忆（ADD=新建；UPDATE/DELETE/NOOP=命中的已有）
+  op          TEXT NOT NULL,               -- ADD | UPDATE | DELETE | NOOP
+  before_text TEXT,                        -- UPDATE/DELETE 的旧文本（复原依据）
+  after_text  TEXT,                        -- ADD/UPDATE 的新文本
+  candidates  TEXT,                        -- JSON：本次判定可见的候选记忆 id（复盘判定依据）
+  source      TEXT NOT NULL,               -- add_memory | l1:<agent>/<session> | manual
+  applied     INTEGER NOT NULL DEFAULT 1,  -- 0=判定为 DELETE 但被安全阀拦下（便于观察模型倾向）
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_memory_ops_user ON memory_ops(user_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_memory_ops_memory ON memory_ops(memory_id);
+
+-- L2 派生状态（L1 摘要 → 事实）：与 l1_summaries 同构的物化状态 + content_hash 幂等，
+-- 摘要没变就不重复派生（省 LLM 调用），变了才重跑。可整表清空后从 L1 重放。
+CREATE TABLE IF NOT EXISTS l2_sources (
+  user_id      TEXT NOT NULL,
+  device_code  TEXT NOT NULL,
+  agent        TEXT NOT NULL,
+  session_id   TEXT NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'pending',  -- pending | running | done | failed
+  content_hash TEXT,                             -- L1 摘要内容指纹
+  attempts     INTEGER NOT NULL DEFAULT 0,
+  error        TEXT,
+  added        INTEGER NOT NULL DEFAULT 0,
+  updated      INTEGER NOT NULL DEFAULT 0,
+  deleted      INTEGER NOT NULL DEFAULT 0,
+  noop         INTEGER NOT NULL DEFAULT 0,
+  model        TEXT,
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL,
+  PRIMARY KEY (user_id, device_code, agent, session_id)
+);
+CREATE INDEX IF NOT EXISTS idx_l2_sources_status ON l2_sources(status, updated_at);
+
+-- L2 内部元数据（键值）：目前存向量索引维度。
+-- vec0 表的维度不可变更，换 embedding 模型（维度变了）必须重建索引——
+-- 记在这里就能在启动时发现不匹配并明确降级，而不是静默返回错结果。
+CREATE TABLE IF NOT EXISTS l2_meta (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+-- L3 凝练游标：记「消化到哪个 L2 派生了」（last_consumed = l2_sources 的最大 updated_at）。
+-- L3 的条目本体在 data/l3/ 的 markdown 文件里（人工可编辑），SQLite 只存游标与运行时间。
+CREATE TABLE IF NOT EXISTS l3_state (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 `);
 
 // 老库兼容：sessions 表早期无 username 列 → 补充（幂等）

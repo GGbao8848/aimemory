@@ -23,5 +23,8 @@
   },
   "allowScripts": {
     "better-sqlite3@13.0.3": true
+  },
+  "optionalDependencies": {
+    "sqlite-vec": "^0.1.9"
   }
 }

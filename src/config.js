@@ -73,6 +73,41 @@ const llm = {
   timeoutMs: parseInt(process.env.LLM_TIMEOUT_MS || '30000', 10),
 };
 
+// ===== L2 事实记忆：冲突消解与派生（详见 docs/L2-事实记忆与冲突消解.md）=====
+// reconcile：写入时与已有记忆比对（ADD/UPDATE/DELETE/NOOP），避免同一事实反复入库、新旧取值并存。
+// derive：从 L1 会话摘要派生事实，补齐「上层可从 L0 重放」的派生链。
+// 两者都可单独关闭（=0）→ 行为等价于改动前（纯追加），便于回滚。
+// 下面的上限同时是 token 预算的硬约束：单批只发 1 次 LLM 调用，输入裁剪到千级 token。
+const l2 = {
+  reconcile: process.env.L2_RECONCILE !== '0',
+  derive: process.env.L2_DERIVE !== '0',
+  maxFacts: parseInt(process.env.L2_MAX_FACTS || '20', 10),              // 单批最多事实条数
+  maxCandidates: parseInt(process.env.L2_MAX_CANDIDATES || '6', 10),     // 每条事实召回候选数
+  maxCandidatesTotal: parseInt(process.env.L2_MAX_CANDIDATES_TOTAL || '30', 10), // 候选池总量上限
+  maxDeletes: parseInt(process.env.L2_MAX_DELETES || '5', 10),           // 单批删除上限（防批量误删）
+  clip: parseInt(process.env.L2_CLIP || '200', 10),                      // 单条文本进 prompt 的裁剪长度
+  maxTokens: parseInt(process.env.L2_MAX_TOKENS || '800', 10),           // 判定输出上限
+  vec: process.env.L2_VEC !== '0',                                       // 向量索引（sqlite-vec），不可用时自动降级
+  quietMs: parseInt(process.env.L2_QUIET_MS || String(5 * 60 * 1000), 10), // 派生：L1 摘要再静默多久才处理
+  batch: parseInt(process.env.L2_BATCH || '6', 10),                      // 派生：每轮处理几个会话
+  maxAttempts: parseInt(process.env.L2_MAX_ATTEMPTS || '3', 10),         // 派生：单会话重试上限
+  intervalMs: parseInt(process.env.L2_INTERVAL_MS || '60000', 10),       // 派生：轮询间隔
+};
+
+// ===== L3 画像／知识（第一阶段，见 docs/L3-画像与知识层.md）=====
+// 低频是硬要求：攒够 batchNew 个新消化会话才凝练一轮（摊到每会话 <1K token）。
+// 条目本体存 data/l3/ 的 markdown（人工可编辑），SQLite 只存游标（l3_state）。
+const l3 = {
+  derive: process.env.L3_DERIVE !== '0',
+  batchNew: parseInt(process.env.L3_BATCH_NEW || '5', 10),               // 攒够几个新会话才跑一轮
+  maxSummaries: parseInt(process.env.L3_MAX_SUMMARIES || '8', 10),       // 单轮最多带几个摘要
+  maxEntries: parseInt(process.env.L3_MAX_ENTRIES || '20', 10),          // 单轮最多带几条现有条目
+  clip: parseInt(process.env.L3_CLIP || '300', 10),                      // 摘要单条裁剪
+  entryClip: parseInt(process.env.L3_ENTRY_CLIP || '120', 10),           // 现有条目单条裁剪
+  maxTokens: parseInt(process.env.L3_MAX_TOKENS || '600', 10),           // 凝练输出上限
+  intervalMs: parseInt(process.env.L3_INTERVAL_MS || String(10 * 60 * 1000), 10), // 轮询间隔
+};
+
 // AIMEMORY_DB 可覆盖数据库路径（测试用独立临时库，避免污染生产数据）
 const dbPath = process.env.AIMEMORY_DB || path.join(root, 'data', 'aimemory.db');
 
@@ -82,12 +117,16 @@ module.exports = {
   dbPath,
   // L0 原始会话归档目录（append-only jsonl，按 用户/agent/会话 分文件；不参与提炼）
   l0Dir: process.env.AIMEMORY_L0_DIR || path.join(path.dirname(dbPath), 'l0'),
+  // L3 画像／知识目录（markdown，人工可编辑；AIMEMORY_DB 覆盖时测试自动隔离）
+  l3Dir: process.env.AIMEMORY_L3_DIR || path.join(path.dirname(dbPath), 'l3'),
   // L0 上传批次体积上限（原始会话批次远大于普通 API 请求，单独放宽）
   l0MaxBody: process.env.AIMEMORY_L0_MAX_BODY || '64mb',
   port: parseInt(process.env.PORT || '18543', 10),
   publicBaseUrl: (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, ''),
   embedding,
   llm,
+  l2,
+  l3,
   // ===== 单用户身份（个人部署） =====
   // 所有数据归属这一个身份；不存在多用户/租户概念。
   // 默认 'owner'：全新的个人部署直接用默认值即可，无需配置。
