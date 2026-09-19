@@ -18,6 +18,13 @@ const store = require('./store');
 
 const KIND_ORDER = ['profile', 'constraints', 'lessons'];
 
+/** 时间推理：valid_from 在未来 = 条目声明"从此刻起才成立"→ 召回不应注入（宁缺勿滥）。
+ *  无/坏时间戳视为已生效。 */
+function notYetEffective(validFrom, nowMs) {
+  const t = Date.parse(String(validFrom || ''));
+  return Number.isFinite(t) && t > (nowMs || Date.now());
+}
+
 /** 抽召回词根：CJK 串（≤4 字整取；长串按 2 字**滑窗步长 1**——真实词不会对齐固定步长，
  *  这个坑在 L2 候选召回踩过一次）+ 拉丁词（≥2 字） */
 function extractTokens(query) {
@@ -53,9 +60,13 @@ async function recallContext({ userId, query = '', perKind = 6, facts = 5, kinds
   const groups = { profile: [], constraints: [], lessons: [] };
   for (const e of store.listEntries({ includeSuperseded: false })) {
     if (!groups[e.kind]) continue;
+    // 时间推理（G5）：未生效条目不注入
+    if (notYetEffective(e.valid_from)) continue;
     groups[e.kind].push({
+      id: e.id,
       text: e.text,
       confidence: e.confidence,
+      effective_confidence: e.effective_confidence,
       valid_from: e.valid_from,
       source: e.source,
       _score: tokens.length ? scoreText(e.text, tokens) : 0,
@@ -64,7 +75,9 @@ async function recallContext({ userId, query = '', perKind = 6, facts = 5, kinds
   const out = {};
   for (const kind of want && want.length ? want : KIND_ORDER) {
     out[kind] = groups[kind]
-      .sort((a, b) => b._score - a._score || (b.confidence || 0) - (a.confidence || 0))
+      // 相关度优先；同分时用时效衰减后的有效置信排序——久远条目自然沉底
+      .sort((a, b) => b._score - a._score
+        || (b.effective_confidence ?? b.confidence ?? 0) - (a.effective_confidence ?? a.confidence ?? 0))
       .slice(0, cap)
       .map(({ _score, ...keep }) => keep);
   }

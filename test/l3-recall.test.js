@@ -145,3 +145,43 @@ test('kinds 非法输入：MCP 层返回 isError 执行错误（含合法取值�
   assert.equal(out.isError, true);
   assert.ok(out.content[0].text.includes('profile'), '文案应列出合法取值');
 });
+
+// ===== 时间推理（评估规划 G5：valid_from 未生效不注入 + 有效置信排序） =====
+
+test('valid_from 在未来的条目不注入；过去/缺失时间戳正常注入', async () => {
+  const future = '2099-01-01';
+  const ok1 = l3store.appendEntry({ kind: 'constraints', text: '已生效约束：端口 18543。', validFrom: '2026-01-01' });
+  l3store.appendEntry({ kind: 'constraints', text: '未生效约束：机房搬迁计划。', validFrom: future });
+  const r = await recallContext({ userId: u1, kinds: ['constraints'] });
+  const texts = r.constraints.map((e) => e.text);
+  assert.ok(texts.some((t) => t.includes('端口 18543')), '已生效条目应注入');
+  assert.ok(!texts.some((t) => t.includes('机房搬迁')), '未生效条目不得注入');
+  // valid_from 字段透传（前端/agent 可显示）
+  const hit = r.constraints.find((e) => e.id === ok1);
+  assert.equal(hit.valid_from, '2026-01-01');
+  assert.ok('effective_confidence' in hit, '输出应携带有效置信');
+});
+
+test('同分排序用时效衰减：内容相同（同分）时，更新的条目排在久远条目前面', async () => {
+  const older = l3store.appendEntry({ kind: 'constraints', text: '约束：部署在内网环境。', confidence: 0.9 });
+  const newer = l3store.appendEntry({ kind: 'constraints', text: '约束：部署在内网环境。', confidence: 0.9 });
+  // 把 older 的 updated_at 手工改到 400 天前（半衰 180 天 → 有效置信显著衰减）
+  const file = path.join(config.l3Dir, 'constraints.md');
+  const raw = fs.readFileSync(file, 'utf8');
+  const oldIso = new Date(Date.now() - 400 * 86400000).toISOString();
+  fs.writeFileSync(file, raw.split(older).length > 1 ? raw : raw, 'utf8');
+  // 精确替换 older 条目的 updated_at：定位其 id 注释行后的一行
+  const patched = raw.replace(
+    new RegExp(`(id=${older}[^\\n]*updated_at=)([^\\n ]+)`),
+    `$1${oldIso}`
+  );
+  fs.writeFileSync(file, patched, 'utf8');
+
+  const r = await recallContext({ userId: u1, kinds: ['constraints'], query: '内网环境' });
+  const idxOlder = r.constraints.findIndex((e) => e.id === older);
+  const idxNewer = r.constraints.findIndex((e) => e.id === newer);
+  assert.ok(idxNewer >= 0 && idxOlder >= 0, '两条都应注入');
+  assert.ok(idxNewer < idxOlder, '同分时更新的条目应排前（有效置信更高）');
+  const eOlder = r.constraints[idxOlder];
+  assert.ok(eOlder.effective_confidence < eOlder.confidence, '久远条目的有效置信应低于原值（衰减生效）');
+});
