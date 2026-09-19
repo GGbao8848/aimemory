@@ -73,7 +73,7 @@ function getFact(id, userId) {
 /** 近期事实（候选兜底扫描用） */
 function recentFacts(userId, limit = 200) {
   return db
-    .prepare('SELECT id, text FROM memories WHERE user_id = ? ORDER BY updated_at DESC LIMIT ?')
+    .prepare('SELECT id, text, metadata FROM memories WHERE user_id = ? ORDER BY updated_at DESC LIMIT ?')
     .all(userId, Math.max(1, Math.min(Number(limit) || 200, 1000)));
 }
 

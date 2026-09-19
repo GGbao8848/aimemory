@@ -33,6 +33,24 @@ const clip = (s, n) => {
   return t.length > n ? `${t.slice(0, n)}…` : t;
 };
 
+// ============ 跨路径互斥（G8：防同一段素材双路入库） ============
+// 素材管线（events 队列）、L2 派生（l1 摘要自动沉淀）、update 重消解三条链都可能并发到达。
+// 消解的顺序是「读候选 → await LLM 判定（数秒）→ 写入」：两条链同时卡在 LLM 等待里时，
+// 互相看不见对方未写入的产物 → 同一事实落两条（跨路径竞态）。
+// 用进程内 promise 链把临界区串行化：同一时刻只有一条链在读候选/写库。后到者能看到先到者的产物 → 判 NOOP。
+let _chain = Promise.resolve();
+function serialized(fn) {
+  const run = _chain.then(fn, fn);
+  _chain = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+/** 候选来源标签：metadata.source（add_memory 素材 / l1:agent/session 派生），给判定 prompt 用 */
+function sourceOf(metadataJson) {
+  const m = (() => { try { return JSON.parse(metadataJson || '{}'); } catch { return {}; } })();
+  return typeof m.source === 'string' && m.source ? m.source : '';
+}
+
 // ============ 候选召回（不依赖 embedding） ============
 
 const CJK_RE = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\u3040-\u30ff\uac00-\ud7af]+/g;
@@ -77,12 +95,12 @@ function findCandidates(userId, factText, limit) {
     const match = fts.map((w) => `"${w.replace(/"/g, '""')}"`).join(' OR ');
     try {
       const rows = db.prepare(
-        `SELECT m.id, m.text
+        `SELECT m.id, m.text, m.metadata
            FROM memories_fts JOIN memories m ON m.rowid = memories_fts.rowid
           WHERE memories_fts MATCH ? AND m.user_id = ?
           ORDER BY bm25(memories_fts) LIMIT ?`
       ).all(match, userId, limit);
-      for (const r of rows) seen.set(r.id, r);
+      for (const r of rows) seen.set(r.id, { id: r.id, text: r.text, source: sourceOf(r.metadata) });
     } catch { /* 极端词根导致 FTS 语法异常 → 走兜底 */ }
   }
 
@@ -91,12 +109,12 @@ function findCandidates(userId, factText, limit) {
     if (needles.length) {
       for (const r of store.recentFacts(userId, 200)) {
         if (seen.has(r.id)) continue;
-        if (needles.some((n) => r.text.includes(n))) seen.set(r.id, r);
+        if (needles.some((n) => r.text.includes(n))) seen.set(r.id, { ...r, source: sourceOf(r.metadata) });
         if (seen.size >= limit) break;
       }
     }
   }
-  return [...seen.values()].slice(0, limit).map((r) => ({ id: r.id, text: r.text }));
+  return [...seen.values()].slice(0, limit).map(({ id, text, source }) => ({ id, text, source }));
 }
 
 /** 全批事实的候选池（去重 + 总量上限，避免 prompt 膨胀） */
@@ -123,6 +141,7 @@ const BASE_RULES = [
   '只输出 JSON 数组，不要解释、不要 markdown 代码块：',
   '[{"i":0,"op":"ADD"},{"i":1,"op":"NOOP","target":"M2"},{"i":2,"op":"UPDATE","target":"M3","text":"合并后的完整句子"},{"i":3,"op":"DELETE","target":"M4"},{"i":4,"op":"NOOP"}]',
   '规则：target 必须是给定 M 编号之一；UPDATE 的 text 必填且自包含；每条新事实恰好一个操作；拿不准用 ADD（宁可重复，不可丢失）。',
+  '候选可能来自「会话摘要派生(l1:…)」或「素材提炼」——同一事实在两条来源里措辞常不同，语义相同即判 NOOP/UPDATE，不得因措辞差异判 ADD；',
 ].join('\n');
 
 /** 派生模式的附加规则：摘要里的一次性过程记录不值得长期记住 */
@@ -133,8 +152,15 @@ function buildPrompt({ facts, candidates, mode }) {
   facts.forEach((f, i) => lines.push(`[F${i}] ${clip(f, L2.clip)}`));
   lines.push('');
   if (candidates.length) {
-    lines.push('已有记忆：');
-    candidates.forEach((c, i) => lines.push(`[M${i + 1}] ${clip(c.text, L2.clip)}`));
+    lines.push('已有记忆（标注来源）：');
+    candidates.forEach((c, i) => {
+      const origin = c.source
+        ? c.source.startsWith('l1:')
+          ? `会话摘要派生(${c.source})`
+          : `素材提炼(${c.source})`
+        : '未标注';
+      lines.push(`[M${i + 1}] (来源: ${origin}) ${clip(c.text, L2.clip)}`);
+    });
   } else {
     lines.push('已有记忆：（无）');
   }
@@ -289,7 +315,12 @@ function applyOps({ userId, facts, ops, candidates, source, metadata = {} }) {
  * @returns {{added:number,updated:number,deleted:number,noop:number,skipped:number,degraded:boolean,memoryIds:string[]}}
  *   memoryIds：ADD 新建与 UPDATE 命中的记忆 id（供上层回执，形状对齐改动前的 created 数组）
  */
-async function reconcileFacts({ userId, facts, source = 'add_memory', metadata = {}, mode = 'material', degrade = 'insert' }) {
+/** 对外入口：包跨路径互斥（实现见 _reconcileFacts） */
+async function reconcileFacts(args) {
+  return serialized(() => _reconcileFacts(args));
+}
+
+async function _reconcileFacts({ userId, facts, source = 'add_memory', metadata = {}, mode = 'material', degrade = 'insert' }) {
   const list = (facts || [])
     .map((s) => String(s == null ? '' : s).trim())
     .filter(Boolean)
@@ -336,7 +367,11 @@ async function reconcileFacts({ userId, facts, source = 'add_memory', metadata =
  *
  * @returns {Promise<{checked:boolean, merged:number, skipped:boolean}>}
  */
-async function reconcileAfterUpdate({ userId, memoryId }) {
+async function reconcileAfterUpdate(args) {
+  return serialized(() => _reconcileAfterUpdate(args));
+}
+
+async function _reconcileAfterUpdate({ userId, memoryId }) {
   const out = { checked: false, merged: 0, skipped: false };
   try {
     if (!L2.reconcile || !llm.enabled()) return { ...out, skipped: true };
