@@ -1,0 +1,17 @@
+# aimemory 单机编排：数据落 ./data 卷，配置走 .env（同 pm2 部署一份模板两用）。
+# 启动：docker compose up -d      冒烟：scripts/smoke.sh http://127.0.0.1:18543 <口令>
+services:
+  aimemory:
+    build: .
+    image: aimemory:local
+    container_name: aimemory
+    ports:
+      - "18543:18543"
+    env_file:
+      - .env
+    environment:
+      # 容器内监听端口固定（外部映射在上面），.env 里的 PORT 不会破坏映射
+      PORT: 18543
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

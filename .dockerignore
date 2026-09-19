@@ -1,0 +1,12 @@
+.git
+node_modules
+data
+.env
+collector
+test
+docs
+!docs/api
+gui-test-screenshots
+*.log
+*.db
+*.db-*
