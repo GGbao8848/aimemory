@@ -1,6 +1,6 @@
 'use strict';
 
-// repo 域模块（memories/events/l0/l1/keys/stats）共享的无状态小工具。不含 db 依赖。
+// repo 域模块（memories/events/keys/stats）共享的无状态小工具。不含 db 依赖。
 
 const crypto = require('crypto');
 

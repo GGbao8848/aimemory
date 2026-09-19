@@ -1,7 +1,7 @@
 {
   "name": "aimemory",
   "version": "0.2.0",
-  "description": "aimemory —— 个人自托管的 AI 记忆库：mem0 兼容 MCP 服务 + 四层记忆（L0 会话归档 / L2 事实记忆）+ Web 管理平台",
+  "description": "aimemory —— 个人自托管的 AI 记忆库：mem0 形态（add/search/history + 冲突消解 + 向量检索）+ MCP + Web 管理台",
   "private": true,
   "type": "commonjs",
   "main": "src/index.js",
@@ -12,9 +12,8 @@
     "web:install": "npm --prefix web install",
     "web:build": "npm --prefix web run build",
     "web:dev": "npm --prefix web run dev",
-    "collector": "node collector/index.js",
-    "collector:status": "node collector/index.js --status",
-    "test": "node --test"
+    "test": "node --test",
+    "vec:rebuild": "node scripts/vec-rebuild.js"
   },
   "engines": {
     "node": ">=20"

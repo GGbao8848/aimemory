@@ -16,8 +16,8 @@ const byName = (name) => {
   return t;
 };
 
-test('全部 10 个工具都带 title（人可读显示名）', () => {
-  assert.equal(tools.length, 10);
+test('全部 7 个工具都带 title（人可读显示名）', () => {
+  assert.equal(tools.length, 7);
   for (const t of tools) {
     assert.ok(t.title && typeof t.title === 'string' && t.title.length >= 2, `${t.name} 缺 title`);
   }

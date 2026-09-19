@@ -62,7 +62,7 @@ async function pingModel(base, key) {
     webBuilt ? null : 'npm run web:install && npm run web:build');
 
   // ===== 3. 数据目录（不存在则创建——与首启行为一致）=====
-  const dirs = [['数据目录', path.dirname(config.dbPath)], ['L0 归档目录', config.l0Dir], ['L3 画像目录', config.l3Dir]];
+  const dirs = [['数据目录', path.dirname(config.dbPath)]];
   for (const [label, dir] of dirs) {
     let ok = true, msg, fix = null;
     try {

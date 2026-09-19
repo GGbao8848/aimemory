@@ -37,7 +37,7 @@ test('openapi 的每条路径与方法都出现在生成物里', () => {
 
 test('核心实体接口存在（外部前端依赖的形状不静默消失）', () => {
   const ts = fs.readFileSync(OUT, 'utf8');
-  for (const name of ['Memory', 'MemoryListResult', 'EventStatus', 'L1Summary', 'L3Entry', 'L3History', 'Stats', 'KeyInfo']) {
+  for (const name of ['Memory', 'MemoryListResult', 'EventStatus', 'Stats', 'KeyInfo']) {
     assert.ok(ts.includes(`export interface ${name}`), `缺 interface ${name}`);
   }
 });

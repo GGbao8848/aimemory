@@ -70,24 +70,19 @@ test('备份 → 破坏 → 恢复：事实与计数完整，integrity ok', () =
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('导出 → 清空 → 导入：回环一致且幂等（含 L3 取代链）', async () => {
+test('导出 → 清空 → 导入：回环一致且幂等', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ops-export-'));
   const srcDb = path.join(dir, 'src.db');
-  const srcL3 = path.join(dir, 'src-l3');
   const packDir = path.join(dir, 'pack');
   const tgtDb = path.join(dir, 'target.db');
-  const tgtL3 = path.join(dir, 'target-l3');
-  const srcEnv = { AIMEMORY_DB: srcDb, AIMEMORY_L3_DIR: srcL3, LLM_ENABLED: '0' };
+  const srcEnv = { AIMEMORY_DB: srcDb, LLM_ENABLED: '0' };
 
-  // 源库：事实 + L3 取代链（旧→新）
+  // 源库：两条事实（直写 SQLite，零 LLM）
   nodeEval(
     `const db = require(${JSON.stringify(path.join(ROOT, 'src/db'))});
      const l2 = require(${JSON.stringify(path.join(ROOT, 'src/l2/store'))});
-     const l3 = require(${JSON.stringify(path.join(ROOT, 'src/l3/store'))});
      l2.insertFact({ userId: 'owner', text: '导出演练事实 X', metadata: {} });
-     const oldId = l3.appendEntry({ kind: 'lessons', text: '旧版条目', confidence: 0.6 });
-     const newId = l3.appendEntry({ kind: 'lessons', text: '新版条目', confidence: 0.8 });
-     l3.markSuperseded(oldId, newId);`,
+     l2.insertFact({ userId: 'owner', text: '导出演练事实 Y', metadata: { tag: 'demo' } });`,
     srcEnv
   );
 
@@ -97,31 +92,14 @@ test('导出 → 清空 → 导入：回环一致且幂等（含 L3 取代链）
     { AIMEMORY_DB: tgtDb }
   );
   run(NODE, [path.join(ROOT, 'scripts/export.js'), packDir], { env: envWith(srcEnv) });
-  run(NODE, [path.join(ROOT, 'scripts/import.js'), packDir], { env: envWith({ AIMEMORY_DB: tgtDb, AIMEMORY_L3_DIR: tgtL3 }) });
-  run(NODE, [path.join(ROOT, 'scripts/import.js'), packDir], { env: envWith({ AIMEMORY_DB: tgtDb, AIMEMORY_L3_DIR: tgtL3 }) });
+  run(NODE, [path.join(ROOT, 'scripts/import.js'), packDir], { env: envWith({ AIMEMORY_DB: tgtDb }) });
+  run(NODE, [path.join(ROOT, 'scripts/import.js'), packDir], { env: envWith({ AIMEMORY_DB: tgtDb }) });
 
-  // 验证：记忆 1 条、L3 全量 2 条（1 active + 1 superseded，链指向新版）
-  const mem = countRows(tgtDb, "SELECT COUNT(*) n FROM memories WHERE text = '导出演练事实 X'");
-  assert.equal(mem.n, 1, '记忆应恰好一条（幂等）');
-
-  // 用独立连接读目标 L3 目录。
-  // 关键：config 与 store 一起清缓存——config 在本进程早前已被以默认 l3Dir 加载，
-  // 只清 store 缓存的话，fresh store 仍会拿旧 config 读默认目录（data/l3）而非目标目录，验证全空。
-  const savedEnv = process.env.AIMEMORY_L3_DIR;
-  delete require.cache[require.resolve('../src/config')];
-  delete require.cache[require.resolve('../src/l3/store')];
-  process.env.AIMEMORY_L3_DIR = tgtL3;
-  const freshL3 = require('../src/l3/store');
-  const all = freshL3.listEntries({ includeSuperseded: true });
-  const active = freshL3.listEntries({});
-  process.env.AIMEMORY_L3_DIR = savedEnv;
-
-  assert.equal(all.length, 2, `L3 应两条（旧+新），实际 ${all.length}`);
-  assert.equal(active.length, 1, 'active 应只剩新版');
-  assert.ok(active[0].text.includes('新版'), 'active 应为新版');
-  const oldEntry = all.find((e) => e.superseded_by);
-  assert.ok(oldEntry && oldEntry.text.includes('旧版'), '旧版应标记被取代');
-  assert.equal(oldEntry.superseded_by, active[0].id, '取代链应指向新版');
+  // 验证：两条事实恰好各一条（幂等）
+  const x = countRows(tgtDb, "SELECT COUNT(*) n FROM memories WHERE text = '导出演练事实 X'");
+  const y = countRows(tgtDb, "SELECT COUNT(*) n FROM memories WHERE text = '导出演练事实 Y'");
+  assert.equal(x.n, 1, '事实 X 应恰好一条（幂等）');
+  assert.equal(y.n, 1, '事实 Y 应恰好一条（幂等）');
 
   fs.rmSync(dir, { recursive: true, force: true });
 });

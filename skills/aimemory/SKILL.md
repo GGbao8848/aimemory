@@ -22,23 +22,21 @@ aimemory 是自托管的 AI 记忆库（mem0 兼容 MCP），语义+关键词混
 
 | 用户说 | 调用 | 说明 |
 |---|---|---|
-| "开始任务，加载我的偏好/约束/教训" | `recall_context` | 一键注入长期上下文（只读零 LLM）；`kinds` 可只要约束/教训 |
 | "搜/查记忆" + 关键词 | `search_memories` | 语义+关键词混合检索，`threshold` 可过滤低置信 |
-| "我上次/某台机器做了什么" | `list_session_summaries` | 会话摘要（L1），按设备/agent 查历史会话 |
 | "刚存的记忆在不在/提炼完没" | `get_event_status` | `add_memory(messages)` 是异步的，用返回的 `event_id` 查提炼状态 |
 | "列出/我的记忆" | `get_memories` | 分页，可按 `metadata`/时间过滤 |
 | "看某条记忆" | `get_memory` | 按 id 取单条 |
 | "改某条记忆" | `get_memory` 确认 id → `update_memory` | 更新前先读原文确认 |
 | "删某条记忆" | `delete_memory` | 按 id 删除 |
-| "清空我的全部记忆" | 引导用户到 Web 平台「我的记忆」手动删 | MCP 刻意不提供整库删除（防误操作） |
-| 记忆键管理 | 引导用户到 Web 平台（REST `/api/keys`）或设备流接入 | API Key 管理（MCP 不暴露） |
+| "清空我的记忆" | 引导用户到 Web 管理台操作，或 REST `DELETE /v1/memories/?user_id=…` | MCP 刻意不提供整库删除（防误操作） |
+| 记忆键管理 | 引导用户到 Web 管理台（REST `/api/keys`） | API Key 管理（MCP 不暴露） |
 
 ## 核心规则
 
 - **删除必须确认**：`delete_memory` 执行前先展示目标内容让用户确认，禁止擅自删除
 - **更新先读**：`update_memory` 前先 `get_memory` 拿到原文，向用户展示修改点
 - **更新后自动去重**：改文本后服务端会异步做一次「同一事实」检测，重复的旧记忆自动合并删除（审计可查），无需手动清理
-- **沉淀分工**：会话归档后台会自动沉淀全部对话（L0→L1→L2）；`add_memory` 只用于即时强调关键事实——不要把整段对话双投（服务端会拦重复，但单投省 token）
+- **写入语义**：`add_memory` 提交的都是素材（text/messages），异步受理由内部 LLM 提炼入库（不存原文）；日常对话结束时主动存一次关键结论即可
 - **账本边界**：记忆是当前部署账号的个人账本（单用户，无需传 `user_id`）
 - **结果汇报**：检索结果用紧凑列表呈现（内容 + 相似度/时间），不吐原始 JSON
 

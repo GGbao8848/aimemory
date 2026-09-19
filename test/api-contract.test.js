@@ -19,7 +19,6 @@ const src = ['src/web/routes.js', 'src/index.js']
 
 const EXEMPT = new Set([
   'GET /auth/login', 'POST /auth/local-login', 'GET /auth/logout', // HTML 登录流
-  'GET /connect', // 授权 HTML 页
   'GET /skill/download', 'GET /skill/SKILL.md', // 静态资源
 ]);
 
@@ -74,5 +73,5 @@ test('契约不虚报：文档里的路由必须真实存在', () => {
 test('契约体量与可解析性：覆盖充分且为合法 JSON', () => {
   const doc = JSON.parse(fs.readFileSync(path.join(ROOT, 'docs', 'api', 'openapi.json'), 'utf8'));
   assert.equal(doc.openapi.startsWith('3.'), true, '应为 OpenAPI 3.x');
-  assert.ok(documentedRoutes().count >= 28, `契约至少覆盖 28 个操作，当前 ${documentedRoutes().count}`);
+  assert.ok(documentedRoutes().count >= 14, `契约至少覆盖 14 个操作，当前 ${documentedRoutes().count}`);
 });

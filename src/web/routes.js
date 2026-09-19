@@ -1,15 +1,15 @@
 'use strict';
 
 /**
- * REST /api + Web 会话辅助。
+ * REST /api 管理台自用面。
  * - 鉴权：Authorization: Token m0-xxx（API key）或 aim_session cookie（Web 口令登录会话）
  * - 所有数据访问强制 user_id 隔离
+ * - 对外的 mem0 形态 API（/v1 /v2）见 src/api/mem0.js
  */
 const express = require('express');
 const path = require('path');
 const repo = require('../db/repo');
 const tokens = require('../auth/tokens');
-const l0Store = require('../l0/store');
 const config = require('../config');
 
 const apiRouter = express.Router();
@@ -49,7 +49,6 @@ apiRouter.get('/me', wrap(async (req, res) => {
   res.json({ userId: id.userId, username: id.username, via: id.via });
 }));
 
-// 当前用户记忆统计（页面展示：记忆数 / 生效密钥数）
 // REST 契约直出（公开）：文档即代码，路径/方法集由 test/api-contract.test.js 守护与实现同步
 apiRouter.get('/openapi.json', (_req, res) => {
   res.type('application/json').sendFile(path.join(config.root, 'docs', 'api', 'openapi.json'));
@@ -95,7 +94,7 @@ apiRouter.post('/memories', requireAuth, wrap(async (req, res) => {
 }));
 
 apiRouter.get('/memories/export', requireAuth, wrap(async (req, res) => {
-  // 导出当前员工全部记忆（JSON 附件下载；数据可携带性 / 备份）
+  // 导出当前用户全部记忆（JSON 附件下载；数据可携带性 / 备份）
   const memories = repo.exportMemories(req.identity.userId);
   const payload = {
     exported_at: new Date().toISOString(),
@@ -157,250 +156,4 @@ apiRouter.post('/keys/:id/revoke', requireAuth, wrap(async (req, res) => {
   res.json({ success: true });
 }));
 
-// ===== L0 原始会话归档（采集器上传；只落盘，不做提炼） =====
-
-// 采集器上传一个批次（同批次重传按 batch_id 幂等跳过）。
-// 注意：本端点的 body 上限单独放宽（见 index.js 的 per-route parser）——原始会话
-// 批次远大于普通 API 请求，若沿用全局 1mb 会持续 413。
-const l0IngestHandler = wrap(async (req, res) => {
-  const b = req.body || {};
-  const agent = String(b.agent || '').trim();
-  const sessionId = String(b.session_id || '').trim();
-  if (!agent) return res.status(400).json({ error: '缺少 agent' });
-  if (!sessionId) return res.status(400).json({ error: '缺少 session_id' });
-  if (!Array.isArray(b.records) || b.records.length === 0) {
-    return res.status(400).json({ error: 'records 不能为空' });
-  }
-  if (b.records.length > 5000) {
-    return res.status(413).json({ error: '单批次记录数超限（≤5000），请拆分上传' });
-  }
-  // 设备信息：device.code 是归类主键；fingerprint 用于"认出同一台机器"（重装后归回原设备）；
-  // label/info 供跨机识别与排查
-  const dev = b.device && typeof b.device === 'object' ? b.device : {};
-  const r = l0Store.ingestBatch({
-    userId: req.identity.userId,
-    agent,
-    sessionId,
-    deviceCode: dev.code || b.device_code || b.collector_id,
-    deviceLabel: dev.label || b.device_label,
-    deviceInfo: dev.info,
-    deviceFingerprint: dev.fingerprint || b.device_fingerprint,
-    deviceFingerprintSource: dev.fingerprint_source || b.device_fingerprint_source,
-    collectorId: b.collector_id,
-    batchSeq: b.batch_seq,
-    batchId: b.batch_id,
-    records: b.records,
-  });
-  res.status(r.deduped ? 200 : 201).json(r);
-});
-
-// 鉴权 + 处理：index.js 以 [parser, ...l0IngestRoute] 形式挂载，先于全局 1mb parser
-const l0IngestRoute = [requireAuth, l0IngestHandler];
-
-// 归档概况 + 设备清单 + 会话清单（Web 展示 / 采集器 status 自检）
-// 支持 ?device=<设备码>&agent=<agent> 过滤会话，用于"看某台机器做了什么"
-apiRouter.get('/l0/stats', requireAuth, wrap(async (req, res) => {
-  const deviceCode = req.query.device ? String(req.query.device) : null;
-  const agent = req.query.agent ? String(req.query.agent) : null;
-  res.json({
-    ...l0Store.archiveStats(req.identity.userId),
-    devices_list: l0Store.listDevices(req.identity.userId),
-    sessions_list: l0Store.listSessions(req.identity.userId, { deviceCode, agent, limit: 200 }),
-  });
-}));
-
-// 单会话详情：读取归档内容（跨用户访问在 store 层校验）
-apiRouter.get('/l0/session', requireAuth, wrap(async (req, res) => {
-  const { device, agent, session_id: sessionId } = req.query;
-  if (!agent || !sessionId) return res.status(400).json({ error: '缺少 agent / session_id' });
-  const r = l0Store.readSession(req.identity.userId, {
-    deviceCode: device ? String(device) : null,
-    agent: String(agent),
-    sessionId: String(sessionId),
-  });
-  if (!r) return res.status(404).json({ error: '会话不存在或无权访问' });
-  // 顺带带上该会话的 L1 摘要（可能尚未生成 → null）
-  const summary = repo.getL1Summary(req.identity.userId, {
-    deviceCode: device ? String(device) : '',
-    agent: String(agent),
-    sessionId: String(sessionId),
-  });
-  res.json({ agent, device: device || null, session_id: sessionId, ...r, summary: summary || null });
-}));
-
-// ===== L1 会话摘要（情景记忆，后台从 L0 归档生成） =====
-
-// 摘要清单：支持 ?device= / ?agent= / ?q= 过滤
-apiRouter.get('/l1/summaries', requireAuth, wrap(async (req, res) => {
-  const deviceCode = req.query.device ? String(req.query.device) : null;
-  const agent = req.query.agent ? String(req.query.agent) : null;
-  const query = req.query.q ? String(req.query.q) : null;
-  let list = repo.listL1Summaries(req.identity.userId, { deviceCode, agent, limit: 500 });
-  if (query) {
-    const q = query.toLowerCase();
-    list = list.filter((s) =>
-      [s.overview, ...(s.decisions || []), ...(s.artifacts || []), ...(s.pending || [])]
-        .filter(Boolean).some((t) => String(t).toLowerCase().includes(q))
-    );
-  }
-  res.json({ results: list, total: list.length, ...repo.l1Stats(req.identity.userId) });
-}));
-
-// 摘要进度（运维：还有多少没跑、失败多少）
-apiRouter.get('/l1/stats', requireAuth, wrap(async (req, res) => {
-  res.json(repo.l1Stats(req.identity.userId));
-}));
-
-// ===== 记忆星图：聚合概览 =====
-// 概念图只关心「规模 / 积压 / 连通性」三类数字，这里一次往返取齐，
-// 避免前端串行打 4 个接口。连通性由公开的 /healthz 提供，不在此重复探测模型服务。
-apiRouter.get('/atlas/overview', requireAuth, wrap(async (req, res) => {
-  const userId = req.identity.userId;
-  const stats = repo.stats(userId);
-  const l1 = repo.l1Stats(userId);
-  res.json({
-    identity: userId,
-    username: req.identity.username || null,
-    stats,
-    keys: { active: stats.keys },
-    l1: { ...l1, backlog: (l1.pending || 0) + (l1.running || 0) },
-    events: repo.eventStats(userId),
-    // L2 派生进度 + 四操作计数；L3 规模。星图按 metric 路径取数（Object.assign 进模型，新增字段自动可用）
-    l2: { ...require('../l2/store').l2Stats(userId), ops: require('../l2/store').opStats(userId) },
-    l3: require('../l3/store').l3Stats(),
-    l0: {
-      ...l0Store.archiveStats(userId),
-      devices_list: l0Store.listDevices(userId),
-    },
-  });
-}));
-
-// 手动触发：立即为「已静默」的会话排队并处理一小批（不等后台轮询）
-apiRouter.post('/l1/run', requireAuth, wrap(async (req, res) => {
-  const l1Scheduler = require('../l1/scheduler');
-  const r = await l1Scheduler.tick();
-  res.json(r || { processed: 0 });
-}));
-
-// ===== L2 事实记忆：派生状态 / 冲突消解审计 / 向量层 =====
-// 供前端与人工排查消费；MCP 工具面保持不变（add_memory 的回执里已带 ops 明细）。
-
-/** 一次取齐：记忆规模 + 派生进度 + 四操作计数 + 向量层状态 */
-apiRouter.get('/l2/stats', requireAuth, wrap(async (req, res) => {
-  const userId = req.identity.userId;
-  const l2Store = require('../l2/store');
-  const vec = require('../l2/vec');
-  res.json({
-    ...l2Store.l2Stats(userId),
-    ops: l2Store.opStats(userId),
-    memories: repo.stats(userId).memories,
-    vec: vec.status(),
-    embedding: { enabled: config.embedding.enabled },
-  });
-}));
-
-/** 冲突消解审计（新→旧）：回答"这条记忆为什么被改 / 被删" */
-apiRouter.get('/l2/ops', requireAuth, wrap(async (req, res) => {
-  const l2Store = require('../l2/store');
-  res.json({ results: l2Store.listOps(req.identity.userId, Number(req.query.limit) || 50) });
-}));
-
-/** 派生明细：哪些会话派生过、产生了多少事实 */
-apiRouter.get('/l2/sources', requireAuth, wrap(async (req, res) => {
-  const l2Store = require('../l2/store');
-  res.json({ results: l2Store.listL2Sources(req.identity.userId, Number(req.query.limit) || 200) });
-}));
-
-/** 手动触发一轮派生（不等后台轮询），与 /l1/run 对称 */
-apiRouter.post('/l2/run', requireAuth, wrap(async (req, res) => {
-  const l2Scheduler = require('../l2/scheduler');
-  const r = await l2Scheduler.tick();
-  res.json(r || { processed: 0 });
-}));
-
-/** 重建向量索引（换 embedding 模型导致维度变化时必须重建；reset=true 先清表） */
-apiRouter.post('/l2/vec/rebuild', requireAuth, wrap(async (req, res) => {
-  const vec = require('../l2/vec');
-  res.json(vec.rebuild({ userId: req.identity.userId, reset: req.body?.reset === true }));
-}));
-
-// ===== L3 画像／知识（第一阶段，docs/L3-画像与知识层.md）=====
-
-/** 条目清单：?kind=profile|constraints|lessons，?include_superseded=1 连被取代的一起返回 */
-apiRouter.get('/l3/entries', requireAuth, wrap(async (req, res) => {
-  const l3Store = require('../l3/store');
-  res.json({
-    results: l3Store.listEntries({
-      kind: req.query.kind || null,
-      includeSuperseded: req.query.include_superseded === '1',
-    }),
-  });
-}));
-
-/** 变更历史：active 条目 + 被其取代的旧版链（纯读；孤儿链单独暴露供排查） */
-apiRouter.get('/l3/history', requireAuth, wrap(async (req, res) => {
-  const l3Store = require('../l3/store');
-  res.json(l3Store.entryHistory());
-}));
-
-/** 人工编辑正文（双时间轴与来源不动；被取代状态需人工改文件复原） */
-apiRouter.put('/l3/entries/:id', requireAuth, wrap(async (req, res) => {
-  const l3Store = require('../l3/store');
-  const entry = l3Store.updateBody(req.params.id, (req.body || {}).text);
-  if (!entry) return res.status(404).json({ error: '条目不存在' });
-  res.json(entry);
-}));
-
-/** 手动触发一轮凝练（force=true 时无新增也取最近几条跑） */
-apiRouter.post('/l3/run', requireAuth, wrap(async (req, res) => {
-  const l3Scheduler = require('../l3/scheduler');
-  res.json(await l3Scheduler.tick({ force: (req.body || {}).force !== false }));
-}));
-
-/** 规模统计（含待凝练的新会话数，给星图内圈与排查用） */
-apiRouter.get('/l3/stats', requireAuth, wrap(async (req, res) => {
-  const l3Store = require('../l3/store');
-  const l3Scheduler = require('../l3/scheduler');
-  res.json({ ...l3Store.l3Stats(), pending: l3Scheduler.pendingCount() });
-}));
-
-// ===== 设备流连接（零粘贴：发起 → 授权页确认 → 轮询拿 key）=====
-
-// agent 端发起连接请求（匿名，不绑定用户）→ 返回 request_id 供浏览器授权页 + 轮询
-// body 可带 confirm_token（agent 侧随机，拼进 authorize_url）→ /connect 校验匹配后免按钮自动授权
-apiRouter.post('/connect/start', wrap(async (req, res) => {
-  const confirmToken = (req.body && typeof req.body.confirm_token === 'string' && req.body.confirm_token) || null;
-  const { request_id } = repo.createConnectRequest(confirmToken);
-  const base = config.publicBaseUrl || `http://${req.get('host')}`;
-  const authorizeUrl = confirmToken
-    ? `${base}/connect?request_id=${request_id}&confirm_token=${encodeURIComponent(confirmToken)}`
-    : `${base}/connect?request_id=${request_id}`;
-  res.status(201).json({
-    request_id,
-    authorize_url: authorizeUrl,
-    expires_in: 600,
-  });
-}));
-
-// agent 端轮询：authorized → { token, key_name }；pending → null；失效/不存在 → { error }
-apiRouter.get('/connect/poll', wrap(async (req, res) => {
-  const requestId = String(req.query.request_id || '').trim();
-  if (!requestId) return res.status(400).json({ error: '缺少 request_id' });
-  const r = repo.pollConnectRequest(requestId);
-  if (r === 'expired') return res.status(410).json({ error: '授权请求已过期或不存在，请重新发起' });
-  if (r === null) return res.json({ status: 'pending' });
-  res.json({ status: 'authorized', token: r.token, key_name: r.key_name, api_key_id: r.api_key_id });
-}));
-
-// 授权页「确认授权」：绑定当前登录用户 + 签发 Token（名称必填）
-apiRouter.post('/connect/confirm', requireAuth, wrap(async (req, res) => {
-  const { request_id, name } = req.body || {};
-  if (!request_id) return res.status(400).json({ error: '缺少 request_id' });
-  const cleanName = String(name || '').trim();
-  if (!cleanName) return res.status(400).json({ error: 'Token 名称不能为空' });
-  const r = repo.confirmConnectRequest(String(request_id), req.identity.userId, cleanName);
-  if (!r) return res.status(400).json({ error: '授权请求无效、已处理或已过期，请从 agent 端重新发起' });
-  res.status(201).json({ token: r.token, key_name: r.key_name, api_key_id: r.api_key_id });
-}));
-
-module.exports = { apiRouter, resolveIdentity, l0IngestRoute };
+module.exports = { apiRouter, resolveIdentity };

@@ -27,25 +27,14 @@ test('.env.example 的每个键都被 src/config.js 读取（防模板漂移）'
   assert.deepEqual(stale, [], `.env.example 存在代码不读取的键：${stale.join(', ')}`);
 });
 
-// ===== 采集器：同一守护扩展到 collector/config.js ↔ collector/.env.example =====
-// 只做单向（代码读的必须有文档）：collector 另有 config.json 文件键（安装流写入），不属 env 模板。
-const collectorSrc = fs.readFileSync(path.join(ROOT, 'collector/config.js'), 'utf8');
-const collectorExample = fs.readFileSync(path.join(ROOT, 'collector/.env.example'), 'utf8');
-const collectorKeys = new Set([...collectorSrc.matchAll(/process\.env\.([A-Z0-9_]+)/g)].map((m) => m[1]));
-const collectorDocKeys = new Set([...collectorExample.matchAll(/^\s*#?\s*([A-Z0-9_]+)\s*=/gm)].map((m) => m[1]));
-
-test('collector/config.js 读取的每个环境变量都在 collector/.env.example 有文档', () => {
-  assert.ok(collectorKeys.size >= 15, 'collector env 读取数不应异常缩水');
-  const missing = [...collectorKeys].filter((k) => !collectorDocKeys.has(k));
-  assert.deepEqual(missing, [], `collector/.env.example 缺少：${missing.join(', ')}`);
-});
+// ===== doctor 冒烟 =====
 
 test('doctor 冒烟：临时库环境 exit 0 且给出结论与下一步', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'doctor-smoke-'));
   try {
     const out = execFileSync('node', ['scripts/doctor.js'], {
       cwd: ROOT,
-      env: { ...process.env, AIMEMORY_DB: path.join(tmp, 't.db'), AIMEMORY_L3_DIR: path.join(tmp, 'l3') },
+      env: { ...process.env, AIMEMORY_DB: path.join(tmp, 't.db') },
       encoding: 'utf8',
     });
     assert.ok(out.includes('首启自检'), '输出应含自检标题');

@@ -66,14 +66,18 @@ async function submitAndProcess({ userId, text, messages }) {
   return ev;
 }
 
-test('schema：无 connect_codes/history/agent 残留，events 保留为任务队列', () => {
+test('schema：无退役表残留，events 保留为任务队列，mem0 维度列在位', () => {
   const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => r.name);
   assert.ok(tables.includes('events'), 'events 表应保留（素材提炼队列）');
   assert.ok(!tables.includes('connect_codes'));
   assert.ok(!tables.includes('memories_history'));
   const cols = db.prepare('PRAGMA table_info(memories)').all().map((c) => c.name);
-  assert.ok(!cols.includes('agent_id'));
+  assert.ok(cols.includes('agent_id'), 'agent_id 应在位（mem0 维度）');
+  assert.ok(cols.includes('run_id'), 'run_id 应在位（mem0 维度）');
   assert.ok(!cols.includes('archived'));
+  for (const gone of ['l0_records', 'l0_devices', 'l0_batches', 'l1_summaries', 'l2_sources', 'l3_state', 'connect_requests']) {
+    assert.ok(!tables.includes(gone), `退役表应删除：${gone}`);
+  }
 });
 
 test('text 素材：异步受理 + 提炼成功入库（产物非原文）', async () => {

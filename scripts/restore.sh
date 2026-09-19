@@ -1,5 +1,5 @@
 #!/bin/bash
-# aimemory 恢复脚本：校验备份完整性 → 恢复 db/L0/L3 → 打开库自检
+# aimemory 恢复脚本：校验备份完整性 → 恢复 db → 打开库自检
 # 用法: scripts/restore.sh <备份目录> [数据目录]
 #   数据目录默认 <仓库>/data。恢复前请停止 aimemory 服务。
 set -euo pipefail
@@ -19,13 +19,6 @@ echo "  ✓ 校验通过"
 echo "== 2/3 恢复到 $DATA_DIR =="
 mkdir -p "$DATA_DIR"
 cp "$BACKUP_DIR/aimemory.db" "$DATA_DIR/aimemory.db"
-for d in l0 l3; do
-  if [ -f "$BACKUP_DIR/$d.tar.gz" ]; then
-    rm -rf "$DATA_DIR/$d"
-    tar -xzf "$BACKUP_DIR/$d.tar.gz" -C "$DATA_DIR"
-    echo "  ✓ $d/"
-  fi
-done
 echo "  ✓ aimemory.db"
 
 echo "== 3/3 恢复后自检 =="
@@ -35,9 +28,8 @@ const db = new Database(process.argv[1], { readonly: true });
 const integrity = db.pragma('integrity_check', { simple: true });
 const tables = db.prepare(\"SELECT COUNT(*) n FROM sqlite_master WHERE type='table'\").get().n;
 const memories = db.prepare('SELECT COUNT(*) n FROM memories').get().n;
-const l1 = db.prepare('SELECT COUNT(*) n FROM l1_summaries').get().n;
 console.log('  ✓ integrity_check:', integrity);
-console.log('  ✓ 表数量:', tables, '| 记忆:', memories, '| 摘要:', l1);
+console.log('  ✓ 表数量:', tables, '| 记忆:', memories);
 if (integrity !== 'ok') process.exit(1);
 " "$DATA_DIR/aimemory.db"
 

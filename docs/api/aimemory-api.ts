@@ -1,35 +1,15 @@
 // 本文件由 `npm run types`（scripts/gen-api-types.js）从 docs/api/openapi.json 生成——勿手改，
 // 与 openapi 不同步会被 test/api-types.test.js 打回。实体接口的语义说明见 docs/前端对接.md。
-// 来源：OpenAPI 3.1.0 · 0.2.0 · 31 条路径
+// 来源：OpenAPI 3.1.0 · 0.2.0 · 11 条路径
 
 // ============ 路由面（自动生成） ============
 
-export type ApiMethod = 'DELETE' | 'GET' | 'POST' | 'PUT';
+export type ApiMethod = 'DELETE' | 'GET' | 'POST';
 
 export type ApiPath =
-  | '/api/atlas/overview'
-  | '/api/connect/confirm'
-  | '/api/connect/poll'
-  | '/api/connect/start'
   | '/api/events/{id}'
   | '/api/keys'
   | '/api/keys/{id}/revoke'
-  | '/api/l0/ingest'
-  | '/api/l0/session'
-  | '/api/l0/stats'
-  | '/api/l1/run'
-  | '/api/l1/stats'
-  | '/api/l1/summaries'
-  | '/api/l2/ops'
-  | '/api/l2/run'
-  | '/api/l2/sources'
-  | '/api/l2/stats'
-  | '/api/l2/vec/rebuild'
-  | '/api/l3/entries'
-  | '/api/l3/entries/{id}'
-  | '/api/l3/history'
-  | '/api/l3/run'
-  | '/api/l3/stats'
   | '/api/me'
   | '/api/memories'
   | '/api/memories/export'
@@ -41,29 +21,9 @@ export type ApiPath =
 
 /** 全部 REST 路由与其支持的方法（与 express 路由表一致，由契约守护测试保证） */
 export const API_ROUTES: Readonly<Record<ApiPath, readonly ApiMethod[]>> = {
-  '/api/atlas/overview': ['GET'],
-  '/api/connect/confirm': ['POST'],
-  '/api/connect/poll': ['GET'],
-  '/api/connect/start': ['POST'],
   '/api/events/{id}': ['GET'],
   '/api/keys': ['GET', 'POST'],
   '/api/keys/{id}/revoke': ['POST'],
-  '/api/l0/ingest': ['POST'],
-  '/api/l0/session': ['GET'],
-  '/api/l0/stats': ['GET'],
-  '/api/l1/run': ['POST'],
-  '/api/l1/stats': ['GET'],
-  '/api/l1/summaries': ['GET'],
-  '/api/l2/ops': ['GET'],
-  '/api/l2/run': ['POST'],
-  '/api/l2/sources': ['GET'],
-  '/api/l2/stats': ['GET'],
-  '/api/l2/vec/rebuild': ['POST'],
-  '/api/l3/entries': ['GET'],
-  '/api/l3/entries/{id}': ['PUT'],
-  '/api/l3/history': ['GET'],
-  '/api/l3/run': ['POST'],
-  '/api/l3/stats': ['GET'],
   '/api/me': ['GET'],
   '/api/memories': ['GET', 'POST'],
   '/api/memories/export': ['GET'],

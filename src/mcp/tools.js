@@ -1,18 +1,15 @@
 'use strict';
 
 /**
- * MCP 工具定义与处理器。
- * 共 10 工具：
- * - L2 事实记忆（7）：add_memory / get_event_status / search_memories / get_memories /
- *   get_memory / update_memory / delete_memory
- * - L1 会话摘要（2）：list_session_summaries / get_session_summary（后台从 L0 归档生成）
- * - L3 画像/知识（1）：recall_context（只读召回，供 agent 开场注入长期上下文）
+ * MCP 工具定义与处理器（mem0 形态，7 工具）：
+ * add_memory / get_event_status / search_memories / get_memories / get_memory /
+ * update_memory / delete_memory。
  * - 写入语义：所有 add_memory 输入都是"素材"（text/messages），一律异步受理返回 event_id，
  *   后台内部 LLM 提炼成结构化记忆入库（不存原文）；get_event_status 查进度。
  * - 错误语义（MCP 官方最佳实践）：输入校验/业务类错误用 toolError() → isError 结果返回
  *   （文案带行动建议，模型可自愈重试）；未知工具才是协议错误。
- * - 已裁剪：批量导入、整库/实体管理、agent/run 作用域。单用户部署：所有数据归属同一身份，无需传 user_id。
- * 注：API Key 管理不暴露为 MCP 工具，由 Web 平台 REST（/api/keys）+ 设备流接入提供。
+ * - 单用户部署：所有数据归属同一身份，无需传 user_id（REST /v1 /v2 面支持多用户维度）。
+ * 注：API Key 管理不暴露为 MCP 工具，由 Web 平台 REST（/api/keys）提供。
  */
 const { McpError, ErrorCode, ListToolsRequestSchema, CallToolRequestSchema } =
   require('@modelcontextprotocol/sdk/types.js');
@@ -20,7 +17,6 @@ const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
 const repo = require('../db/repo');
 const llm = require('../llm/client');
 const l2reconcile = require('../l2/reconcile');
-const l3recall = require('../l3/recall');
 
 function jsonText(obj) {
   return JSON.stringify(obj, null, 2);
@@ -143,49 +139,6 @@ const tools = [
   },
 
   {
-    name: 'recall_context',
-    title: '召回长期上下文',
-    description:
-      '召回「长期成立的上下文」：L3 画像/约束/教训条目（按类分组）+ 可选相关 L2 事实。' +
-      '只读、零 LLM、任何环境可用，适合会话开场直接注入（agent 的自我介绍）。' +
-      'query 提供时按相关度排序并附带 top-K 相关事实；省略则按置信度返回每类前几条。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: '当前任务描述，用于相关度排序与相关事实召回；可省略' },
-        per_kind: { type: 'integer', minimum: 1, maximum: 12, description: '每类条目最多返回几条，默认 6' },
-        facts: { type: 'integer', minimum: 0, maximum: 20, description: '相关 L2 事实条数，默认 5；0 = 不带事实' },
-        kinds: {
-          type: 'array',
-          items: { type: 'string', enum: l3recall.KIND_ORDER },
-          description: '只返回指定类别（如 ["constraints","lessons"]，开场只要约束/教训时省 token）；省略 = 全部三类',
-        },
-      },
-    },
-    handler: async ({ query = '', per_kind, facts, kinds }, userId) => {
-      let kindList = null;
-      if (kinds !== undefined) {
-        const bad = Array.isArray(kinds) ? kinds.filter((k) => !l3recall.KIND_ORDER.includes(k)) : null;
-        if (!Array.isArray(kinds) || bad === null) {
-          throw toolError('kinds 需为字符串数组，取值 profile / constraints / lessons，例如 ["constraints","lessons"]。');
-        }
-        if (bad.length) {
-          throw toolError(`kinds 含未知类别：${bad.join(', ')}——只支持 ${l3recall.KIND_ORDER.join(' / ')}，请修正后重试。`);
-        }
-        kindList = kinds;
-      }
-      const r = await l3recall.recallContext({
-        userId,
-        query: String(query || ''),
-        perKind: per_kind,
-        facts,
-        kinds: kindList,
-      });
-      return { content: [{ type: 'text', text: jsonText(r) }] };
-    },
-  },
-
-  {
     name: 'get_memories',
     title: '列出记忆',
     description: '分页列出当前用户的记忆（按更新时间倒序）',
@@ -272,88 +225,6 @@ const tools = [
       return { content: [{ type: 'text', text: jsonText({ success: true }) }] };
     },
   },
-
-  {
-    name: 'list_session_summaries',
-    title: '列出会话摘要',
-    description:
-      '列出会话摘要（L1 情景记忆）：后台把归档的 agent 会话（L0 原始归档）提炼成结构化摘要——'
-      + '概述、关键决定、未决事项、产出物。用于回答"我最近/某台机器做了什么"这类跨会话、'
-      + '跨设备的问题（区别于 search_memories 查的是提炼后的长期事实）。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        device: { type: 'string', description: '按设备码过滤（可选，见返回里的 device_code）' },
-        agent: { type: 'string', description: '按 agent 过滤：codex / claude / zcode（可选）' },
-        query: { type: 'string', description: '在摘要正文/决定/产出物里做关键词过滤（可选）' },
-        limit: { type: 'integer', minimum: 1, maximum: 50, description: '返回条数，默认 10' },
-      },
-    },
-    handler: async ({ device, agent, query, limit = 10 }, userId) => {
-      const list = repo.listL1Summaries(userId, { deviceCode: device, agent, limit: 200 });
-      let out = list;
-      if (query) {
-        const q = String(query).toLowerCase();
-        out = list.filter((s) =>
-          [s.overview, ...(s.decisions || []), ...(s.artifacts || []), ...(s.pending || [])]
-            .filter(Boolean)
-            .some((t) => String(t).toLowerCase().includes(q))
-        );
-      }
-      const results = out.slice(0, Math.min(limit, 50)).map((s) => ({
-        session_id: s.session_id,
-        device_code: s.device_code,
-        agent: s.agent,
-        time: s.last_ts,
-        overview: s.overview,
-        decisions: s.decisions,
-        pending: s.pending,
-        artifacts: s.artifacts,
-      }));
-      return { content: [{ type: 'text', text: jsonText({ results, total: results.length }) }] };
-    },
-  },
-
-  {
-    name: 'get_session_summary',
-    title: '读取会话摘要',
-    description: '查看某个会话的摘要详情（L1）。用 list_session_summaries 拿到 session_id / device_code / agent 后调用。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        session_id: { type: 'string', description: '会话 id' },
-        device_code: { type: 'string', description: '设备码（同名会话可能存在于多台设备，建议带上）' },
-        agent: { type: 'string', description: 'agent：codex / claude / zcode' },
-      },
-      required: ['session_id'],
-    },
-    handler: async ({ session_id: sessionId, device_code: deviceCode, agent }, userId) => {
-      // 允许只给 session_id（单用户下会话 id 基本唯一），但要能唯一定位
-      const list = repo.listL1Summaries(userId, { limit: 500 });
-      const match = list.filter((s) =>
-        s.session_id === sessionId
-        && (!deviceCode || s.device_code === deviceCode)
-        && (!agent || s.agent === agent)
-      );
-      if (!match.length) {
-        // 可能尚未生成（还在排队）或会话不存在
-        const raw = repo.getL1Summary(userId, { deviceCode: deviceCode || '', agent: agent || '', sessionId });
-        return {
-          content: [{
-            type: 'text',
-            text: jsonText({
-              found: false,
-              hint: raw
-                ? `该会话摘要状态为 ${raw.status}${raw.error ? `（${raw.error}）` : ''}，尚未完成。`
-                : '没有该会话的摘要：可能尚未生成（后台按静默时间排队），或 session_id 有误。',
-            }),
-          }],
-        };
-      }
-      const s = match[0];
-      return { content: [{ type: 'text', text: jsonText(s) }] };
-    },
-  },
 ];
 
 /** 创建并注册工具的 MCP Server 实例（userId 由 server 注入，单用户下为常量） */
@@ -368,9 +239,8 @@ function buildServer() {
       capabilities: { tools: {} },
       instructions:
         '单用户部署：所有记忆归属同一身份，无需传 user_id。'
-        + '两层记忆各有用途——search_memories 查长期事实（L2，由 add_memory 素材提炼而来）；'
-        + 'list_session_summaries 查"某个会话做了什么"（L1，由 agent 会话归档自动摘要）。'
-        + '问"我最近做了什么/某台机器做了什么"用后者，问"关于 X 我知道什么"用前者。',
+        + 'add_memory 提交素材（异步提炼入库），search_memories 检索长期事实，'
+        + 'get_memories/get_memory/update_memory/delete_memory 管理记忆本体。',
     }
   );
 
