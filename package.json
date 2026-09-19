@@ -9,6 +9,9 @@
     "start": "node src/index.js",
     "doctor": "node scripts/doctor.js",
     "types": "node scripts/gen-api-types.js",
+    "web:install": "npm --prefix web install",
+    "web:build": "npm --prefix web run build",
+    "web:dev": "npm --prefix web run dev",
     "collector": "node collector/index.js",
     "collector:status": "node collector/index.js --status",
     "test": "node --test"

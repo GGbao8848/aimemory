@@ -1,0 +1,25 @@
+{
+  "name": "aimemory-web",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "description": "aimemory 管理台前端（React + Vite + TS）；构建产物 web/dist 由后端 Express 挂载在 /admin",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.0"
+  }
+}

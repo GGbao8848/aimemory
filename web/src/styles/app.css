@@ -749,3 +749,13 @@ input:focus, textarea:focus {
 .l3-chain { padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; }
 .l3-chain-head { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
 .l3-chain-old { margin-top: 6px; padding-left: 10px; border-left: 2px solid var(--border); font-size: 12px; text-decoration: line-through; }
+
+.ops-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.ops-table th {
+  text-align: left; font-weight: 600; color: var(--muted); font-size: 11.5px;
+  padding: 6px 10px; border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+.ops-table td { padding: 8px 10px; border-bottom: 1px dashed var(--border); vertical-align: top; }
+.ops-table tr:last-child td { border-bottom: none; }
+.ops-table .mono { font-family: var(--font-mono); font-size: 12px; word-break: break-word; }
+.ops-table td.op-src, .ops-table td.op-time { white-space: nowrap; color: var(--muted); }
