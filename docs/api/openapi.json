@@ -138,6 +138,360 @@
         ],
         "summary": "吊销 API Token"
       }
+    },
+    "/v1/memories": {
+      "post": {
+        "summary": "add：提交记忆素材（异步提炼）",
+        "tags": [
+          "memories"
+        ],
+        "description": "infer=true（默认）异步受理：返回 event_id，用 GET /v1/event/{event_id} 轮询；infer=false 原文直存同步返回 results。user_id 省略时默认鉴权主体；agent_id/run_id 为自由标签维度。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "按作用域批量删除（异步）",
+        "tags": [
+          "memories"
+        ],
+        "description": "query 参数 user_id / agent_id / run_id 至少其一（mem0 语义：'*' = 全选该维度）。返回 event_id。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memories/{id}": {
+      "get": {
+        "summary": "单条记忆",
+        "tags": [
+          "memories"
+        ],
+        "description": "mem0 形状：文本字段名为 memory。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "更新记忆（text/metadata）",
+        "tags": [
+          "memories"
+        ],
+        "description": "改文本后异步重消解；变更写入 history。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "删除单条记忆",
+        "tags": [
+          "memories"
+        ],
+        "description": "删除并写入 DELETE 历史。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memories/{id}/history": {
+      "get": {
+        "summary": "记忆变更历史",
+        "tags": [
+          "memories"
+        ],
+        "description": "ADD/UPDATE/DELETE 每次变更留痕（new/old_memory），新→旧。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/memories": {
+      "post": {
+        "summary": "get_all：按 filters 分页列出",
+        "tags": [
+          "memories"
+        ],
+        "description": "body: {filters, page, page_size}；filters 至少含一个实体维度（user_id/agent_id/run_id，user_id 省略默认主体）。响应 {count, next, previous, results}。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/memories/search": {
+      "post": {
+        "summary": "search：语义+关键词混合检索",
+        "tags": [
+          "memories"
+        ],
+        "description": "body: {query, filters, top_k, threshold}。响应 {results: [{id, memory, score, ...}]}。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/event/{event_id}": {
+      "get": {
+        "summary": "事件状态轮询",
+        "tags": [
+          "memories"
+        ],
+        "description": "add（infer=true）与批量删除的异步事件状态：pending/processing/done/failed。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "x-exempt-notes": "HTML 页面（/、/admin、/auth/login、/connect）与 /skill/* 静态资源不属于 REST 契约。"

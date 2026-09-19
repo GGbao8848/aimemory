@@ -74,7 +74,8 @@ app.get('/mcp', (_req, res) =>
   res.status(200).json({ jsonrpc: '2.0', result: { protocolVersion: '2025-03-26', capabilities: { tools: {} } }, id: null })
 );
 
-// ===== REST /api（管理台自用面）；mem0 形态 API（/v1 /v2）在下一步接入 =====
+// ===== REST：mem0 形态 API（/v1 /v2，对外接入面）+ /api（管理台自用面）=====
+app.use('/', require('./api/mem0').router);
 app.use('/api', web.apiRouter);
 
 // ===== 本地口令登录（单用户）=====

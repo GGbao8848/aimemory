@@ -28,6 +28,7 @@ function implementedRoutes() {
   // index.js 里的 app 级路由路径自带全路径（/api/l0/ingest、/healthz、/mcp）。
   const sources = [
     { file: 'src/web/routes.js', prefix: '/api', marker: 'apiRouter' },
+    { file: 'src/api/mem0.js', prefix: '', marker: 'router' },
     { file: 'src/index.js', prefix: '', marker: 'app' },
   ];
   for (const { file, prefix, marker } of sources) {
@@ -36,7 +37,7 @@ function implementedRoutes() {
     let m;
     while ((m = re.exec(code))) {
       let p = prefix + m[2];
-      if (!p.startsWith('/api') && !['/healthz', '/mcp'].includes(p)) continue; // 只看 REST 面
+      if (!p.startsWith('/api') && !p.startsWith('/v1') && !p.startsWith('/v2') && !['/healthz', '/mcp'].includes(p)) continue; // 只看 REST 面
       p = p.replace(/:([A-Za-z0-9_]+)/g, '{$1}');
       out.add(`${m[1].toUpperCase()} ${p}`);
     }

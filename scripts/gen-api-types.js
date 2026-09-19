@@ -27,10 +27,38 @@ const ENTITIES = `\
 export interface Memory {
   id: string;
   user_id: string;
+  agent_id: string | null;
+  run_id: string | null;
   text: string;
   metadata: Record<string, unknown>;
   facts: string[] | null;
   entities: string[] | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** mem0 形态记忆（/v1 /v2 面响应；文本字段名为 memory） */
+export interface Mem0Memory {
+  id: string;
+  memory: string;
+  user_id: string;
+  agent_id: string | null;
+  run_id: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  score?: number;
+}
+
+/** mem0 形态变更历史条目（GET /v1/memories/{id}/history） */
+export interface Mem0HistoryEntry {
+  id: string;
+  memory_id: string;
+  event: 'ADD' | 'UPDATE' | 'DELETE' | 'NOOP';
+  old_memory: string | null;
+  new_memory: string | null;
+  user_id: string;
+  source: string;
   created_at: string;
   updated_at: string;
 }
@@ -55,47 +83,6 @@ export interface EventStatus {
   error: string | null;
   created_at: string;
   updated_at: string | null;
-}
-
-/** L1 会话摘要（列表接口不含 status/error，单条接口含） */
-export interface L1Summary {
-  device_code: string;
-  agent: string;
-  session_id: string;
-  overview: string | null;
-  decisions: string[];
-  pending: string[];
-  artifacts: unknown[];
-  records: number;
-  first_ts: string | null;
-  last_ts: string | null;
-  model: string | null;
-  updated_at: string;
-  status?: 'pending' | 'running' | 'done' | 'failed';
-  error?: string | null;
-}
-
-/** L3 画像条目（markdown 存储，双时间轴；effective_confidence 为时效衰减只读视图） */
-export interface L3Entry {
-  id: string;
-  kind: 'profile' | 'constraints' | 'lessons';
-  kind_label: string;
-  text: string;
-  confidence: number | null;
-  effective_confidence: number | null;
-  valid_from: string;
-  created_at: string;
-  updated_at: string;
-  superseded_by: string | null;
-  source: string | null;
-}
-
-/** L3 变更历史：现行条目 + 被其直接/间接取代的旧版链（新→旧）；orphan 指向不存在的取代者 */
-export interface L3History {
-  chains: { active: L3Entry; history: L3Entry[]; depth: number }[];
-  orphans: L3Entry[];
-  total: number;
-  active_total: number;
 }
 
 export interface Stats {

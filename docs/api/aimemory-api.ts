@@ -1,10 +1,10 @@
 // 本文件由 `npm run types`（scripts/gen-api-types.js）从 docs/api/openapi.json 生成——勿手改，
 // 与 openapi 不同步会被 test/api-types.test.js 打回。实体接口的语义说明见 docs/前端对接.md。
-// 来源：OpenAPI 3.1.0 · 0.2.0 · 11 条路径
+// 来源：OpenAPI 3.1.0 · 0.2.0 · 17 条路径
 
 // ============ 路由面（自动生成） ============
 
-export type ApiMethod = 'DELETE' | 'GET' | 'POST';
+export type ApiMethod = 'DELETE' | 'GET' | 'POST' | 'PUT';
 
 export type ApiPath =
   | '/api/events/{id}'
@@ -17,7 +17,13 @@ export type ApiPath =
   | '/api/openapi.json'
   | '/api/stats'
   | '/healthz'
-  | '/mcp';
+  | '/mcp'
+  | '/v1/event/{event_id}'
+  | '/v1/memories'
+  | '/v1/memories/{id}'
+  | '/v1/memories/{id}/history'
+  | '/v2/memories'
+  | '/v2/memories/search';
 
 /** 全部 REST 路由与其支持的方法（与 express 路由表一致，由契约守护测试保证） */
 export const API_ROUTES: Readonly<Record<ApiPath, readonly ApiMethod[]>> = {
@@ -32,6 +38,12 @@ export const API_ROUTES: Readonly<Record<ApiPath, readonly ApiMethod[]>> = {
   '/api/stats': ['GET'],
   '/healthz': ['GET'],
   '/mcp': ['POST', 'GET'],
+  '/v1/event/{event_id}': ['GET'],
+  '/v1/memories': ['POST', 'DELETE'],
+  '/v1/memories/{id}': ['GET', 'PUT', 'DELETE'],
+  '/v1/memories/{id}/history': ['GET'],
+  '/v2/memories': ['POST'],
+  '/v2/memories/search': ['POST'],
 };
 
 // ============ 实体形状（与后端返回一致；字段语义见 docs/前端对接.md） ============
@@ -40,10 +52,38 @@ export const API_ROUTES: Readonly<Record<ApiPath, readonly ApiMethod[]>> = {
 export interface Memory {
   id: string;
   user_id: string;
+  agent_id: string | null;
+  run_id: string | null;
   text: string;
   metadata: Record<string, unknown>;
   facts: string[] | null;
   entities: string[] | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** mem0 形态记忆（/v1 /v2 面响应；文本字段名为 memory） */
+export interface Mem0Memory {
+  id: string;
+  memory: string;
+  user_id: string;
+  agent_id: string | null;
+  run_id: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  score?: number;
+}
+
+/** mem0 形态变更历史条目（GET /v1/memories/{id}/history） */
+export interface Mem0HistoryEntry {
+  id: string;
+  memory_id: string;
+  event: 'ADD' | 'UPDATE' | 'DELETE' | 'NOOP';
+  old_memory: string | null;
+  new_memory: string | null;
+  user_id: string;
+  source: string;
   created_at: string;
   updated_at: string;
 }
@@ -68,47 +108,6 @@ export interface EventStatus {
   error: string | null;
   created_at: string;
   updated_at: string | null;
-}
-
-/** L1 会话摘要（列表接口不含 status/error，单条接口含） */
-export interface L1Summary {
-  device_code: string;
-  agent: string;
-  session_id: string;
-  overview: string | null;
-  decisions: string[];
-  pending: string[];
-  artifacts: unknown[];
-  records: number;
-  first_ts: string | null;
-  last_ts: string | null;
-  model: string | null;
-  updated_at: string;
-  status?: 'pending' | 'running' | 'done' | 'failed';
-  error?: string | null;
-}
-
-/** L3 画像条目（markdown 存储，双时间轴；effective_confidence 为时效衰减只读视图） */
-export interface L3Entry {
-  id: string;
-  kind: 'profile' | 'constraints' | 'lessons';
-  kind_label: string;
-  text: string;
-  confidence: number | null;
-  effective_confidence: number | null;
-  valid_from: string;
-  created_at: string;
-  updated_at: string;
-  superseded_by: string | null;
-  source: string | null;
-}
-
-/** L3 变更历史：现行条目 + 被其直接/间接取代的旧版链（新→旧）；orphan 指向不存在的取代者 */
-export interface L3History {
-  chains: { active: L3Entry; history: L3Entry[]; depth: number }[];
-  orphans: L3Entry[];
-  total: number;
-  active_total: number;
 }
 
 export interface Stats {

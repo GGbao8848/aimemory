@@ -64,7 +64,7 @@ async function searchMemories({ userId, query, limit = 10, threshold = 0, filter
     const match = ftsWords.map((w) => `"${w.replace(/"/g, '""')}"`).join(' AND ');
     ftsRows = db
       .prepare(
-        `SELECT m.id, m.text, m.metadata, m.facts, m.entities, m.created_at, m.updated_at, bm25(memories_fts) AS score
+        `SELECT m.id, m.text, m.metadata, m.facts, m.entities, m.agent_id, m.run_id, m.created_at, m.updated_at, bm25(memories_fts) AS score
          FROM memories_fts JOIN memories m ON m.rowid = memories_fts.rowid
          WHERE memories_fts MATCH ? AND m.user_id = ?${fsql} ORDER BY score LIMIT 500`
       )
@@ -74,7 +74,7 @@ async function searchMemories({ userId, query, limit = 10, threshold = 0, filter
   if (!ftsRows.length) {
     ftsRows = db
       .prepare(
-        `SELECT m.id, m.text, m.metadata, m.facts, m.entities, m.created_at, m.updated_at, 0 AS score
+        `SELECT m.id, m.text, m.metadata, m.facts, m.entities, m.agent_id, m.run_id, m.created_at, m.updated_at, 0 AS score
          FROM memories m WHERE m.user_id = ?${fsql} ORDER BY m.updated_at DESC LIMIT 500`
       )
       .all(userId, ...fparams);
@@ -145,7 +145,7 @@ function getVecCandidates(userId, query, topN, threshold, fsql, fparams) {
         const ph = hits.map(() => '?').join(',');
         const rows = db
           .prepare(
-            `SELECT m.id, m.text, m.metadata, m.facts, m.entities, m.created_at, m.updated_at, m.embedding
+            `SELECT m.id, m.text, m.metadata, m.facts, m.entities, m.agent_id, m.run_id, m.created_at, m.updated_at, m.embedding
                FROM memories m WHERE m.user_id = ? AND m.id IN (${ph})`
           )
           .all(userId, ...hits.map((h) => h.id));
@@ -160,7 +160,7 @@ function getVecCandidates(userId, query, topN, threshold, fsql, fparams) {
 
     const rows = db
       .prepare(
-        `SELECT m.id, m.text, m.metadata, m.facts, m.entities, m.created_at, m.updated_at, m.embedding
+        `SELECT m.id, m.text, m.metadata, m.facts, m.entities, m.agent_id, m.run_id, m.created_at, m.updated_at, m.embedding
          FROM memories m WHERE m.user_id = ? AND m.embedding IS NOT NULL${fsql}`
       )
       .all(userId, ...fparams);
@@ -190,7 +190,14 @@ function cosineSimilarity(a, b) {
   return denom === 0 ? 0 : dot / denom;
 }
 
-// ============ 记忆更新 / 删除 ============
+// ============ 记忆更新 / 删除（人工路径也留 history，mem0 语义） ============
+
+function recordHistory({ userId, memoryId, op, beforeText = null, afterText = null, source = 'manual' }) {
+  db.prepare(
+    `INSERT INTO memory_ops (user_id, memory_id, op, before_text, after_text, candidates, source, applied, created_at)
+     VALUES (?, ?, ?, ?, ?, '[]', ?, 1, ?)`
+  ).run(userId, memoryId, op, beforeText, afterText, source, now());
+}
 
 function updateMemory({ id, userId, text, metadata }) {
   const existing = getMemoryRow(id, userId);
@@ -205,21 +212,37 @@ function updateMemory({ id, userId, text, metadata }) {
     db.prepare('UPDATE memories SET facts = NULL, entities = NULL WHERE id = ?').run(id);
     syncEmbedding(id, newText);
     syncFacts(id, newText);
+    recordHistory({ userId, memoryId: id, op: 'UPDATE', beforeText: existing.text, afterText: newText });
   }
   return toObj(getMemoryRow(id, userId));
 }
 
 function deleteMemory(id, userId) {
-  const res = db.prepare('DELETE FROM memories WHERE id = ? AND user_id = ?').run(id, userId);
-  return res.changes > 0;
+  const row = db.prepare('SELECT rowid AS rid, text FROM memories WHERE id = ? AND user_id = ?').get(id, userId);
+  if (!row) return false;
+  db.prepare('DELETE FROM memories WHERE id = ? AND user_id = ?').run(id, userId);
+  vec.remove(row.rid); // 向量索引同步清掉（不可用时静默）
+  recordHistory({ userId, memoryId: id, op: 'DELETE', beforeText: row.text });
+  return true;
 }
 
 // ============ 多维过滤 SQL ============
-// metadata：键值对象（如 {source:"claude-code"}）；created_at/updated_at：{gte, lte} 时间范围
+// metadata：键值对象（如 {source:"claude-code"}）；agent_id/run_id：精确匹配；
+// created_at/updated_at：{gte, lte} 时间范围；keywords：全文 LIKE
 function filtersClause(alias, filters = {}) {
   const a = alias ? `${alias}.` : '';
   const parts = [];
   const params = [];
+  for (const field of ['agent_id', 'run_id']) {
+    if (filters[field] !== undefined && filters[field] !== null) {
+      parts.push(`${a}${field} = ?`);
+      params.push(String(filters[field]));
+    }
+  }
+  if (filters.keywords !== undefined && String(filters.keywords).trim()) {
+    parts.push(`${a}text LIKE ?`);
+    params.push(`%${String(filters.keywords).trim()}%`);
+  }
   const meta = filters.metadata;
   if (meta && typeof meta === 'object' && !Array.isArray(meta)) {
     for (const [k, v] of Object.entries(meta)) {

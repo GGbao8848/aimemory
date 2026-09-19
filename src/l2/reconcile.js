@@ -226,11 +226,11 @@ async function judge({ facts, candidates, mode }) {
 // ============ 应用 ============
 
 /** 降级路径：不做比对，全部 ADD（等价于改动前的行为，0 token） */
-function insertAll({ userId, facts, metadata = {}, source, candidates = [] }) {
+function insertAll({ userId, facts, metadata = {}, source, candidates = [], agentId = null, runId = null }) {
   const stats = { added: 0, updated: 0, deleted: 0, noop: 0, skipped: 0, memoryIds: [] };
   const candIds = candidates.map((c) => c.id);
   for (const text of facts) {
-    const id = store.insertFact({ userId, text, metadata });
+    const id = store.insertFact({ userId, agentId, runId, text, metadata });
     stats.added += 1;
     stats.memoryIds.push(id);
     store.recordOp({ userId, memoryId: id, op: 'ADD', afterText: text, candidates: candIds, source });
@@ -238,7 +238,7 @@ function insertAll({ userId, facts, metadata = {}, source, candidates = [] }) {
   return stats;
 }
 
-function applyOps({ userId, facts, ops, candidates, source, metadata = {} }) {
+function applyOps({ userId, facts, ops, candidates, source, metadata = {}, agentId = null, runId = null }) {
   const stats = { added: 0, updated: 0, deleted: 0, noop: 0, skipped: 0, memoryIds: [] };
   const candIds = candidates.map((c) => c.id);
   let deletes = 0;
@@ -269,7 +269,7 @@ function applyOps({ userId, facts, ops, candidates, source, metadata = {} }) {
             store.recordOp({ userId, memoryId: o.targetId, op: 'DELETE', beforeText: before, candidates: candIds, source });
           }
         }
-        const id = store.insertFact({ userId, text, metadata });
+        const id = store.insertFact({ userId, agentId, runId, text, metadata });
         stats.added += 1;
         stats.memoryIds.push(id);
         store.recordOp({ userId, memoryId: id, op: 'ADD', afterText: text, candidates: candIds, source });
@@ -279,7 +279,7 @@ function applyOps({ userId, facts, ops, candidates, source, metadata = {} }) {
         const r = store.updateFact({ userId, id: o.targetId, text: o.text });
         if (!r) {
           // 目标在判定后被删掉 → 降级 ADD，不丢事实
-          const id = store.insertFact({ userId, text: o.text || text, metadata });
+          const id = store.insertFact({ userId, agentId, runId, text: o.text || text, metadata });
           stats.added += 1;
           stats.memoryIds.push(id);
           store.recordOp({ userId, memoryId: id, op: 'ADD', afterText: o.text || text, candidates: candIds, source });
@@ -290,7 +290,7 @@ function applyOps({ userId, facts, ops, candidates, source, metadata = {} }) {
         store.recordOp({ userId, memoryId: o.targetId, op: 'UPDATE', beforeText: r.before, afterText: r.after, candidates: candIds, source });
         return;
       }
-      const id = store.insertFact({ userId, text, metadata });
+      const id = store.insertFact({ userId, agentId, runId, text, metadata });
       stats.added += 1;
       stats.memoryIds.push(id);
       store.recordOp({ userId, memoryId: id, op: 'ADD', afterText: text, candidates: candIds, source });
@@ -320,7 +320,7 @@ async function reconcileFacts(args) {
   return serialized(() => _reconcileFacts(args));
 }
 
-async function _reconcileFacts({ userId, facts, source = 'add_memory', metadata = {}, mode = 'material', degrade = 'insert' }) {
+async function _reconcileFacts({ userId, facts, source = 'add_memory', metadata = {}, mode = 'material', degrade = 'insert', agentId = null, runId = null }) {
   const list = (facts || [])
     .map((s) => String(s == null ? '' : s).trim())
     .filter(Boolean)
@@ -334,7 +334,7 @@ async function _reconcileFacts({ userId, facts, source = 'add_memory', metadata 
       console.warn(`[l2] ${why} → 本轮跳过（不写入，等下轮重试）`);
       return { ...empty, degraded: true };
     }
-    return { ...insertAll({ userId, facts: list, metadata, source }), degraded: true };
+    return { ...insertAll({ userId, facts: list, metadata, source, agentId, runId }), degraded: true };
   };
 
   // 关闭消解或 LLM 不可用（素材路径：0 token 纯追加；派生路径：跳过）
@@ -344,7 +344,7 @@ async function _reconcileFacts({ userId, facts, source = 'add_memory', metadata 
     const candidates = gatherCandidates(userId, list);
     const ops = await judge({ facts: list, candidates, mode });
     if (!ops) return fallback('判定输出无法解析');
-    return { ...applyOps({ userId, facts: list, ops, candidates, source, metadata }), degraded: false };
+    return { ...applyOps({ userId, facts: list, ops, candidates, source, metadata, agentId, runId }), degraded: false };
   } catch (e) {
     return fallback(`冲突消解异常：${e.message}`);
   }

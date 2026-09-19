@@ -15,7 +15,7 @@ const { now, uuid } = require('./_common');
  * 库内只存提炼产物，不存原文。提炼失败 → 事件 failed（素材不落库）。
  * LLM 未启用（LLM_ENABLED=0）时直接拒绝，避免"收了素材却永远无法提炼"。
  */
-function createMemory({ userId, text, messages, metadata = {} }) {
+function createMemory({ userId, text, messages, metadata = {}, agentId = null, runId = null }) {
   if (!llm.enabled()) {
     throw new Error('LLM 提炼服务未启用（LLM_ENABLED=0），无法写入记忆');
   }
@@ -31,19 +31,19 @@ function createMemory({ userId, text, messages, metadata = {} }) {
   const eventId = createEvent({
     userId,
     eventType: 'add_memory',
-    payload: { kind, input, metadata: metadata || {} },
+    payload: { kind, input, metadata: metadata || {}, agent_id: agentId, run_id: runId },
   });
   return { event_id: eventId, status: 'pending', user_id: userId };
 }
 
 /**
- * 后台执行素材提炼入库（processEvent 调用，不阻塞 MCP 调用）。
+ * 后台执行素材提炼入库（processEvent 调用，不阻塞调用方）。
  * kind='messages'：input 为 [{role,content}] → 拼成对话文本；kind='text'：input 为原文。
  * 流程：LLM 提炼成事实 → **与已有记忆冲突消解**（ADD/UPDATE/DELETE/NOOP，见 src/l2/reconcile.js）→ 入库。
  * 提炼无产物/失败 → 抛错（调用方标记事件 failed，素材不落库）；
  * 消解失败则降级为纯追加，绝不让事实丢失。
  */
-async function processMemoryMaterial({ userId, kind, input, metadata = {} }) {
+async function processMemoryMaterial({ userId, kind, input, metadata = {}, agentId = null, runId = null }) {
   const source = kind === 'messages' && Array.isArray(input)
     ? input.map((m) => `${m.role}: ${m.content}`).join('\n')
     : String(input || '');
@@ -52,7 +52,7 @@ async function processMemoryMaterial({ userId, kind, input, metadata = {} }) {
   if (!extracted.length) throw new Error('LLM 未能从素材提炼出有效记忆（无产物，素材未入库）');
   // 延迟 require：l2 侧要用到本模块的记忆读取，写在顶部会形成循环依赖
   const { reconcileFacts } = require('../../l2/reconcile');
-  const r = await reconcileFacts({ userId, facts: extracted, source: 'add_memory', metadata, mode: 'material' });
+  const r = await reconcileFacts({ userId, facts: extracted, source: 'add_memory', metadata, mode: 'material', agentId, runId });
   const created = r.memoryIds.map((id) => memories.getMemory(id, userId)).filter(Boolean);
   return { created, ops: r };
 }
@@ -105,6 +105,27 @@ function getEvent(id, userId) {
   };
 }
 
+/** 批量删除（DELETE /v1/memories/ 异步执行体）：按作用域删除并逐条留历史 */
+function processDeleteAll({ userId, agentId, runId }) {
+  const where = ['user_id = ?'];
+  const params = [userId];
+  // mem0 语义：'*' = 该维度全选；未提供 = 不按该维度过滤
+  if (agentId !== undefined && agentId !== '*') { where.push('agent_id = ?'); params.push(agentId); }
+  if (agentId === '*') where.push('agent_id IS NOT NULL');
+  if (runId !== undefined && runId !== '*') { where.push('run_id = ?'); params.push(runId); }
+  if (runId === '*') where.push('run_id IS NOT NULL');
+  const rows = db.prepare(`SELECT id, rowid AS rid, text FROM memories WHERE ${where.join(' AND ')}`).all(...params);
+  for (const r of rows) {
+    db.prepare('DELETE FROM memories WHERE id = ?').run(r.id);
+    require('../../l2/vec').remove(r.rid);
+    require('../../l2/store').recordOp({
+      userId, memoryId: r.id, op: 'DELETE', beforeText: r.text,
+      candidates: [], source: 'delete_all',
+    });
+  }
+  return { count: rows.length, memoryIds: [] };
+}
+
 /** 处理一个 pending 任务：素材 → LLM 提炼 → 逐条入库（仅提炼产物）。失败/无产物 → failed。 */
 async function processEvent(event) {
   const userId = event.user_id;
@@ -112,8 +133,14 @@ async function processEvent(event) {
   const p = JSON.parse(event.payload || '{}');
   db.prepare("UPDATE events SET status='processing', updated_at=? WHERE id=?").run(now(), id);
   try {
+    if (event.event_type === 'delete_memories') {
+      const r = processDeleteAll({ userId, agentId: p.agent_id, runId: p.run_id });
+      db.prepare("UPDATE events SET status='done', result=?, updated_at=? WHERE id=?")
+        .run(JSON.stringify({ count: r.count, memories: [] }), now(), id);
+      return getEvent(id, userId);
+    }
     const { created, ops } = await processMemoryMaterial({
-      userId, kind: p.kind, input: p.input, metadata: p.metadata,
+      userId, kind: p.kind, input: p.input, metadata: p.metadata, agentId: p.agent_id, runId: p.run_id,
     });
     // ops 记录消解明细：count=0 时也能看出"不是没干活，而是素材里的东西都已记住"，
     // 前端/agent 可据此区分「已存在（NOOP）」与「空产出」。
