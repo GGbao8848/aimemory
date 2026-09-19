@@ -1,7 +1,7 @@
 'use strict';
 
 // 密钥泄漏防线（回归守护）：
-// 1) src/ collector/ scripts/ 不得出现硬编码凭据形态的字符串（密钥一律走 .env）；
+// 1) src/ collector/ scripts/ web/ 不得出现硬编码凭据形态的字符串（密钥一律走 .env）；
 // 2) .env 不被 git 跟踪，.env.example 模板的密钥值留空。
 // 背景：LLM_API_KEY 曾被硬编码进 src/config.js 且已进入推送历史（docs/复盘-2026-09-19-剪枝.md）。
 const test = require('node:test');
@@ -12,6 +12,7 @@ const { execSync } = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..');
 const SCAN_DIRS = ['src', 'collector', 'scripts'];
+const WEB_DIR = 'web'; // 前端源码同样不得硬编码凭据；构建产物 dist 是打包结果，跳过
 
 const SECRET_PATTERNS = [
   [/\b[0-9a-f]{32,}\b/, '长十六进制串（疑似 API key）'],
@@ -22,8 +23,8 @@ function walk(dir, out = []) {
   for (const name of fs.readdirSync(dir)) {
     const p = path.join(dir, name);
     if (fs.statSync(p).isDirectory()) {
-      if (name !== 'node_modules') walk(p, out);
-    } else if (/\.(js|mjs|cjs|sh)$/.test(name)) {
+      if (name !== 'node_modules' && name !== 'dist') walk(p, out);
+    } else if (/\.(js|mjs|cjs|sh|ts|tsx)$/.test(name)) {
       out.push(p);
     }
   }
@@ -31,7 +32,7 @@ function walk(dir, out = []) {
 }
 
 test('源代码不含硬编码密钥形态字符串', () => {
-  const files = SCAN_DIRS.flatMap((d) => walk(path.join(ROOT, d)));
+  const files = [...SCAN_DIRS, WEB_DIR].flatMap((d) => walk(path.join(ROOT, d)));
   assert.ok(files.length > 10, '扫描目标不应为空');
   const offenders = [];
   for (const f of files) {

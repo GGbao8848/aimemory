@@ -62,13 +62,18 @@ app.get('/skill/SKILL.md', (_req, res) => {
 });
 
 // ===== 静态资源 =====
-// `/admin`  管理控制台（记忆列表 / Token / 会话归档下钻 / 操作审计 / L3 画像）。
-// 管理台的资源引用是绝对路径（/style.css、/app.js、/icon-*.png），由下面的 static 兜底解析。
-// 产品主前端由独立仓库另行构建，直连 /api/* 与 /mcp（契约见 docs/api/openapi.json）。
-app.get('/admin', (_req, res) =>
-  res.sendFile(path.join(__dirname, 'web', 'static', 'index.html'))
-);
-app.use(express.static(path.join(__dirname, 'web', 'static')));
+// 管理台是 web/（React + Vite + TS）的构建产物：`/admin` 与 `/` 指向同一个 SPA。
+// 契约仍只有 REST /api/*（openapi 守护）；产品前端如另建，直连 /api 与 /mcp 即可。
+const WEB_DIST = path.join(config.root, 'web', 'dist');
+const WEB_BUILD_FILE = path.join(WEB_DIST, 'index.html');
+if (fs.existsSync(WEB_BUILD_FILE)) {
+  app.get('/admin', (_req, res) => res.sendFile(WEB_BUILD_FILE));
+  // 登录成功后的跳转落在 `/`，故 SPA 同时挂在根路径（/api、/mcp、/auth 等显式路由优先匹配）
+  app.use(express.static(WEB_DIST));
+} else {
+  const hint = '前端未构建：仓库根执行 npm run web:install && npm run web:build（Docker 镜像内已自动构建）';
+  app.get(['/admin', '/'], (_req, res) => res.status(503).type('text/plain; charset=utf-8').send(hint));
+}
 
 // ===== MCP 端点（Streamable HTTP）=====
 app.post('/mcp', handleMcpRequest);

@@ -13,3 +13,6 @@ data/l0/
 
 # 浏览器 GUI 测试截图产物（体积大、零引用，不入库）
 gui-test-screenshots/
+
+# 管理台前端构建产物（npm run web:build 生成；镜像内构建，不入库）
+web/dist/
