@@ -2,12 +2,7 @@
 
 /**
  * 管理台前端（web/）的纯逻辑守护：Node 原生类型擦除直接 require .ts 模块。
- * 锁住的是「层级下钻」这一明确需求（原 test/l0-archive-view.test.js 用 DOM stub 验的东西）：
- *   - 未选设备：agent 卡与会话卡都不出现
- *   - 选了设备：出现 agent 卡，会话卡仍不出现
- *   - 再选 agent：会话卡才出现，且只含该 agent 的会话
- *   - 换设备必须清空 agent（否则把 A 机的 agent 当成 B 机的筛选）
- * 以及展示格式与 MCP 配置生成的三种 Token 状态。
+ * 锁住三块：记忆视图的作用域过滤/事件映射、展示格式、MCP 配置生成的三种 Token 状态。
  */
 
 const test = require('node:test');
@@ -16,111 +11,61 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const LIB = path.join(__dirname, '..', 'web', 'src', 'lib');
-const archive = require(path.join(LIB, 'archive.ts'));
 const format = require(path.join(LIB, 'format.ts'));
 const mcp = require(path.join(LIB, 'mcp-config.ts'));
+const memories = require(path.join(LIB, 'memories.ts'));
 
-const SESSIONS = [
-  { agent: 'codex', session_id: 'a-c1', device_code: 'dev_A', records: 10, bytes: 1000, first_received: '2026-09-18T07:00:00Z', last_received: '2026-09-18T07:30:00Z' },
-  { agent: 'codex', session_id: 'a-c2', device_code: 'dev_A', records: 10, bytes: 1000, first_received: '2026-09-18T07:40:00Z', last_received: '2026-09-18T07:50:00Z' },
-  { agent: 'zcode', session_id: 'b-z1', device_code: 'dev_B', records: 10, bytes: 1000, first_received: '2026-09-18T08:10:00Z', last_received: '2026-09-18T08:20:00Z' },
-  { agent: 'codex', session_id: 'b-c1', device_code: 'dev_B', records: 10, bytes: 1000, first_received: '2026-09-18T08:30:00Z', last_received: '2026-09-18T08:40:00Z' },
-  { agent: 'codex', session_id: 'b-c2', device_code: 'dev_B', records: 10, bytes: 1500, first_received: '2026-09-18T08:45:00Z', last_received: '2026-09-18T08:50:00Z' },
+const MEM = [
+  { id: '1', text: 'a', agent_id: 'zcode', run_id: 's1', metadata: {}, updated_at: '2026-09-18T07:00:00Z' },
+  { id: '2', text: 'b', agent_id: 'claude', run_id: null, metadata: {}, updated_at: '2026-09-18T08:00:00Z' },
+  { id: '3', text: 'c', agent_id: 'zcode', run_id: 's2', metadata: {}, updated_at: '2026-09-18T09:00:00Z' },
+  { id: '4', text: 'd', agent_id: null, run_id: null, metadata: {}, updated_at: '2026-09-18T10:00:00Z' },
 ];
 
-const DEVICES = [
-  { device_code: 'dev_A', label: '笔记本', agents: ['codex'], info: { platform: 'darwin' }, sessions: 2, records: 20, bytes: 2000, last_seen: '2026-09-18T08:00:00Z' },
-  { device_code: 'dev_B', label: '服务器', agents: ['zcode', 'codex'], info: { platform: 'linux' }, sessions: 3, records: 30, bytes: 3500, last_seen: '2026-09-18T09:00:00Z' },
-];
-
-const forDevice = (code) => SESSIONS.filter((s) => s.device_code === code);
-
-test('层级1：未选设备时 agent 卡与会话卡都不可见', () => {
-  const shown = archive.layersVisible(archive.emptyFilter);
-  assert.strictEqual(shown.agents, false);
-  assert.strictEqual(shown.sessions, false);
-  assert.deepStrictEqual(archive.visibleSessions(SESSIONS, archive.emptyFilter), [], '未选设备不应列出任何会话');
+test('作用域聚合：提取出现过的 agent/run，去重且保持出现顺序', () => {
+  const s = memories.scopeOptions(MEM);
+  assert.deepStrictEqual(s.agents, ['zcode', 'claude']);
+  assert.deepStrictEqual(s.runs, ['s1', 's2']);
+  assert.deepStrictEqual(memories.scopeOptions([]), { agents: [], runs: [] });
 });
 
-test('层级2：选中设备后出现 agent 层级，会话层级仍收起', () => {
-  const f = archive.toggleDevice(archive.emptyFilter, 'dev_B');
-  const shown = archive.layersVisible(f);
-  assert.strictEqual(shown.agents, true);
-  assert.strictEqual(shown.sessions, false);
-  assert.strictEqual(archive.aggregateAgents(forDevice('dev_B')).length, 2, 'dev_B 有 2 个 agent');
-  assert.strictEqual(archive.deviceName(DEVICES, 'dev_B'), '服务器', '标题用设备名而非设备码');
+test('作用域过滤：null 维度不限制，双维度取交集', () => {
+  assert.strictEqual(memories.filterByScope(MEM, memories.ALL_SCOPE).length, 4);
+  assert.deepStrictEqual(
+    memories.filterByScope(MEM, { agentId: 'zcode', runId: null }).map((m) => m.id),
+    ['1', '3'],
+  );
+  assert.deepStrictEqual(
+    memories.filterByScope(MEM, { agentId: 'zcode', runId: 's2' }).map((m) => m.id),
+    ['3'],
+  );
+  assert.deepStrictEqual(
+    memories.filterByScope(MEM, { agentId: null, runId: 's1' }).map((m) => m.id),
+    ['1'],
+  );
 });
 
-test('层级3：选中 agent 后才会话列表出现，且只含该 agent 的会话', () => {
-  let f = archive.toggleDevice(archive.emptyFilter, 'dev_B');
-  f = archive.toggleAgent(f, 'codex');
-  assert.strictEqual(archive.layersVisible(f).sessions, true);
-  const rows = archive.visibleSessions(forDevice('dev_B'), f);
-  assert.strictEqual(rows.length, 2, 'dev_B 的 codex 有 2 个会话');
-  assert.ok(!rows.some((r) => r.session_id === 'b-z1'), '不应混入 zcode 的会话');
+test('历史事件映射：三类操作有标签与配色，未知事件原样兜底', () => {
+  assert.deepStrictEqual(memories.historyMeta('ADD'), { label: '新增', variant: 'default' });
+  assert.deepStrictEqual(memories.historyMeta('UPDATE'), { label: '更新', variant: 'secondary' });
+  assert.deepStrictEqual(memories.historyMeta('DELETE'), { label: '删除', variant: 'destructive' });
+  assert.strictEqual(memories.historyMeta('WEIRD').label, 'WEIRD');
 });
 
-test('会话条目不串台：切到 zcode 只列 zcode 会话', () => {
-  let f = archive.toggleDevice(archive.emptyFilter, 'dev_B');
-  f = archive.toggleAgent(f, 'codex');
-  f = archive.toggleAgent(f, 'zcode');
-  const rows = archive.visibleSessions(forDevice('dev_B'), f);
-  assert.deepStrictEqual(rows.map((r) => r.session_id), ['b-z1']);
+test('事件状态文案：异步提炼的四种状态 + 未知兜底', () => {
+  assert.strictEqual(memories.eventStatusLabel('pending'), '排队中');
+  assert.strictEqual(memories.eventStatusLabel('processing'), '提炼中');
+  assert.strictEqual(memories.eventStatusLabel('done'), '已入库');
+  assert.strictEqual(memories.eventStatusLabel('failed'), '提炼失败');
+  assert.strictEqual(memories.eventStatusLabel(null), '—');
+  assert.strictEqual(memories.eventStatusLabel('other'), 'other');
 });
 
-test('切换设备时下级选择被清空（agent 与设备强绑定）', () => {
-  let f = archive.toggleDevice(archive.emptyFilter, 'dev_A');
-  f = archive.toggleAgent(f, 'codex');
-  assert.strictEqual(f.agent, 'codex');
-  f = archive.toggleDevice(f, 'dev_B');
-  assert.strictEqual(f.device, 'dev_B');
-  assert.strictEqual(f.agent, null, '换设备后 agent 必须清空，否则会把 A 机的 agent 当成 B 机的筛选');
-  assert.strictEqual(archive.layersVisible(f).sessions, false, '换设备后会话层级应收起，等待重选 agent');
-});
-
-test('再点同一设备/agent 收起本级选择', () => {
-  let f = archive.toggleDevice(archive.emptyFilter, 'dev_B');
-  f = archive.toggleDevice(f, 'dev_B');
-  assert.strictEqual(f.device, null, '再点同一设备收起');
-  f = archive.toggleDevice(archive.emptyFilter, 'dev_B');
-  const g = archive.toggleAgent(archive.toggleAgent(f, 'codex'), 'codex');
-  assert.strictEqual(g.agent, null, '再点同一 agent 收起');
-  assert.strictEqual(g.device, 'dev_B', '收起 agent 不影响已选设备');
-});
-
-test('agent 聚合：按会话数/条数汇总，且按最近时间倒序', () => {
-  const ag = archive.aggregateAgents(forDevice('dev_B'));
-  const byName = Object.fromEntries(ag.map((a) => [a.agent, a]));
-  assert.strictEqual(byName.codex.sessions, 2);
-  assert.strictEqual(byName.codex.records, 20);
-  assert.strictEqual(byName.zcode.sessions, 1);
-  assert.strictEqual(byName.zcode.records, 10);
-  assert.strictEqual(ag[0].agent, 'codex', 'b-c2 最新（08:50）应排在 zcode（08:20）之前');
-  assert.strictEqual(byName.codex.bytes, 2500);
-});
-
-test('空聚合不报错（新设备尚无会话）', () => {
-  assert.deepStrictEqual(archive.aggregateAgents([]), []);
-  assert.strictEqual(archive.totalBytes([]), 0);
-});
-
-test('展示格式：字节 / 时间 / agent 名 / 角色名', () => {
-  assert.strictEqual(format.fmtBytes(0), '0 B');
-  assert.strictEqual(format.fmtBytes(999), '999 B');
-  assert.strictEqual(format.fmtBytes(2048), '2.0 KB');
-  assert.strictEqual(format.fmtBytes(5 * 1024 * 1024), '5.0 MB');
-  assert.strictEqual(format.fmtBytes(3 * 1024 * 1024 * 1024), '3.0 GB');
-  assert.strictEqual(format.fmtBytes(null), '0 B');
+test('展示格式：时间', () => {
   assert.strictEqual(format.fmtTime(null), '—');
   assert.strictEqual(format.fmtTime('not-a-date'), 'not-a-date', '无法解析的时间原样返回，不显示 Invalid Date');
   assert.strictEqual(format.fmtCompactTime('2026-09-19T04:12:33Z'), '09-19 04:12');
-  assert.strictEqual(format.agentLabel('codex'), 'Codex');
-  assert.strictEqual(format.agentLabel('claude'), 'Claude Code');
-  assert.strictEqual(format.agentLabel('custom-agent'), 'custom-agent', '未知 agent 原样显示');
-  assert.strictEqual(format.roleLabel('user'), '用户');
-  assert.strictEqual(format.roleLabel(undefined), '元信息');
-  assert.strictEqual(format.fingerprintLabel('machine-id'), '系统安装标识');
-  assert.strictEqual(format.fingerprintLabel('weird'), 'weird');
+  assert.strictEqual(format.fmtCompactTime(null), '—');
 });
 
 test('MCP 配置：有明文→完整可用；有 Token 无明文→占位；无 Token→不带 headers', () => {

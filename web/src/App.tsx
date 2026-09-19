@@ -1,29 +1,38 @@
+import { Toaster } from 'sonner';
 import { useEffect, useState } from 'react';
 import { get, onUnauthorized } from './api/client';
 import { endpoints, type Me } from './api/contract';
 import Sidebar from './components/Sidebar';
-import { ToastProvider } from './components/Toast';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { VIEWS, type ViewName } from './views/config';
 import MemoriesView from './views/MemoriesView';
 import KeysView from './views/KeysView';
-import ArchiveView from './views/ArchiveView';
-import OpsView from './views/OpsView';
-import L3View from './views/L3View';
 import GuideView from './views/GuideView';
 
 function LoginView() {
   return (
-    <section className="login-wrap">
-      <div className="card login-card">
-        <img className="login-logo" src="/icon-128.png" alt="aimemory" />
-        <h1>登录记忆平台</h1>
-        <p className="muted">输入访问口令以管理你的记忆、会话归档与接入 Token。</p>
-        <form className="login-form" method="POST" action="/auth/local-login">
-          <input name="password" type="password" placeholder="访问口令" autoComplete="current-password" required autoFocus />
-          <button className="btn btn-primary btn-block" type="submit">登录</button>
+    <div className="flex min-h-screen items-center justify-center p-6">
+      <Card className="w-full max-w-sm gap-5 p-8">
+        <div className="flex flex-col items-center gap-2 text-center">
+          <img className="size-14 rounded-xl" src="/icon-128.png" alt="aimemory" />
+          <h1 className="text-lg font-semibold">登录记忆库</h1>
+          <p className="text-muted-foreground text-sm">输入访问口令以管理你的记忆。</p>
+        </div>
+        <form className="flex flex-col gap-3" method="POST" action="/auth/local-login">
+          <Input
+            name="password"
+            type="password"
+            placeholder="访问口令"
+            autoComplete="current-password"
+            required
+            autoFocus
+          />
+          <Button type="submit" className="w-full">登录</Button>
         </form>
-      </div>
-    </section>
+      </Card>
+    </div>
   );
 }
 
@@ -47,23 +56,19 @@ export default function App() {
   const active = (name: ViewName) => ({ active: view === name });
 
   return (
-    <ToastProvider>
-      <div className="app">
-        <Sidebar active={view} onNavigate={setView} userName={me.username || '我'} />
-        <main className="main">
-          <header className="main-head">
-            <h1>{meta.title}</h1>
-            <p className="sub">{meta.sub}</p>
-          </header>
-          {/* 六个视图常驻挂载（只切显隐）：Token 一次性明文、归档下钻选择等状态跨视图切换不丢 */}
-          <MemoriesView {...active('memories')} />
-          <KeysView {...active('keys')} />
-          <ArchiveView {...active('sessions')} />
-          <OpsView {...active('ops')} />
-          <L3View {...active('l3')} />
-          <GuideView {...active('guide')} />
-        </main>
-      </div>
-    </ToastProvider>
+    <div className="flex min-h-screen">
+      <Sidebar active={view} onNavigate={setView} userName={me.username || '我'} />
+      <main className="flex min-w-0 flex-1 flex-col gap-4 p-6">
+        <header>
+          <h1 className="text-lg font-semibold">{meta.title}</h1>
+          <p className="text-muted-foreground text-sm">{meta.sub}</p>
+        </header>
+        {/* 三个视图常驻挂载（只切显隐）：Token 一次性明文等跨视图状态不丢 */}
+        <MemoriesView {...active('memories')} />
+        <KeysView {...active('keys')} />
+        <GuideView {...active('guide')} />
+      </main>
+      <Toaster position="top-center" />
+    </div>
   );
 }

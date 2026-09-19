@@ -17,22 +17,14 @@ export const endpoints = {
   event: (id: string) => withId(path('/api/events/{id}'), id),
   keys: () => path('/api/keys'),
   keyRevoke: (id: string) => withId(path('/api/keys/{id}/revoke'), id),
-  l0Stats: () => path('/api/l0/stats'),
-  l0Session: () => path('/api/l0/session'),
-  l2Ops: () => path('/api/l2/ops'),
-  l3Entries: () => path('/api/l3/entries'),
-  l3Entry: (id: string) => withId(path('/api/l3/entries/{id}'), id),
-  l3History: () => path('/api/l3/history'),
-  l3Stats: () => path('/api/l3/stats'),
 };
 
 export type {
   Memory,
   MemoryListResult,
   EventStatus,
-  L1Summary,
-  L3Entry,
-  L3History,
+  Mem0Memory,
+  Mem0HistoryEntry,
   Stats,
   KeyInfo,
 } from '../../../docs/api/aimemory-api';
@@ -41,25 +33,6 @@ export interface Me {
   userId: string;
   username: string | null;
   via: 'token' | 'session';
-}
-
-/** L2 冲突消解审计行（memory_ops） */
-export interface OpRow {
-  id?: string;
-  op: 'ADD' | 'UPDATE' | 'DELETE' | 'NOOP' | string;
-  before_text: string | null;
-  after_text: string | null;
-  source: string | null;
-  applied?: boolean;
-  created_at: string | null;
-}
-
-/** L3 规模统计（active / 已取代 / 平均有效置信 / 待凝练） */
-export interface L3Stats {
-  active: number;
-  superseded: number;
-  effective_confidence?: number | null;
-  pending?: number;
 }
 
 /** 素材受理回执：202 + event_id，需轮询到 done/failed */

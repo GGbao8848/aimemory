@@ -1,52 +1,106 @@
+import { CheckIcon, CopyIcon } from 'lucide-react';
+import { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { copyText } from '../lib/dom';
+
+const BASE = typeof window !== 'undefined' ? window.location.origin : 'http://127.0.0.1:18543';
+
+const REST_EXAMPLES: { title: string; desc: string; code: string }[] = [
+  {
+    title: '写入记忆（异步提炼）',
+    desc: 'messages 或 text 二选一；返回 event_id，用 GET /v1/event/{event_id} 轮询到 done/failed。',
+    code: `curl -X POST ${BASE}/v1/memories/ \\
+  -H "Authorization: Token m0-xxx" -H "Content-Type: application/json" \\
+  -d '{"messages":[{"role":"user","content":"我们把网关迁到了 10.10.10.146"}],
+       "user_id":"owner","agent_id":"zcode","run_id":"session-42"}'`,
+  },
+  {
+    title: '写入记忆（原文直存，不经 LLM）',
+    desc: 'infer=false 同步返回 results，适合已有明确结论的场景。',
+    code: `curl -X POST ${BASE}/v1/memories/ \\
+  -H "Authorization: Token m0-xxx" -H "Content-Type: application/json" \\
+  -d '{"text":"部署端口钉死 18543","user_id":"owner","infer":false}'`,
+  },
+  {
+    title: '语义检索',
+    desc: '混合检索：向量语义 + FTS 关键词；filters 至少含一个实体维度。',
+    code: `curl -X POST ${BASE}/v2/memories/search/ \\
+  -H "Authorization: Token m0-xxx" -H "Content-Type: application/json" \\
+  -d '{"query":"网关部署在哪","filters":{"user_id":"owner"},"top_k":5}'`,
+  },
+  {
+    title: '列出 / 更新 / 删除 / 历史',
+    desc: 'get_all 分页（count/next/previous）；update 与 delete 都会写入变更历史。',
+    code: `curl -X POST ${BASE}/v2/memories/ \\
+  -H "Authorization: Token m0-xxx" -H "Content-Type: application/json" \\
+  -d '{"filters":{"user_id":"owner","agent_id":"zcode"},"page":1,"page_size":20}'
+
+curl -X PUT ${BASE}/v1/memories/<id>/ \\
+  -H "Authorization: Token m0-xxx" -H "Content-Type: application/json" \\
+  -d '{"text":"更新后的记忆文本"}'
+
+curl -X DELETE ${BASE}/v1/memories/<id>/ -H "Authorization: Token m0-xxx"
+
+curl ${BASE}/v1/memories/<id>/history/ -H "Authorization: Token m0-xxx"`,
+  },
+];
+
+function CodeBlock({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await copyText(code);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch { /* 浏览器限制时静默 */ }
+  };
+  return (
+    <div className="relative">
+      <pre className="bg-muted overflow-x-auto rounded-md p-3 pr-12 font-mono text-xs leading-relaxed">{code}</pre>
+      <Button variant="ghost" size="icon" className="absolute top-1.5 right-1.5" onClick={copy} aria-label="复制">
+        {copied ? <CheckIcon /> : <CopyIcon />}
+      </Button>
+    </div>
+  );
+}
+
 export default function GuideView({ active }: { active: boolean }) {
   return (
-    <section className={active ? 'view view-active' : 'view'}>
-      <div className="card">
-        <h2>📦 配套技能下载</h2>
-        <p className="muted">
-          零内部代码、零敏感配置，只描述记忆库工具编排与沉淀/召回流程。下载后放入 skills 目录或上传安装，agent
-          即自动获得记忆读写能力（含 <code>aimemory</code> 管理 / <code>aimemory-recall</code> 自动召回 /{' '}
-          <code>aimemory-remember</code> 自动沉淀，以及 <code>aimemory-collector</code> 会话自动备份部署）。技能源码同仓维护：
-          <a href="https://github.com/GGbao8848/aimemory" target="_blank" rel="noopener"> GitHub · skills/</a>
-        </p>
-        <div className="skill-dl-actions">
-          <a className="btn btn-primary" href="/skill/download" download>⬇ 下载 Skill（zip）</a>
-          <a className="btn btn-ghost" href="/skill/SKILL.md" target="_blank" rel="noopener">查看 SKILL.md</a>
-        </div>
-      </div>
+    <div className={active ? 'flex flex-col gap-4' : 'hidden'}>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">鉴权方式</CardTitle>
+          <CardDescription>
+            与 mem0 相同的 Token 头：<code className="font-mono">Authorization: Token m0-xxx</code>
+            （在「接入 Token」页签发）。本服务为个人自托管：记忆归属 Token 持有者，
+            user_id 必须省略或与之一致；agent_id / run_id 是自由标签维度，用于区分写入来源。
+          </CardDescription>
+        </CardHeader>
+      </Card>
 
-      <div className="card">
-        <h2>🔌 MCP 接入步骤</h2>
-        <ol className="steps">
-          <li>
-            <b>签发 Token</b>：登录后切到「接入 Token」，<b>填写名称</b>（必填）新建一枚；建议为每个客户端分别新建（命名区分），
-            明文在创建响应里给出一次，请立即复制保存
-          </li>
-          <li><b>复制配置</b>：「MCP 配置」里复制完整 JSON（含本次新建的 Token），或切「手动模式」按字段复制</li>
-          <li><b>填入客户端</b>：把 JSON 或字段粘贴到你的 agent 的 MCP 客户端配置（Claude Code / Codex / BR-Agent 自定义连接器…）</li>
-          <li><b>验证</b>：agent 调用 <code>add_memory</code> 提交一条素材（等 AI 提炼完成后），再到本平台「我的记忆」确认</li>
-        </ol>
-        <p className="muted small">
-          可同时持有多枚 Token，按客户端 / 设备分发、单独吊销；任一枚泄露只波及它自己。MCP 端点：
-          <code>http://&lt;服务器内网IP&gt;:18543/mcp</code>
-        </p>
-      </div>
+      {REST_EXAMPLES.map((ex) => (
+        <Card key={ex.title}>
+          <CardHeader>
+            <CardTitle className="text-base">{ex.title}</CardTitle>
+            <CardDescription>{ex.desc}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <CodeBlock code={ex.code} />
+          </CardContent>
+        </Card>
+      ))}
 
-      <div className="card">
-        <h2>🧰 MCP 工具一览</h2>
-        <ul className="tool-list">
-          <li><code>add_memory</code> — 提交素材（text / messages），AI 提炼成记忆后入库</li>
-          <li><code>get_event_status</code> — 查询素材提炼状态（提炼需数秒）</li>
-          <li><code>search_memories</code> — 语义 + 关键词混合检索（支持中文子串）</li>
-          <li><code>get_memories</code> / <code>get_memory</code> — 列出 / 查看单条</li>
-          <li><code>update_memory</code> / <code>delete_memory</code> — 修正 / 删除</li>
-          <li><code>list_session_summaries</code> / <code>get_session_summary</code> — L1 会话摘要</li>
-          <li><code>recall_context</code> — L3 画像只读注入（零 LLM）</li>
-        </ul>
-        <p className="muted small">
-          所有记忆归属同一个账本，跨设备、跨 agent 共享。
-        </p>
-      </div>
-    </section>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">MCP 接入（agent 端）</CardTitle>
+          <CardDescription>
+            端点 <code className="font-mono">{BASE}/mcp</code>（Streamable HTTP），7 个工具：
+            add_memory / get_event_status / search_memories / get_memories / get_memory / update_memory / delete_memory。
+            完整配置模板见「接入 Token」页。
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    </div>
   );
 }

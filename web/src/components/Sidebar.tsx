@@ -1,7 +1,10 @@
+import { BookOpenText, KeyRound, Moon, Sun, BrainCircuit, LogOut } from 'lucide-react';
 import { useState } from 'react';
-import { LogoutIcon, MoonIcon, SunIcon } from './Icons.tsx';
-import { VIEWS, type ViewName } from '../views/config.ts';
-import { applyTheme, currentTheme, type Theme } from '../lib/dom.ts';
+import { VIEWS, type ViewName } from '../views/config';
+import { applyTheme, currentTheme, type Theme } from '../lib/dom';
+import { Button } from '@/components/ui/button';
+
+const VIEW_ICONS = { memories: BrainCircuit, keys: KeyRound, guide: BookOpenText } as const;
 
 interface Props {
   active: ViewName;
@@ -19,44 +22,43 @@ export default function Sidebar({ active, onNavigate, userName }: Props) {
   };
 
   return (
-    <aside className="sidebar">
-      <div className="brand">
-        <img className="brand-logo" src="/icon-128.png" alt="aimemory" />
-        <div className="brand-text">
-          <strong>aimemory</strong>
-          <span>个人 AI 记忆库</span>
+    <aside className="flex w-56 shrink-0 flex-col gap-2 border-r bg-card p-4">
+      <div className="mb-4 flex items-center gap-3 px-1">
+        <img className="size-10 rounded-lg" src="/icon-128.png" alt="aimemory" />
+        <div className="leading-tight">
+          <strong className="block text-sm">aimemory</strong>
+          <span className="text-muted-foreground text-xs">mem0 形态记忆库</span>
         </div>
       </div>
 
-      <nav className="nav" aria-label="主导航">
-        {VIEWS.map(({ name, nav, Icon }) => (
-          <button
-            key={name}
-            type="button"
-            className={name === active ? 'nav-item active' : 'nav-item'}
-            onClick={() => onNavigate(name)}
-          >
-            <Icon className="nav-ico" />
-            <span>{nav}</span>
-          </button>
-        ))}
+      <nav className="flex flex-col gap-1" aria-label="主导航">
+        {VIEWS.map(({ name, nav }) => {
+          const Icon = VIEW_ICONS[name];
+          return (
+            <Button
+              key={name}
+              variant={name === active ? 'secondary' : 'ghost'}
+              className="justify-start"
+              onClick={() => onNavigate(name)}
+            >
+              <Icon className="size-4" />
+              <span>{nav}</span>
+            </Button>
+          );
+        })}
       </nav>
 
-      <div className="sidebar-foot">
-        <button type="button" className="theme-toggle" onClick={toggleTheme} aria-label="切换亮暗模式">
-          <SunIcon className="ico ico-sun" />
-          <MoonIcon className="ico ico-moon" />
-          <span className="lbl-sun">亮色模式</span>
-          <span className="lbl-moon">暗色模式</span>
-        </button>
-        <div className="user-chip">
-          <span className="who-dot" aria-hidden="true" />
-          <span className="who">{userName}</span>
-        </div>
-        <a className="logout" href="/auth/logout">
-          <LogoutIcon className="nav-ico" />
-          <span>退出登录</span>
-        </a>
+      <div className="mt-auto flex flex-col gap-1 border-t pt-3">
+        <Button variant="ghost" className="justify-start" onClick={toggleTheme} aria-label="切换亮暗模式">
+          {theme === 'light' ? <Moon className="size-4" /> : <Sun className="size-4" />}
+          <span>{theme === 'light' ? '暗色模式' : '亮色模式'}</span>
+        </Button>
+        <Button variant="ghost" className="text-muted-foreground justify-start" asChild>
+          <a href="/auth/logout">
+            <LogOut className="size-4" />
+            <span>退出（{userName}）</span>
+          </a>
+        </Button>
       </div>
     </aside>
   );
