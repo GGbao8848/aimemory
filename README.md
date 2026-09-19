@@ -146,7 +146,7 @@ curl http://localhost:18543/v1/memories/<id>/history/ -H "Authorization: Token m
 
 ## 关联
 
-- **配套 Skills**：本仓库 `skills/`（aimemory 管理 / aimemory-recall 召回 / aimemory-remember 沉淀），
-  Web「接入指南」页可下载 zip。
+- **配套 Skill**：本仓库 `skills/aimemory/`（单一入口，`references/` 下按需读召回/沉淀/管理三篇），
+  Web 可访问 `GET /skill/SKILL.md` 预览、`GET /skill/download` 打包下载。
 - **历史版本**：四层架构（L0/L1/L2/L3）与多租户实现分别封存在 git 历史与 `multi-tenant` 分支；
   层级设计文档保留在 `docs/` 作为存档（L0/L2/L3 文档描述的机制已不在 main）。

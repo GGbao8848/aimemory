@@ -1,46 +1,55 @@
 ---
 name: aimemory
-description: aimemory 记忆库管理入口——检索、列出、查看、更新、删除记忆，管理记忆库数据。适用时机：用户想"查我的记忆/看记忆库/搜索记忆/列出记忆/修改某条记忆/删除记忆/清空记忆/导入导出记忆"，或询问"我记得什么/我的记忆里有没有 X"。涉及记忆库的增删改查都走本 skill。纯对话式加载历史记忆用 aimemory-recall，主动保存用 aimemory-remember。
+description: aimemory 个人记忆库的统一入口——检索/注入历史记忆、沉淀新记忆、管理记忆库数据。适用时机：开始新任务或切换上下文时预取相关记忆；用户说"记住/别忘了/记一下"或给出持久偏好/决策/配置；用户问"我记得什么/我的记忆里有没有 X/之前/上次"；以及查、改、删、导出记忆或管理接入 Token。涉及 aimemory 记忆库的一切操作都走本 skill。
 metadata:
   cli_version: ">=0.2.14"
   category: memory
 user-invocable: true
 ---
 
-# aimemory（记忆库管理）
+# aimemory（个人记忆库）
 
-aimemory 是自托管的 AI 记忆库（mem0 兼容 MCP），语义+关键词混合检索。核心逻辑由 MCP 服务提供（MCP 工具），本 skill 描述各管理操作的编排。
+自托管的 mem0 形态记忆库：素材写入 → 后台 LLM 提炼 + 冲突消解 → 语义/关键词混合检索。
+单用户部署，记忆归属当前部署的身份，无需传 `user_id`。
 
 > ⚠️ 依赖已连接的 MCP 服务 `aimemory`（`http://<内网IP>:18543/mcp`）。
-> ⚠️ 单用户部署：记忆归属当前部署的账号（个人账本），无需指定用户。
+> 实际注册的工具名是 `mcp__<server名>__<工具名>`，下文统一用**裸工具名**（`search_memories` 等）表示，
+> 调用时按 `__` 后的名字匹配即可。
 
-> 🧩 **工具名匹配**：实际注册的 MCP 工具名为 `mcp__<server名>__<工具名>`，如 server 名为 `aimemory` 时
-> 检索工具注册为 `mcp__aimemory__search_memories`（若你的客户端安装时给 server 名加了前缀，则以实际注册名为准）。
-> 下表统一用**裸工具名**（`search_memories` 等）表示，调用时按 `__` 后的工具名匹配实际注册名即可，无需关心 server 前缀。
+## 三种用法，按需读对应参考（不要一次全读）
 
-## 意图 → 工具映射
-
-| 用户说 | 调用 | 说明 |
+| 场景 | 读哪篇 | 主要工具 |
 |---|---|---|
-| "搜/查记忆" + 关键词 | `search_memories` | 语义+关键词混合检索，`threshold` 可过滤低置信 |
-| "刚存的记忆在不在/提炼完没" | `get_event_status` | `add_memory(messages)` 是异步的，用返回的 `event_id` 查提炼状态 |
-| "列出/我的记忆" | `get_memories` | 分页，可按 `metadata`/时间过滤 |
-| "看某条记忆" | `get_memory` | 按 id 取单条 |
-| "改某条记忆" | `get_memory` 确认 id → `update_memory` | 更新前先读原文确认 |
-| "删某条记忆" | `delete_memory` | 按 id 删除 |
-| "清空我的记忆" | 引导用户到 Web 管理台操作，或 REST `DELETE /v1/memories/?user_id=…` | MCP 刻意不提供整库删除（防误操作） |
-| 记忆键管理 | 引导用户到 Web 管理台（REST `/api/keys`） | API Key 管理（MCP 不暴露） |
+| **召回**：任务开始/切换上下文时预取相关记忆，或用户问"我之前的偏好/决策" | [references/recall.md](references/recall.md) | `search_memories` |
+| **沉淀**：用户说"记住"，或出现值得长期留存的决策/配置/偏好/教训 | [references/remember.md](references/remember.md) | `add_memory` → `get_event_status` |
+| **管理**：查/看/改/删单条记忆，导出，或管理接入 Token | [references/manage.md](references/manage.md) | `get_memories` / `get_memory` / `update_memory` / `delete_memory` |
 
-## 核心规则
+一次会话里召回 + 沉淀可以都做（先召回、回答后再沉淀）；管理类操作按需查。
 
-- **删除必须确认**：`delete_memory` 执行前先展示目标内容让用户确认，禁止擅自删除
-- **更新先读**：`update_memory` 前先 `get_memory` 拿到原文，向用户展示修改点
-- **更新后自动去重**：改文本后服务端会异步做一次「同一事实」检测，重复的旧记忆自动合并删除（审计可查），无需手动清理
-- **写入语义**：`add_memory` 提交的都是素材（text/messages），异步受理由内部 LLM 提炼入库（不存原文）；日常对话结束时主动存一次关键结论即可
-- **账本边界**：记忆是当前部署账号的个人账本（单用户，无需传 `user_id`）
-- **结果汇报**：检索结果用紧凑列表呈现（内容 + 相似度/时间），不吐原始 JSON
+## 工具面（7 个）
 
-## 相关 skill
+| 工具 | 一句话 |
+|---|---|
+| `add_memory` | 提交素材（`text` 或 `messages`），**异步**受理返回 `event_id`，后台 LLM 提炼入库（不存原文） |
+| `get_event_status` | 用 `event_id` 查提炼进度：pending / processing / done / failed |
+| `search_memories` | 语义 + 关键词混合检索（`query` 必填；`limit` / `threshold` / `filters` 可选） |
+| `get_memories` | 分页列出记忆（可用 `filters` 过滤 metadata / 时间范围） |
+| `get_memory` | 按 id 取单条 |
+| `update_memory` | 按 id 更新 `text` / `metadata`（改文本后台自动去重合并） |
+| `delete_memory` | 按 id 删除 |
 
-- `aimemory-recall`：任务开始时自动加载相关记忆（只读）
-- `aimemory-remember`：主动保存记忆（写入）
+## 四条硬规则
+
+1. **写入必须轮询到底**：`add_memory` 返回 `event_id` ≠ 已入库。用 `get_event_status` 等到 `done`
+   （拿提炼产物）或 `failed`（素材未入库，如实告知用户，不谎报成功）。
+2. **删除必须确认**：`delete_memory` 前先展示目标内容让用户确认，禁止擅自删除。
+3. **更新先读**：`update_memory` 前先 `get_memory` 拿原文，向用户展示修改点。
+4. **结果要紧凑**：检索/列表结果用短列表呈现（内容 + 时间），不吐原始 JSON；把记忆融入回答；
+   无相关记忆时保持沉默、不打扰。
+
+## 边界
+
+- 记忆是当前部署账号的个人账本：检索到的内容可能已过时（端口/地址/配置），使用前判断时效性，必要时提醒核实。
+- 不存敏感明文：密码等凭据默认不存原文，可存"存在哪/用户名"，除非用户明确要求。
+- 清空全部记忆、签发/吊销 Token 这类整库与凭据操作**不通过 MCP 做**——引导用户到 Web 管理台
+  （`http://<内网IP>:18543/admin`）。

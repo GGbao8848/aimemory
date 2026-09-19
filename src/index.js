@@ -20,12 +20,12 @@ app.use(cookieParser());
 app.use(express.json({ limit: '1mb' }));
 
 // ===== 配套技能（下载/预览，公开）=====
-// 记忆 skill 源目录（skills/）：aimemory（管理）/ aimemory-recall（召回）/ aimemory-remember（沉淀）
+// 配套 skill 源目录（skills/aimemory）：单一 skill + references/（召回/沉淀/管理三篇按需读）
 const SKILLS_DIR = path.join(config.root, 'skills');
-const SKILL_NAMES = ['aimemory', 'aimemory-recall', 'aimemory-remember'];
+const SKILL_NAMES = ['aimemory'];
 const MAIN_SKILL_MD = path.join(SKILLS_DIR, 'aimemory', 'SKILL.md');
 
-// 技能 zip 包下载：aimemory-skills.zip（zip 内为各 skill 目录，解压后放入 skills/ 或上传安装）
+// 技能 zip 包下载：aimemory-skills.zip（内含 aimemory skill 目录，解压后放入 skills/ 或上传安装）
 app.get('/skill/download', (_req, res) => {
   if (!fs.existsSync(MAIN_SKILL_MD)) {
     res.status(404).send('配套技能 skills/ 不存在（请检查服务器部署目录）');
