@@ -161,7 +161,7 @@ async function pingModel(base, key) {
   console.log('下一步：');
   console.log('  1. npm start                     # 启动（或 pm2 start ecosystem.config.js）');
   console.log(`  2. 浏览器打开 http://127.0.0.1:${config.port}/admin  # 口令登录（.env 的 AIMEMORY_PASSWORD）`);
-  console.log('  3. /admin 接入指南页             # agent 接入（MCP / 设备流 Token / 采集器）');
+  console.log('  3. /admin 接入指南页             # agent 接入（MCP / REST Token）');
   console.log('  4. npm run doctor -- --probe     # 需要探活模型服务时');
   process.exitCode = bad ? 1 : 0;
 })();

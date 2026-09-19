@@ -1,0 +1,62 @@
+- generic [ref=f1e3]:
+  - complementary [ref=f1e4]:
+    - generic [ref=f1e5]:
+      - img "aimemory" [ref=f1e6]
+      - generic [ref=f1e7]:
+        - strong [ref=f1e8]: aimemory
+        - text: mem0 形态记忆库
+    - navigation "主导航" [ref=f1e9]:
+      - button "我的记忆" [ref=f1e10] [cursor=pointer]
+      - button "接入 Token" [ref=f1e12] [cursor=pointer]
+      - button "接入指南" [active] [ref=f1e14] [cursor=pointer]
+    - generic [ref=f1e16]:
+      - button "切换亮暗模式" [ref=f1e17] [cursor=pointer]:
+        - generic [ref=f1e18]: 暗色模式
+      - link "退出（我）" [ref=f1e19] [cursor=pointer]:
+        - /url: /auth/logout
+  - main [ref=f1e21]:
+    - generic [ref=f1e22]:
+      - heading "接入指南" [level=1] [ref=f1e112]
+      - paragraph [ref=f1e24]: mem0 形态 REST API 与 MCP 接入方式
+    - generic [ref=f1e113]:
+      - generic [ref=f1e115]:
+        - generic [ref=f1e116]: 鉴权方式
+        - generic [ref=f1e117]:
+          - text: 与 mem0 相同的 Token 头：
+          - code [ref=f1e118]: "Authorization: Token m0-xxx"
+          - text: （在「接入 Token」页签发）。本服务为个人自托管：记忆归属 Token 持有者， user_id 必须省略或与之一致；agent_id / run_id 是自由标签维度，用于区分写入来源。
+      - generic [ref=f1e119]:
+        - generic [ref=f1e120]:
+          - generic [ref=f1e121]: 写入记忆（异步提炼）
+          - generic [ref=f1e122]: "messages 或 text 二选一；返回 event_id，用 GET /v1/event/{event_id} 轮询到 done/failed。"
+        - generic [ref=f1e124]:
+          - generic [ref=f1e125]: "curl -X POST http://127.0.0.1:19999/v1/memories/ \\ -H \"Authorization: Token m0-xxx\" -H \"Content-Type: application/json\" \\ -d '{\"messages\":[{\"role\":\"user\",\"content\":\"我们把网关迁到了 10.10.10.146\"}], \"user_id\":\"owner\",\"agent_id\":\"zcode\",\"run_id\":\"session-42\"}'"
+          - button "复制" [ref=f1e126] [cursor=pointer]
+      - generic [ref=f1e127]:
+        - generic [ref=f1e128]:
+          - generic [ref=f1e129]: 写入记忆（原文直存，不经 LLM）
+          - generic [ref=f1e130]: infer=false 同步返回 results，适合已有明确结论的场景。
+        - generic [ref=f1e132]:
+          - generic [ref=f1e133]: "curl -X POST http://127.0.0.1:19999/v1/memories/ \\ -H \"Authorization: Token m0-xxx\" -H \"Content-Type: application/json\" \\ -d '{\"text\":\"部署端口钉死 18543\",\"user_id\":\"owner\",\"infer\":false}'"
+          - button "复制" [ref=f1e134] [cursor=pointer]
+      - generic [ref=f1e135]:
+        - generic [ref=f1e136]:
+          - generic [ref=f1e137]: 语义检索
+          - generic [ref=f1e138]: 混合检索：向量语义 + FTS 关键词；filters 至少含一个实体维度。
+        - generic [ref=f1e140]:
+          - generic [ref=f1e141]: "curl -X POST http://127.0.0.1:19999/v2/memories/search/ \\ -H \"Authorization: Token m0-xxx\" -H \"Content-Type: application/json\" \\ -d '{\"query\":\"网关部署在哪\",\"filters\":{\"user_id\":\"owner\"},\"top_k\":5}'"
+          - button "复制" [ref=f1e142] [cursor=pointer]
+      - generic [ref=f1e143]:
+        - generic [ref=f1e144]:
+          - generic [ref=f1e145]: 列出 / 更新 / 删除 / 历史
+          - generic [ref=f1e146]: get_all 分页（count/next/previous）；update 与 delete 都会写入变更历史。
+        - generic [ref=f1e148]:
+          - generic [ref=f1e149]: "curl -X POST http://127.0.0.1:19999/v2/memories/ \\ -H \"Authorization: Token m0-xxx\" -H \"Content-Type: application/json\" \\ -d '{\"filters\":{\"user_id\":\"owner\",\"agent_id\":\"zcode\"},\"page\":1,\"page_size\":20}' curl -X PUT http://127.0.0.1:19999/v1/memories/<id>/ \\ -H \"Authorization: Token m0-xxx\" -H \"Content-Type: application/json\" \\ -d '{\"text\":\"更新后的记忆文本\"}' curl -X DELETE http://127.0.0.1:19999/v1/memories/<id>/ -H \"Authorization: Token m0-xxx\" curl http://127.0.0.1:19999/v1/memories/<id>/history/ -H \"Authorization: Token m0-xxx\""
+          - button "复制" [ref=f1e150] [cursor=pointer]
+      - generic [ref=f1e152]:
+        - generic [ref=f1e153]: MCP 接入（agent 端）
+        - generic [ref=f1e154]:
+          - text: 端点
+          - code [ref=f1e155]: http://127.0.0.1:19999/mcp
+          - text: （Streamable HTTP），7 个工具： add_memory / get_event_status / search_memories / get_memories / get_memory / update_memory / delete_memory。 完整配置模板见「接入 Token」页。
+  - region "Notifications alt+T"

@@ -1,60 +1,54 @@
-# aimemory —— 个人 AI 记忆库（MCP 服务）
+# aimemory —— 个人 AI 记忆库（mem0 形态）
 
-> 自托管、mem0 兼容的 **个人 AI 记忆服务**：给你的 agent（Claude Code / Codex / ZCode / 自研 agent…）经 **MCP（Streamable HTTP）** 读写记忆。
-> 单用户部署——所有记忆归属一个个人账本，跨设备、跨 agent 共享；Web 页用本地口令登录，管理记忆、会话归档与接入 Token。
+> 自托管的 **mem0 形态个人记忆服务**：REST（`/v1` `/v2`，对齐 mem0 官方用法）+ **MCP（Streamable HTTP）**
+> 双接入面，给 agent（Claude Code / Codex / ZCode / 自研 agent…）读写长期记忆。
+> 单用户部署——记忆归属 Token 持有者；Web 管理台（shadcn/ui）管理记忆与接入 Token。
 
 ## 特性
 
-- **素材提炼型写入（核心）**：`add_memory` 的输入一律视为素材（`text` / `messages`），**不直接落库**——后台内部 LLM 提炼成多条自包含结构化记忆后入库；异步受理 + 队列串行，本地低并发 LLM 下不阻塞调用；提炼失败不落库
-- **语义 + 关键词混合检索**：embedding 向量召回（同义/口语化可命中）+ SQLite FTS5 trigram 关键词召回（中文子串）；embedding 不可用时自动回退纯关键词
-- **10 个 MCP 工具**：记忆类 7 个（`add_memory` / `get_event_status` / `search_memories` / `get_memories` / `get_memory` / `update_memory` / `delete_memory`）+ 会话摘要 2 个（`list_session_summaries` / `get_session_summary`）+ L3 上下文注入 1 个（`recall_context`，只读零 LLM）——刻意不提供批量导入、整库/实体管理、agent/run 维度
-- **四层记忆**：L0 原始会话归档（采集器自动备份）→ L1 会话摘要（后台自动生成，可查"某个会话/某台机器做了什么"）→ L2 事实记忆（素材提炼 + **冲突消解**）→ L3 画像／知识（低频凝练，markdown 人工可编辑）。详见 [docs/四层记忆架构与进展.md](docs/四层记忆架构与进展.md)
-- **L2 冲突消解（四操作）**：新事实入库前与已有记忆比对，产出 `ADD`/`UPDATE`/`DELETE`/`NOOP`——同一事实不再反复入库、新旧取值不再并存；`DELETE` 是"删旧+存新"的取代语义，全程记 `memory_ops` 审计（误删可从审计复原）。同时 **L2 可从 L1 摘要派生**（后台静默触发、内容指纹幂等），兑现"上层可从 L0 重放"。详见 [docs/L2-事实记忆与冲突消解.md](docs/L2-事实记忆与冲突消解.md)
-- **L0 原始会话归档**：各机安装采集器（pm2），把 Codex / Claude Code / ZCode 的原始会话追加归档到 `data/l0/<设备>/<agent>/`；上传带**设备码 + 设备信息 + agent**，Web「会话归档」页按**设备 → agent → 会话 → 详情**逐级下钻，可在任意机器查看其他机器的会话；只采集上传、不做提炼（详见 [docs/L0-原始会话归档.md](docs/L0-原始会话归档.md)）。
-- **单用户**：一个个人账本，多设备多 agent 共享；Web 用本地口令登录（无外部 SSO 依赖）
-- **接入**：Web 自助签发多枚 `m0-xxx` Token（按客户端命名分发、单独吊销，明文仅创建时展示一次）+ 设备流浏览器免粘贴授权；Web 页支持导出全量记忆（JSON）
+- **mem0 形态 API**：`POST /v1/memories/`（add）、`POST /v2/memories/search/`、`POST /v2/memories/`（get_all + filters）、
+  `GET/PUT/DELETE /v1/memories/{id}/`、`GET /v1/memories/{id}/history/`、`DELETE /v1/memories/`（按作用域批量删）、
+  `GET /v1/event/{event_id}/`（事件轮询）——SDK/脚本照 mem0 的用法写即可
+- **素材提炼型写入（infer 双路径）**：`infer=true`（默认）输入视为素材（`text` / `messages`），后台 LLM 提炼成
+  多条自包含记忆后异步入库（返回 `event_id`）；`infer=false` 原文直存同步返回——与 mem0 语义一致
+- **冲突消解（mem0 的 ADD/UPDATE/DELETE/NOOP）**：新事实入库前与已有记忆比对，同一事实不再反复入库、
+  新旧取值不再并存；每次变更写入 `memory_ops` 历史（`GET /v1/memories/{id}/history/` 可查，误删可复原）
+- **语义 + 关键词混合检索**：embedding 向量召回 + SQLite FTS5 trigram 关键词召回（中文子串）；
+  embedding 不可用时自动回退纯关键词
+- **mem0 三维度作用域**：`user_id`（账号维度，必须省略或等于鉴权主体）/ `agent_id` / `run_id`
+  （自由标签，标记哪个 agent、哪次会话写入），检索与列表可按维度过滤
+- **MCP 7 工具**：`add_memory` / `get_event_status` / `search_memories` / `get_memories` / `get_memory` /
+  `update_memory` / `delete_memory`
+- **Web 管理台（shadcn/ui）**：记忆列表（搜索 / agent·run 过滤 / 编辑 / 删除 / 变更历史）、
+  Token 签发（明文一次性展示）、接入指南；Tailwind v4 + Radix，暗/亮双主题
 - **半熔断容错**：LLM/embedding 服务抖动自动熔断降级、恢复自动探测回补，无需重启
-- **单端口 18543**：`/mcp` + `/api/*` + Web 管理页 + `/healthz`
+- **单端口 18543**：`/mcp` + `/v1` `/v2` + `/api/*` + Web 管理台 + `/healthz`
 
 ## 架构
 
 ```
-MCP 客户端 (Claude Code / ZCode / …) ── POST /mcp, Authorization: Token m0-xxx
+agent / SDK / 脚本 ── POST /v1/memories · POST /v2/memories/search，Authorization: Token m0-xxx
+MCP 客户端        ── POST /mcp
         │
         ▼
 HTTP Server :18543 (Express)
-  /mcp        MCP Streamable HTTP（10 工具）
-  /api/*      REST（Token 或 Web 会话 cookie）
-  /admin, /   管理控制台（`web/` 构建产物 + 本地口令登录；同时挂在根路径供登录后落地）
-  /healthz    健康检查（db / embedding / llm）
+  /v1 /v2     mem0 形态 REST（Token 鉴权）
+  /mcp        MCP Streamable HTTP（7 工具）
+  /api/*      管理台自用面（Token 或 Web 会话 cookie）
+  /admin, /   Web 管理台（web/ 构建产物 + 本地口令登录）
+  /healthz    健康检查（db / embedding / llm / 提炼队列积压）
         │
         ▼
-SQLite (data/aimemory.db): memories + memories_fts(FTS5) + l1_summaries + memory_ops(操作审计)
-        + l2_sources/l2_meta(派生游标/向量元数据) + l3_state(凝练游标) + api_keys + sessions + events(异步队列)
+SQLite (data/aimemory.db): memories + memories_fts(FTS5) + memory_ops(变更历史)
+        + l2_meta(向量维度) + api_keys + sessions + events(异步提炼队列)
         │
         ├─ embeddings/client.js → OpenAI 兼容 /v1/embeddings（语义向量）
-        └─ llm/client.js       → OpenAI 兼容 /v1/chat/completions（提炼/infer）
+        └─ llm/client.js       → OpenAI 兼容 /v1/chat/completions（素材提炼/消解判定）
 ```
 
-## Web 界面
-
-`/admin`（同时挂在 `/`）是**管理控制台**：记忆列表与检索预览、Token 签发（设备流接入）、L0 会话归档下钻、
-操作审计（memory_ops）与 L3 画像条目编辑。口令登录（`.env` 的 `AIMEMORY_PASSWORD`，
-首次启动若为空会自动生成并打印）。
-
-前端住在同仓 `web/`：**Vite + React + TypeScript**，六个视图（我的记忆 / 接入 Token / 会话归档 /
-操作审计 / L3 画像 / 接入指南）与旧的单文件静态页 1:1 平替——样式沿用原设计令牌（`web/src/styles/app.css`）。
-接口类型直接复用契约生成物 `docs/api/aimemory-api.ts`（`web/src/api/contract.ts` 按 `ApiPath` 收敛路由，
-后端加/删路由会让前端类型检查失败）。前端纯逻辑（归档下钻层级、展示格式化、MCP 配置拼装）是 `web/src/lib/*.ts`
-的无框架模块，由 `node --test` 直接加载守护（不引入 vitest/jsdom）。
-
-```bash
-npm run web:install && npm run web:build   # 产物 web/dist，由后端直接托管（未构建时 /admin 返回 503 提示）
-npm run web:dev                            # 本地开发：5185 端口，/api /mcp /auth 等代理到 18543
-```
-
-星图前端（atlas/）与样例（samples/）已于 2026-09-19 剪枝；「产品主前端由独立仓库构建」的旧决定已作废——
-管理台就是本仓 `web/`，外部 agent 仍只对接 REST（`/api/*`，契约见 `docs/api/openapi.json`）与 MCP（`/mcp`）。
+> 2026-09-19 转向定论：项目收敛为 mem0 形态——此前的 L0 会话采集 / L1 会话摘要 / L3 画像 / 设备流授权
+> 已整体退役（旧库自动迁移：这些表 DROP，memories 数据保留；`data/l0`、`data/l3` 文件留盘可自行归档）。
+> 见 [docs/项目规划.md](docs/项目规划.md)。
 
 ## 快速开始
 
@@ -64,7 +58,7 @@ npm run web:dev                            # 本地开发：5185 端口，/api /
 npm install
 npm run web:install && npm run web:build   # 管理台前端（产物 web/dist；只跑后端可跳过，/admin 会给 503 提示）
 cp .env.example .env            # 按需改 LLM_* / EMBEDDING_*（见 .env 注释）
-npm run doctor                  # 首启自检：依赖/目录/数据库/前端产物/LLM 配置一次查清，缺什么给一行修复命令
+npm run doctor                  # 首启自检：依赖/目录/数据库/前端产物/LLM 配置一次查清
 pm2 start ecosystem.config.js && pm2 save   # 或 npm start
 ```
 
@@ -72,85 +66,87 @@ pm2 start ecosystem.config.js && pm2 save   # 或 npm start
 
 ```bash
 curl http://localhost:18543/healthz    # {"status":"ok",...}
-curl http://localhost:18543/           # Web 平台（首次启动会打印自动生成的口令）
+curl http://localhost:18543/           # Web 管理台（首次启动会打印自动生成的口令）
 ```
 
-## 使用方式
+## 使用方式（照 mem0 的写法）
 
-- **MCP 接入**：`url: http://<内网IP>:18543/mcp`，`headers: { "Authorization": "Token m0-xxx" }`。在 Web「接入 Token」页签发 / 或走设备流一键授权。
-- **写入（素材）**：`add_memory { text }` 或 `add_memory { messages: [{role,content}...] }` → 返回 `{event_id, status:"pending"}`；轮询 `get_event_status` 至 `done`（含提炼产物）或 `failed`（素材未入库）。**返回≠已入库，务必查状态。**
-- **查询**：`search_memories { query, limit?, threshold? }` 语义检索；`get_memories` / `get_memory` 列表/单条；`update_memory` / `delete_memory` 修改/删除。
+签发 Token：登录 Web「接入 Token」页 → 签发 → 明文一次性展示。之后：
 
-> 参数保留 mem0 子集：`text` / `messages` / `metadata` / `filters`（metadata 键值、时间范围）/ `page_size` / `limit` / `threshold` / `user_id`（只能等于当前身份）。
-> 刻意不提供：`infer`（写入即自动提炼）、`rerank`、`agent_id`/`run_id`（个人单维度账本）。
+```bash
+# add（异步提炼，返回 event_id）
+curl -X POST http://localhost:18543/v1/memories/ \
+  -H "Authorization: Token m0-xxx" -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"网关迁到了 10.10.10.146"}],"agent_id":"zcode","run_id":"s-42"}'
+
+# search（混合检索）
+curl -X POST http://localhost:18543/v2/memories/search/ \
+  -H "Authorization: Token m0-xxx" -H "Content-Type: application/json" \
+  -d '{"query":"网关部署在哪","filters":{"user_id":"owner"},"top_k":5}'
+
+# get_all / update / delete / history
+curl -X POST http://localhost:18543/v2/memories/ -H "Authorization: Token m0-xxx" \
+  -H "Content-Type: application/json" -d '{"filters":{"agent_id":"zcode"},"page":1,"page_size":20}'
+curl -X PUT http://localhost:18543/v1/memories/<id>/ -H "Authorization: Token m0-xxx" \
+  -H "Content-Type: application/json" -d '{"text":"更新后的文本"}'
+curl -X DELETE http://localhost:18543/v1/memories/<id>/ -H "Authorization: Token m0-xxx"
+curl http://localhost:18543/v1/memories/<id>/history/ -H "Authorization: Token m0-xxx"
+```
+
+- **infer=true 必须轮询**：返回 200 + `event_id` ≠ 已入库，用 `GET /v1/event/{event_id}/` 等到 `done`/`failed`。
+- **响应文本字段名是 `memory`**（mem0 形状）；`agent_id`/`run_id` 是自由标签。
+- **MCP 接入**：`url: http://<内网IP>:18543/mcp`，`headers: { "Authorization": "Token m0-xxx" }`。
 
 ## REST API 摘要
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/memories` | 提交素材（202 + event_id 异步受理） |
-| GET | `/api/memories?page=&page_size=&q=` | 列表 / 语义搜索 |
-| GET/PATCH/DELETE | `/api/memories/:id` | 单条 / 更新 / 删除 |
-| GET | `/api/memories/export` | 导出全部记忆（JSON 附件） |
-| GET | `/api/events/:id` | 查素材提炼状态 |
-| GET | `/api/stats` / `/api/me` | 统计 / 当前身份 |
-| POST/GET | `/api/keys`、`/api/keys/:id/revoke` | Token 管理（多 Token 并存，单独吊销） |
-| POST | `/api/l0/ingest` | L0 原始会话批次上传（带设备三元组，幂等，仅归档不提炼） |
-| GET | `/api/l1/summaries` / `/api/l1/stats` / `POST /api/l1/run` | L1 会话摘要（清单 / 进度 / 手动触发） |
-| GET/PUT | `/api/l3/entries` / `POST /api/l3/run` / `GET /api/l3/stats` / `GET /api/l3/history` | L3 画像（条目与编辑 / 手动凝练 / 规模 / 变更历史链） |
-| GET | `/api/l0/stats` | L0 归档统计 + 设备清单 + 会话清单（`?device=`/`?agent=` 过滤） |
-| GET | `/api/l0/session` | 读单会话内容（`agent`/`device`/`session_id`，含归属校验） |
-| POST/GET | `/api/connect/start`、`/api/connect/poll`、`/api/connect/confirm` | 设备流接入 |
+| POST | `/v1/memories/` | add（infer=true 异步提炼 / infer=false 直存） |
+| POST | `/v2/memories/search/` | 混合检索（query + filters + top_k） |
+| POST | `/v2/memories/` | get_all（filters + 分页，{count, next, previous, results}） |
+| GET/PUT/DELETE | `/v1/memories/{id}/` | 单条 / 更新 / 删除 |
+| GET | `/v1/memories/{id}/history/` | 变更历史（ADD/UPDATE/DELETE 留痕） |
+| DELETE | `/v1/memories/` | 按作用域批量删除（异步，返回 event_id） |
+| GET | `/v1/event/{event_id}/` | 异步事件状态轮询 |
+| POST/GET | `/api/keys`、`/api/keys/:id/revoke` | Token 管理（管理台自用面） |
+| GET | `/api/stats` / `/api/me` / `/api/memories/export` | 统计 / 身份 / 导出 |
 
-鉴权：`Authorization: Token m0-xxx` 或 Web 会话 cookie。
-
+完整契约：[docs/api/openapi.json](docs/api/openapi.json)（路径与方法集由测试守护，TS 类型 `npm run types` 生成）。
 
 ## 配置项（.env 关键项）
 
 | 变量 | 说明 |
 |---|---|
 | `PORT` | 服务端口（默认 18543） |
-| `PUBLIC_BASE_URL` | 对外地址（管理页生成 MCP JSON 用；留空取请求 Host） |
 | `AIMEMORY_PASSWORD` | Web 登录口令（首次启动自动生成写回 .env，并打印在日志） |
 | `AIMEMORY_USER_ID` / `AIMEMORY_USER_NAME` | 个人身份标识 / 界面显示名（默认 owner / 我） |
-| `LLM_ENABLED` / `LLM_BASE_URL` / `LLM_MODEL` / `LLM_API_KEY` / `LLM_TIMEOUT_MS` | 提炼用 chat/completions（未启用时写入直接拒绝） |
-| `EMBEDDING_ENABLED` / `EMBEDDING_BASE_URL` / `EMBEDDING_MODEL` / `EMBEDDING_API_KEY` | 语义检索用 embeddings（不可用自动退关键词） |
-| `AIMEMORY_DB` | 数据库路径覆盖（测试用独立库；`AIMEMORY_L0_DIR` / `AIMEMORY_L3_DIR` 同理） |
-| `L2_*` / `L3_*` | 冲突消解与凝练的开关与预算，默认全开（全量见 .env.example 注释） |
+| `LLM_ENABLED` / `LLM_BASE_URL` / `LLM_MODEL` / `LLM_API_KEY` / `LLM_TIMEOUT_MS` | 提炼用 chat/completions（未启用时 infer=true 写入直接拒绝） |
+| `EMBEDDING_ENABLED` / `EMBEDDING_BASE_URL` / `EMBEDDING_MODEL` / `EMBEDDING_API_KEY` | 语义检索（不可用自动退关键词；换模型后 `npm run vec:rebuild`） |
+| `AIMEMORY_DB` | 数据库路径覆盖（测试用独立库） |
+| `L2_*` | 冲突消解开关与 token 预算（全量见 .env.example 注释） |
 
 ## 数据与安全
 
-- 库内只存**提炼产物**（结构化记忆），素材原文不入库；`text` 明文存储无加密——**不写入完整密码等敏感明文**（skill 有约束）。
-- Token 校验走 sha256 哈希（`token_hash`），**库内不存明文**（G3）：明文仅在创建响应里返回一次，丢失请吊销重建或走设备流自动签发。可持有多枚命名 Token，按客户端/设备签发、单独吊销。
-- 删除需 Web 或 MCP `delete_memory` 单条确认。
+- 库内只存**提炼产物**（`infer=true` 路径）；`infer=false` 按需直存。**不要写入完整密码等敏感明文**。
+- Token 校验走 sha256 哈希，**库内不存明文**：明文仅在创建响应里返回一次，丢失请吊销重建。
+- 删除走单条确认（Web/MCP）或按作用域批量删（REST，必须带至少一个过滤条件）。
 
-## 容量与运维
+## 运维
 
-- **个人规模 SQLite 余量充足**：10 万条记忆关键词检索 P95≈40ms（[docs/性能基线-2026-09-19.md](docs/性能基线-2026-09-19.md)）；
-  检索质量基线 recall@5=1.0 / MRR≈1.0（[docs/检索基线-2026-09-19.md](docs/检索基线-2026-09-19.md)）。
-- 换 PostgreSQL 的必要信号：`SQLITE_BUSY` 频发、写 QPS >1000、数据量上百 GB——未到前 SQLite 是零运维最优解。
+- **个人规模 SQLite 余量充足**：10 万条记忆关键词检索 P95≈40ms；检索质量基线 recall@5=1.0 / MRR≈1.0
+  （历史基线见 [docs/检索基线-2026-09-19.md](docs/检索基线-2026-09-19.md)，注意其中 L0/L1/L3 相关项已随裁层失效）。
 - 运维件：`npm run doctor`（首启自检）、`scripts/backup.sh` / `restore.sh`（在线备份恢复）、
-  `scripts/export.js` / `import.js`（全量迁移，幂等）；操作手册见 [docs/运维手册.md](docs/运维手册.md)。
-- 历史压测明细（多租户时代 300 并发等）、Windows 开机自启等已归档 `docs/archive/`（当时环境的记录，参数已过时）。
+  `scripts/export.js` / `import.js`（memories 全量迁移，幂等）、`npm run vec:rebuild`（换 embedding 模型后重建向量索引）。
+- Docker：多阶段镜像 + compose（数据卷 `./data`），见 [docs/部署-生产机.md](docs/部署-生产机.md)；操作手册见 [docs/运维手册.md](docs/运维手册.md)。
 
 ## 测试
 
-`npm test` 全量 **173 项**（独立临时库，不碰生产数据）：四层各层单测 + API 契约守护（openapi 双向比对）+
-检索质量地板（recall@5≥0.9 / MRR≥0.8）+ MCP 错误语义 + 备份/导出端到端 + 配置对齐 + 密钥防线。
-历史测试报告：[docs/测试报告-2026-09-07-v0.2-素材提炼与端到端.md](docs/测试报告-2026-09-07-v0.2-素材提炼与端到端.md)（多租户时代记录）。
+`npm test` 全量（独立临时库，零真实 LLM）：mem0 API 行为回归 + 契约守护（openapi 双向比对）+
+冲突消解 + 检索质量地板 + MCP 错误语义 + 迁移/备份/导出端到端 + 配置对齐 + 密钥防线。
 
-## 四层记忆架构
+## 关联
 
-本项目按 **L0 原始会话 → L1 会话摘要 → L2 事实记忆 → L3 画像/知识** 四层组织，L0 是唯一事实源，
-上层均可从 L0 重放重建。**四层均已落地**（L3 为第一阶段：markdown 存储 + 低频凝练）：
-
-- **[docs/四层记忆架构与进展.md](docs/四层记忆架构与进展.md)** —— 总览与进度台账（建议先读）
-- [docs/调研报告-2026-07-会话与记忆管理系统.md](docs/调研报告-2026-07-会话与记忆管理系统.md) —— 架构源起（L0-L3 模型出自该文）
-- [docs/L0-原始会话归档.md](docs/L0-原始会话归档.md) —— L0 实现细节
-- [docs/L2-事实记忆与冲突消解.md](docs/L2-事实记忆与冲突消解.md) —— L2 冲突消解、派生链、向量层
-- [docs/L3-画像与知识层.md](docs/L3-画像与知识层.md) —— L3 画像/约束/教训的凝练与双时间轴
-
-## 关联项目
-
-- **配套 Skills**：本仓库 `skills/` 目录（aimemory 管理 / aimemory-recall 召回 / aimemory-remember 沉淀 / aimemory-collector 会话备份部署），Web「接入指南」页可下载 zip，或直接取用仓库源（https://github.com/GGbao8848/aimemory）。已取消插件打包与插件市场分发，接入只走 skill + MCP API 两条路。
-- **多租户版本**：已归档在 `multi-tenant` 分支（tag `multi-tenant-final`），main 为单用户版本。
+- **配套 Skills**：本仓库 `skills/`（aimemory 管理 / aimemory-recall 召回 / aimemory-remember 沉淀），
+  Web「接入指南」页可下载 zip。
+- **历史版本**：四层架构（L0/L1/L2/L3）与多租户实现分别封存在 git 历史与 `multi-tenant` 分支；
+  层级设计文档保留在 `docs/` 作为存档（L0/L2/L3 文档描述的机制已不在 main）。

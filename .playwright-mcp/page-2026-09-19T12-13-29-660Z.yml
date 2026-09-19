@@ -1,0 +1,8 @@
+- generic [ref=e4]:
+  - generic [ref=e5]:
+    - img "aimemory" [ref=e6]
+    - heading "登录记忆库" [level=1] [ref=e7]
+    - paragraph [ref=e8]: 输入访问口令以管理你的记忆。
+  - generic [ref=e9]:
+    - textbox "访问口令" [active] [ref=e10]
+    - button "登录" [ref=e11] [cursor=pointer]

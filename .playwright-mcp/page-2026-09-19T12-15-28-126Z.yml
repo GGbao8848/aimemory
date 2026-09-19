@@ -1,0 +1,78 @@
+- generic [ref=f1e3]:
+  - complementary [ref=f1e4]:
+    - generic [ref=f1e5]:
+      - img "aimemory" [ref=f1e6]
+      - generic [ref=f1e7]:
+        - strong [ref=f1e8]: aimemory
+        - text: mem0 形态记忆库
+    - navigation "主导航" [ref=f1e9]:
+      - button "我的记忆" [ref=f1e10] [cursor=pointer]
+      - button "接入 Token" [ref=f1e12] [cursor=pointer]
+      - button "接入指南" [ref=f1e14] [cursor=pointer]
+    - generic [ref=f1e16]:
+      - button "切换亮暗模式" [active] [ref=f1e17] [cursor=pointer]:
+        - generic [ref=f1e18]: 亮色模式
+      - link "退出（我）" [ref=f1e19] [cursor=pointer]:
+        - /url: /auth/logout
+  - main [ref=f1e21]:
+    - generic [ref=f1e22]:
+      - heading "我的记忆" [level=1] [ref=f1e156]
+      - paragraph [ref=f1e24]: agent 提交的素材经 LLM 提炼与冲突消解后的长期记忆
+    - generic [ref=f1e25]:
+      - generic [ref=f1e26]:
+        - textbox "搜索记忆…" [ref=f1e31]
+        - combobox "按 agent 过滤" [ref=f1e32]:
+          - option "全部 agent" [selected]
+          - option "codex"
+          - option "zcode"
+          - option "claude"
+        - combobox "按 run 过滤" [ref=f1e33]:
+          - option "全部 run" [selected]
+          - option "session-42"
+        - button "刷新" [ref=f1e34] [cursor=pointer]
+        - button "新增记忆" [ref=f1e35] [cursor=pointer]
+      - generic [ref=f1e36]:
+        - generic [ref=f1e37]:
+          - generic [ref=f1e38]:
+            - paragraph [ref=f1e39]: 夜间自动化任务用 pm2 托管
+            - generic [ref=f1e40]:
+              - button "变更历史" [ref=f1e41] [cursor=pointer]
+              - button "编辑" [ref=f1e42] [cursor=pointer]
+              - button "删除" [ref=f1e43] [cursor=pointer]
+          - generic [ref=f1e44]:
+            - generic [ref=f1e45]: 09-19 12:13
+            - generic [ref=f1e46]: codex
+        - generic [ref=f1e47]:
+          - generic [ref=f1e48]:
+            - paragraph [ref=f1e49]: 网关服务部署在 gateway-01，端口 8001
+            - generic [ref=f1e50]:
+              - button "变更历史" [ref=f1e51] [cursor=pointer]
+              - button "编辑" [ref=f1e52] [cursor=pointer]
+              - button "删除" [ref=f1e53] [cursor=pointer]
+          - generic [ref=f1e54]:
+            - generic [ref=f1e55]: 09-19 12:13
+            - generic [ref=f1e56]: zcode
+            - generic [ref=f1e57]: session-42
+        - generic [ref=f1e58]:
+          - generic [ref=f1e59]:
+            - paragraph [ref=f1e60]: 用户偏好用 better-sqlite3 而不是 ORM
+            - generic [ref=f1e61]:
+              - button "变更历史" [ref=f1e62] [cursor=pointer]
+              - button "编辑" [ref=f1e63] [cursor=pointer]
+              - button "删除" [ref=f1e64] [cursor=pointer]
+          - generic [ref=f1e65]:
+            - generic [ref=f1e66]: 09-19 12:13
+            - generic [ref=f1e67]: claude
+        - generic [ref=f1e68]:
+          - generic [ref=f1e69]:
+            - paragraph [ref=f1e70]: 生产数据库在 10.10.10.146:5432，用户名 aimemory
+            - generic [ref=f1e71]:
+              - button "变更历史" [ref=f1e72] [cursor=pointer]
+              - button "编辑" [ref=f1e73] [cursor=pointer]
+              - button "删除" [ref=f1e74] [cursor=pointer]
+          - generic [ref=f1e75]:
+            - generic [ref=f1e76]: 09-19 12:13
+            - generic [ref=f1e77]: zcode
+            - generic [ref=f1e78]: session-42
+            - generic [ref=f1e79]: "{\"tag\":\"infra\"}"
+  - region "Notifications alt+T"

@@ -54,7 +54,7 @@ if [ -n "$PW" ]; then
       TOOLS=$(curl -s -H "$AH" -H "$AC" -H 'Content-Type: application/json' ${SID:+-H "mcp-session-id: $SID"} \
         -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' "$BASE/mcp" \
         | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{const j=JSON.parse(d.slice(d.indexOf('{')));console.log((j.result&&j.result.tools||[]).length)}catch{console.log(0)}})")
-      if [ "${TOOLS:-0}" -ge 10 ]; then ok "MCP tools/list（$TOOLS 个工具）"; else bad "MCP tools/list（${TOOLS:-0} 个）"; fi
+      if [ "${TOOLS:-0}" -ge 7 ]; then ok "MCP tools/list（$TOOLS 个工具）"; else bad "MCP tools/list（${TOOLS:-0} 个）"; fi
       SEARCH=$(curl -s -H "$AH" -H "$AC" -H 'Content-Type: application/json' ${SID:+-H "mcp-session-id: $SID"} \
         -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"search_memories","arguments":{"query":"冒烟"}}}' "$BASE/mcp" \
         | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{const j=JSON.parse(d.slice(d.indexOf('{')));console.log(j.result&&j.result.content?'ok':'bad')}catch{console.log('bad')}})")
