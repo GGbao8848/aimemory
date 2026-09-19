@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "aimemory REST API",
-    "version": "0.3.0",
+    "version": "0.2.0",
     "description": "个人自托管 AI 记忆服务。鉴权：Authorization: Token m0-xxx（API key）或 aim_session cookie（Web 口令登录）；除标注「公开」外全部需要鉴权。请求/响应主体为 JSON；schemas 按需渐进补全，本契约当前承诺「路径与方法集」与实现一致（由 test/api-contract.test.js 守护）。",
     "x-data-model": "L0 原始会话归档（append-only）→ L1 会话摘要 → L2 事实记忆（memories，冲突消解）→ L3 画像/知识（data/l3 markdown）"
   },

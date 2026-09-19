@@ -8,6 +8,7 @@
   "scripts": {
     "start": "node src/index.js",
     "doctor": "node scripts/doctor.js",
+    "types": "node scripts/gen-api-types.js",
     "collector": "node collector/index.js",
     "collector:status": "node collector/index.js --status",
     "test": "node --test"
