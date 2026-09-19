@@ -55,6 +55,12 @@ async function pingModel(base, key) {
   report(depMissing.length === 0, '依赖安装', depMissing.length ? `缺失：${depMissing.join(', ')}` : `${deps.length} 个核心依赖可加载`,
     depMissing.length ? 'npm install' : null);
 
+  // ===== 2.5 管理台前端构建产物（web/ 由 Vite 构建，缺失时 /admin 只能返回提示页）=====
+  const webBuild = path.join(config.root, 'web', 'dist', 'index.html');
+  const webBuilt = fs.existsSync(webBuild);
+  report(webBuilt, '管理台前端', webBuilt ? 'web/dist 已构建' : '未构建（访问 /admin 会得到 503 提示）',
+    webBuilt ? null : 'npm run web:install && npm run web:build');
+
   // ===== 3. 数据目录（不存在则创建——与首启行为一致）=====
   const dirs = [['数据目录', path.dirname(config.dbPath)], ['L0 归档目录', config.l0Dir], ['L3 画像目录', config.l3Dir]];
   for (const [label, dir] of dirs) {

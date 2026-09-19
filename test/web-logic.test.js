@@ -12,6 +12,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
+const fs = require('node:fs');
 const path = require('node:path');
 
 const LIB = path.join(__dirname, '..', 'web', 'src', 'lib');
@@ -139,4 +140,16 @@ test('MCP 配置：有明文→完整可用；有 Token 无明文→占位；无
   const noKeys = mcp.buildMcpConfig({ origin: 'http://h:18543', plaintext: null, hasKey: false });
   assert.ok(!noKeys.json.includes('headers'), '尚无 Token 时不输出 headers 键');
   assert.strictEqual(mcp.authorizationHeader({ origin: 'http://h:18543', plaintext: null, hasKey: false }), 'Token m0-xxx（请先在上方新建 Token）');
+});
+
+// 镜像内构建前端时，契约类型（仓库根 docs/api/）必须在 web 阶段可见——
+// 首轮 docker build 就是因为只 COPY 了 web/ 而整阶段 tsc 失败，这里钉死目录形状。
+test('Dockerfile 的 web 构建阶段能看见仓库根的契约类型', () => {
+  const docker = fs.readFileSync(path.join(__dirname, '..', 'Dockerfile'), 'utf8');
+  const stage = docker.split(/^FROM /m).find((b) => /^\S+ AS web$/m.test(b.split('\n')[0]));
+  assert.ok(stage, '应存在 AS web 构建阶段');
+  assert.match(stage, /^WORKDIR \/app$/m, 'web 阶段 WORKDIR 须为 /app（与仓库根同深度）');
+  assert.match(stage, /^COPY web \.\/web$/m, 'web 源码须落在 ./web');
+  assert.match(stage, /^COPY docs\/api \.\/docs\/api$/m, '契约类型须随阶段一起 COPY');
+  assert.match(docker, /^COPY --from=web \/app\/web\/dist \.\/web\/dist$/m, '运行阶段取 /app/web/dist');
 });

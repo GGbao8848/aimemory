@@ -13,6 +13,17 @@ COPY package.json package-lock.json ./
 # sqlite-vec 是 optionalDependencies：prebuild 拉不到也不阻塞（运行期自动降级关键词检索）
 RUN npm ci --omit=dev || (npm config set update-notifier false && npm install --omit=dev)
 
+# ---- web：管理台前端构建（运行期只需要 dist） ----
+# 目录形状刻意与仓库一致（/app/web + /app/docs）：前端直接 import 仓库根的契约生成物
+# docs/api/aimemory-api.ts，路径深度变了就找不到类型。
+FROM node:22-bookworm-slim AS web
+WORKDIR /app
+COPY web/package.json web/package-lock.json ./web/
+RUN npm --prefix ./web ci --no-audit --no-fund
+COPY web ./web
+COPY docs/api ./docs/api
+RUN npm --prefix ./web run build
+
 # ---- runtime：仅运行件，非 root ----
 FROM node:22-bookworm-slim
 ENV NODE_ENV=production
@@ -27,6 +38,7 @@ COPY src ./src
 COPY skills ./skills
 COPY scripts ./scripts
 COPY docs/api ./docs/api
+COPY --from=web /app/web/dist ./web/dist
 # config 首启会写 .env（自动生成口令）——预建可写空文件；数据目录归属运行用户
 RUN touch .env \
  && mkdir -p /app/data \
