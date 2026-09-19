@@ -60,6 +60,9 @@ const embedding = {
   model: process.env.EMBEDDING_MODEL || '/models/Qwen3-Embedding-8B',
   apiKey: process.env.EMBEDDING_API_KEY || '',
   timeoutMs: parseInt(process.env.EMBEDDING_TIMEOUT_MS || '15000', 10),
+  // 半熔断：连续失败 breakThreshold 次 → 熔断 retryMs 毫秒（期间零请求），窗口到后放行一次探测自动恢复
+  breakThreshold: parseInt(process.env.EMBEDDING_BREAK_THRESHOLD || '3', 10),
+  retryMs: parseInt(process.env.EMBEDDING_RETRY_MS || '60000', 10),
 };
 
 // ===== LLM（infer 事实抽取，P0-2）=====

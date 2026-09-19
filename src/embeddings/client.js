@@ -10,8 +10,9 @@
 
 const config = require('../config');
 
-const CIRCUIT_BREAK_THRESHOLD = 3; // 连续失败 3 次 → 熔断
-const CIRCUIT_RETRY_MS = 60_000; // 熔断后每 60s 放行一次探测
+// 熔断参数走 config（EMBEDDING_BREAK_THRESHOLD / EMBEDDING_RETRY_MS），测试可注入短窗口
+const CIRCUIT_BREAK_THRESHOLD = config.embedding.breakThreshold;
+const CIRCUIT_RETRY_MS = config.embedding.retryMs;
 
 let failures = 0;
 let circuitOpen = false;

@@ -128,3 +128,42 @@ test('降级：L2_VEC=0 时所有函数安全返回、不抛错', () => {
     delete require.cache[require.resolve('../src/l2/vec')];
   }
 });
+
+// ===== G4：语义检索上线准备——rebuild 幂等 / 增量 / 维度变更 =====
+
+test('rebuild 幂等：重复执行不产生重复命中，indexed 数稳定', () => {
+  const a = mkWithVec(u1, 'rebuild 幂等一', [1, 0, 0, 0]);
+  const b = mkWithVec(u1, 'rebuild 幂等二', [0.9, 0.1, 0, 0]);
+  const r1 = vec.rebuild({ userId: u1 });
+  const r2 = vec.rebuild({ userId: u1 });
+  assert.equal(r2.indexed, r1.indexed, '第二次 rebuild 不应新增（upsert 按 rowid 幂等）');
+  const hits = vec.search(u1, buf([1, 0, 0, 0]), 50, 0);
+  const ids = hits.map((h) => h.id);
+  assert.equal(new Set(ids).size, ids.length, '命中不得重复');
+  assert.ok(ids.includes(a) && ids.includes(b), '既有向量应全部可召回');
+});
+
+test('rebuild 增量：补上向量后再 rebuild 能收进索引', () => {
+  const plain = store.insertFact({ userId: u1, text: '先没有向量的记忆', metadata: {} });
+  db.prepare('UPDATE memories SET embedding = NULL WHERE id = ?').run(plain);
+  const seeded = mkWithVec(u1, '已有向量的记忆', [1, 0, 0, 0]);
+  let r = vec.rebuild({ userId: u1 });
+  assert.ok(!vec.search(u1, buf([1, 0, 0, 0]), 50, 0).map((h) => h.id).includes(plain),
+    '无向量者不进索引');
+  db.prepare('UPDATE memories SET embedding = ? WHERE id = ?').run(buf([1, 0, 0, 0]), plain);
+  r = vec.rebuild({ userId: u1 });
+  assert.ok(r.indexed >= 2);
+  const ids = vec.search(u1, buf([1, 0, 0, 0]), 50, 0).map((h) => h.id);
+  assert.ok(ids.includes(plain) && ids.includes(seeded), '补向量后 rebuild 应收进索引');
+});
+
+test('维度变更：reset=true 后以新维度重建，旧维度查询不返回错结果', () => {
+  const c = mkWithVec(u1, '八维新世界', [1, 0, 0, 0, 0, 0, 0, 0]);
+  const r = vec.rebuild({ userId: u1, reset: true });
+  assert.equal(r.ok, true);
+  assert.equal(r.dim, 8, '维度随新数据重置');
+  const hits = vec.search(u1, buf([1, 0, 0, 0, 0, 0, 0, 0]), 10, 0);
+  assert.ok(hits.some((h) => h.id === c), '新维度正常召回');
+  const stale = vec.search(u1, buf([1, 0, 0, 0]), 10, 0);
+  assert.ok(stale === null || stale.length === 0, '旧维度查询宁可不返回，也不返回错结果');
+});
