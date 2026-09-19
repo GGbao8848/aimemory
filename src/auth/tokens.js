@@ -2,7 +2,7 @@
 
 /**
  * API Token（m0- 前缀，与 mem0 云 key 形态一致）：
- * 生成 / 哈希 / 校验。校验走 sha256（token_hash），明文另存 token_plain 供 Web 端随时回看。
+ * 生成 / 哈希 / 校验。校验走 sha256（token_hash）；明文不落库（G3），仅在创建响应里返回一次。
  */
 const crypto = require('crypto');
 const repo = require('../db/repo');
@@ -17,10 +17,10 @@ function hashToken(token) {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
-/** 创建 Token，返回 { token(明文), id, name, created_at }；name 必填（调用方校验非空） */
+/** 创建 Token，返回 { token(明文，仅此一次), id, name, created_at }；name 必填（调用方校验非空） */
 function createApiKey(userId, name) {
   const token = generateApiKey();
-  const row = repo.createApiKey({ userId, name, tokenHash: hashToken(token), tokenPlain: token });
+  const row = repo.createApiKey({ userId, name, tokenHash: hashToken(token) });
   return {
     token,
     id: row.id,
@@ -29,12 +29,11 @@ function createApiKey(userId, name) {
   };
 }
 
-/** 列出该用户的生效 Token（含明文，供 Web 端随时回看） */
+/** 列出该用户的生效 Token（不含明文——明文仅在创建时展示一次，G3） */
 function listApiKeys(userId) {
-  return repo.listApiKeys(userId).map(({ id, name, token_plain, created_at }) => ({
+  return repo.listApiKeys(userId).map(({ id, name, created_at }) => ({
     id,
     name,
-    token: token_plain,
     created_at,
   }));
 }

@@ -6,7 +6,9 @@ const $ = (sel) => document.querySelector(sel);
 
 let currentUser = null;   // { userId, via }
 let selectedKey = null;   // MCP JSON 配置里嵌入的 Token（默认最新一枚）
-let keyToken = null;      // selectedKey 的明文（服务端提供，随时可见）
+// G3：服务端不再存明文——只有本次会话里新建的 Token 拿得到一次性明文，用于拼 MCP 配置 JSON
+let freshToken = null;
+let freshTokenKeyId = null;
 let page = 1;
 const PAGE_SIZE = 10;
 let searchQuery = '';
@@ -350,7 +352,7 @@ $('#memory-list').addEventListener('click', async (e) => {
   }
 });
 
-// ===== API Token（一名用户可持有多条命名 Token；明文由服务端保存，列表内随时可看可复制） =====
+// ===== API Token（一名用户可持有多条命名 Token；明文不落库，仅创建响应返回一次） =====
 
 async function loadKeys() {
   try {
@@ -359,7 +361,7 @@ async function loadKeys() {
   } catch (e) { toast(e.message); }
 }
 
-// 渲染 Token 列表（后端按创建时间倒序）：每枚都常显明文，可直接复制
+// 渲染 Token 列表（后端按创建时间倒序）。明文不回显：仅本次会话新建的那枚显示一次性明文。
 function renderKeys(keys) {
   const list = $('#key-list');
   if (!keys.length) {
@@ -369,22 +371,22 @@ function renderKeys(keys) {
     renderJson();
     return;
   }
-  // MCP JSON 默认嵌入最新一枚（列表首条）；有明文才能拼出可直接用的完整配置
+  // MCP JSON 默认嵌入最新一枚（列表首条）；仅当它就是本次会话新建的 Token 时有明文可拼
   selectedKey = keys[0];
-  keyToken = selectedKey.token || null;
+  keyToken = freshTokenKeyId && selectedKey && freshTokenKeyId === selectedKey.id ? freshToken : null;
   list.innerHTML = keys.map((k) => {
-    const plain = k.token || '';
+    const isFresh = k.id === freshTokenKeyId;
     return `
     <li class="key-item">
       <div class="key-main">
         <span class="key-name">${esc(k.name)}</span>
         <span class="muted">· ${esc(new Date(k.created_at).toLocaleDateString())} 创建${k.id === selectedKey.id ? ' · 用于下方配置' : ''}</span>
-        ${plain
-          ? `<code class="key-plain">${esc(plain)}</code>`
-          : '<span class="muted small">早期签发的 Token 未存明文，无法回显（请吊销后新建）</span>'}
+        ${isFresh && freshToken
+          ? `<div class="muted small">明文仅此一次，请立即保存：</div><code class="key-plain">${esc(freshToken)}</code>`
+          : '<span class="muted small">明文不回显（仅创建时展示一次）；丢失请吊销后重建，或走设备流自动签发</span>'}
       </div>
       <div class="key-ops">
-        ${plain ? `<button class="btn btn-ghost" data-copy-token="${esc(plain)}">复制</button>` : ''}
+        ${isFresh && freshToken ? `<button class="btn btn-ghost" data-copy-token="${esc(freshToken)}">复制明文</button>` : ''}
         <button class="btn btn-ghost danger" data-revoke="${esc(k.id)}">吊销</button>
       </div>
     </li>`;
@@ -397,6 +399,7 @@ function renderKeys(keys) {
       if (!confirm('吊销后该 Token 立即失效（正在使用它的 agent 会 401），确定？')) return;
       try {
         await api(`/api/keys/${b.dataset.revoke}/revoke`, { method: 'POST' });
+        if (b.dataset.revoke === freshTokenKeyId) { freshToken = null; freshTokenKeyId = null; }
         toast('已吊销');
         loadKeys();
       } catch (e2) { toast(e2.message); }
@@ -405,15 +408,17 @@ function renderKeys(keys) {
   renderJson();
 }
 
-// 新建 Token（名称必填；明文持久化，列表中随时可看）
+// 新建 Token（名称必填；响应含一次性明文——立即可见可复制，刷新后不再有）
 $('#key-create-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const name = $('#key-name-input').value.trim();
   if (!name) return toast('请先填写 Token 名称');
   try {
-    await api('/api/keys', { method: 'POST', body: JSON.stringify({ name }) });
+    const data = await api('/api/keys', { method: 'POST', body: JSON.stringify({ name }) });
     $('#key-name-input').value = '';
-    toast(`Token「${name}」已创建`);
+    freshToken = data.token || null;
+    freshTokenKeyId = data.id || null;
+    toast(`Token「${name}」已创建——明文仅显示这一次`);
     loadKeys();
   } catch (e2) { toast(e2.message); }
 });

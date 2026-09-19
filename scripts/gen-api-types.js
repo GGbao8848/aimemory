@@ -103,12 +103,11 @@ export interface Stats {
   keys: number;
 }
 
-/** Token 信息（列表返回；创建响应额外含一次性明文 token 字段名因入口而异：REST 为 token） */
+/** Token 信息（列表返回，不含明文——明文仅在创建响应里返回一次，字段名 token） */
 export interface KeyInfo {
   id: string;
   user_id: string;
   name: string;
-  token_plain: string;
   created_at: string;
   revoked_at: string | null;
 }`;

@@ -45,14 +45,13 @@ END;
 -- 注：早期版本的 memories_history（记忆修改时间线）已废弃——此处不再建表，
 -- 由下方 v0.2 瘦身迁移 DROP 掉。曾出现「同一文件里先 CREATE 又 DROP」的自相矛盾写法。
 
--- API Token：token_hash 用于鉴权校验，token_plain 供 Web 端随时回看明文
--- （明文需长期可查，故与哈希一并存储；名称由调用方强制提供，不设默认值）
+-- API Token：只存 token_hash（sha256）用于鉴权校验。
+-- 明文仅在创建响应里返回一次（G3，2026-09-19）：库文件被读走也不再等于 Token 全泄。
 CREATE TABLE IF NOT EXISTS api_keys (
   id          TEXT PRIMARY KEY,
   user_id     TEXT NOT NULL,
   name        TEXT NOT NULL,
   token_hash  TEXT NOT NULL UNIQUE,
-  token_plain TEXT,
   created_at  TEXT NOT NULL,
   revoked_at  TEXT
 );
@@ -256,11 +255,12 @@ if (!sessionCols.includes('username')) {
   db.exec('ALTER TABLE sessions ADD COLUMN username TEXT');
 }
 
-// 老库兼容：api_keys 早期只存哈希 → 补 token_plain 列。
-// 历史 Token 的明文无法从哈希逆推，该列留空，前端会提示吊销后重建。
+// G3 迁移（2026-09-19）：api_keys 不再存明文——老库清空并删除 token_plain 列。
+// 校验只走 token_hash，已有 Token 全部继续可用；「随时回看」由「创建时一次性展示」替代。
 const apiKeyCols = db.prepare("PRAGMA table_info(api_keys)").all().map((c) => c.name);
-if (!apiKeyCols.includes('token_plain')) {
-  db.exec('ALTER TABLE api_keys ADD COLUMN token_plain TEXT');
+if (apiKeyCols.includes('token_plain')) {
+  db.exec('UPDATE api_keys SET token_plain = NULL');
+  db.exec('ALTER TABLE api_keys DROP COLUMN token_plain');
 }
 
 // 老库兼容：l0_batches 早期无 device_code 列 → 补充（历史行留空，列表里显示为"未标注"）

@@ -8,26 +8,26 @@ const { now, uuid } = require('./_common');
 
 // ============ API Token（多 Token 并存：按客户端签发，单独吊销） ============
 
-function createApiKey({ userId, name, tokenHash, tokenPlain }) {
+function createApiKey({ userId, name, tokenHash }) {
   const row = {
     id: uuid(),
     user_id: userId,
     name,
     token_hash: tokenHash,
-    token_plain: tokenPlain,
     created_at: now(),
     revoked_at: null,
   };
-  // 多 Token 并存：每条独立签发、单独吊销，签发不影响该用户已有 Token
+  // 多 Token 并存：每条独立签发、单独吊销，签发不影响该用户已有 Token。
+  // 不存明文（G3）：明文只在创建响应里返回一次。
   db.prepare(
-    'INSERT INTO api_keys (id, user_id, name, token_hash, token_plain, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-  ).run(row.id, row.user_id, row.name, row.token_hash, row.token_plain, row.created_at, row.revoked_at);
+    'INSERT INTO api_keys (id, user_id, name, token_hash, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(row.id, row.user_id, row.name, row.token_hash, row.created_at, row.revoked_at);
   return row;
 }
 
 function listApiKeys(userId) {
   return db
-    .prepare('SELECT id, user_id, name, token_plain, created_at, revoked_at FROM api_keys WHERE user_id = ? AND revoked_at IS NULL ORDER BY created_at DESC')
+    .prepare('SELECT id, user_id, name, created_at, revoked_at FROM api_keys WHERE user_id = ? AND revoked_at IS NULL ORDER BY created_at DESC')
     .all(userId);
 }
 
