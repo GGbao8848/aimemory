@@ -12,7 +12,7 @@
 - **L2 冲突消解（四操作）**：新事实入库前与已有记忆比对，产出 `ADD`/`UPDATE`/`DELETE`/`NOOP`——同一事实不再反复入库、新旧取值不再并存；`DELETE` 是"删旧+存新"的取代语义，全程记 `memory_ops` 审计（误删可从审计复原）。同时 **L2 可从 L1 摘要派生**（后台静默触发、内容指纹幂等），兑现"上层可从 L0 重放"。详见 [docs/L2-事实记忆与冲突消解.md](docs/L2-事实记忆与冲突消解.md)
 - **L0 原始会话归档**：各机安装采集器（pm2），把 Codex / Claude Code / ZCode 的原始会话追加归档到 `data/l0/<设备>/<agent>/`；上传带**设备码 + 设备信息 + agent**，Web「会话归档」页按**设备 → agent → 会话 → 详情**逐级下钻，可在任意机器查看其他机器的会话；只采集上传、不做提炼（详见 [docs/L0-原始会话归档.md](docs/L0-原始会话归档.md)）。
 - **单用户**：一个个人账本，多设备多 agent 共享；Web 用本地口令登录（无外部 SSO 依赖）
-- **接入**：Web 自助签发多枚 `m0-xxx` Token（按客户端命名分发、单独吊销，明文页面随时可查）+ 设备流浏览器免粘贴授权；Web 页支持导出全量记忆（JSON）
+- **接入**：Web 自助签发多枚 `m0-xxx` Token（按客户端命名分发、单独吊销，明文仅创建时展示一次）+ 设备流浏览器免粘贴授权；Web 页支持导出全量记忆（JSON）
 - **半熔断容错**：LLM/embedding 服务抖动自动熔断降级、恢复自动探测回补，无需重启
 - **单端口 18543**：`/mcp` + `/api/*` + Web 管理页 + `/healthz`
 
@@ -25,7 +25,7 @@ MCP 客户端 (Claude Code / ZCode / …) ── POST /mcp, Authorization: Token
 HTTP Server :18543 (Express)
   /mcp        MCP Streamable HTTP（10 工具）
   /api/*      REST（Token 或 Web 会话 cookie）
-  /           管理控制台（本地口令登录；产品主前端由独立仓库对接 /api 与 /mcp）
+  /admin, /   管理控制台（`web/` 构建产物 + 本地口令登录；同时挂在根路径供登录后落地）
   /healthz    健康检查（db / embedding / llm）
         │
         ▼
@@ -38,10 +38,23 @@ SQLite (data/aimemory.db): memories + memories_fts(FTS5) + l1_summaries + memory
 
 ## Web 界面
 
-`/admin` 是**管理控制台**：记忆列表与检索预览、Token 签发（设备流接入）、L0 会话归档下钻、
+`/admin`（同时挂在 `/`）是**管理控制台**：记忆列表与检索预览、Token 签发（设备流接入）、L0 会话归档下钻、
 操作审计（memory_ops）与 L3 画像条目编辑。口令登录（`.env` 的 `AIMEMORY_PASSWORD`，
-首次启动若为空会自动生成并打印）。星图前端（atlas/）与样例（samples/）已于 2026-09-19 剪枝，
-产品主前端由独立仓库另行构建——对接 REST（`/api/*`，契约见 `docs/api/openapi.json`）与 MCP（`/mcp`）。
+首次启动若为空会自动生成并打印）。
+
+前端住在同仓 `web/`：**Vite + React + TypeScript**，六个视图（我的记忆 / 接入 Token / 会话归档 /
+操作审计 / L3 画像 / 接入指南）与旧的单文件静态页 1:1 平替——样式沿用原设计令牌（`web/src/styles/app.css`）。
+接口类型直接复用契约生成物 `docs/api/aimemory-api.ts`（`web/src/api/contract.ts` 按 `ApiPath` 收敛路由，
+后端加/删路由会让前端类型检查失败）。前端纯逻辑（归档下钻层级、展示格式化、MCP 配置拼装）是 `web/src/lib/*.ts`
+的无框架模块，由 `node --test` 直接加载守护（不引入 vitest/jsdom）。
+
+```bash
+npm run web:install && npm run web:build   # 产物 web/dist，由后端直接托管（未构建时 /admin 返回 503 提示）
+npm run web:dev                            # 本地开发：5185 端口，/api /mcp /auth 等代理到 18543
+```
+
+星图前端（atlas/）与样例（samples/）已于 2026-09-19 剪枝；「产品主前端由独立仓库构建」的旧决定已作废——
+管理台就是本仓 `web/`，外部 agent 仍只对接 REST（`/api/*`，契约见 `docs/api/openapi.json`）与 MCP（`/mcp`）。
 
 ## 快速开始
 
@@ -49,8 +62,9 @@ SQLite (data/aimemory.db): memories + memories_fts(FTS5) + l1_summaries + memory
 
 ```bash
 npm install
+npm run web:install && npm run web:build   # 管理台前端（产物 web/dist；只跑后端可跳过，/admin 会给 503 提示）
 cp .env.example .env            # 按需改 LLM_* / EMBEDDING_*（见 .env 注释）
-npm run doctor                  # 首启自检：依赖/目录/数据库/LLM 配置一次查清，缺什么给一行修复命令
+npm run doctor                  # 首启自检：依赖/目录/数据库/前端产物/LLM 配置一次查清，缺什么给一行修复命令
 pm2 start ecosystem.config.js && pm2 save   # 或 npm start
 ```
 
