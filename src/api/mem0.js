@@ -28,7 +28,7 @@
 const express = require('express');
 const repo = require('../db/repo');
 const l2store = require('../l2/store');
-const { resolveIdentity } = require('../web/routes');
+const { resolveIdentity } = require('../auth/identity');
 
 const router = express.Router();
 const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => {
@@ -58,10 +58,18 @@ function toMem0(row, extra = {}) {
     agent_id: row.agent_id || null,
     run_id: row.run_id || null,
     metadata: meta,
+    // 写入来源：direct=文本直接存储；llm=LLM 提炼；llm+embedding=LLM 提炼且向量已建
+    origin: row.origin || 'direct',
+    entities: typeof row.entities === 'string' ? safeMetaArray(row.entities) : row.entities || [],
+    categories: typeof row.categories === 'string' ? safeMetaArray(row.categories) : row.categories || [],
     created_at: row.created_at,
     updated_at: row.updated_at,
     ...extra,
   };
+}
+
+function safeMetaArray(s) {
+  try { const v = JSON.parse(s || '[]'); return Array.isArray(v) ? v : []; } catch { return []; }
 }
 
 /**
@@ -89,6 +97,9 @@ function parseFilters(filters, principal) {
   for (const key of ['agent_id', 'run_id']) {
     if (f[key] !== undefined && f[key] !== null && f[key] !== '*') out[key] = String(f[key]);
   }
+  // 实体/分类过滤（对齐 mem0 平台的 entities/categories filters）
+  if (f.entity !== undefined && f.entity !== null) out.entity = String(f.entity);
+  if (f.category !== undefined && f.category !== null) out.category = String(f.category);
   if (f.metadata && typeof f.metadata === 'object' && !Array.isArray(f.metadata)) out.metadata = f.metadata;
   for (const key of ['created_at', 'updated_at']) {
     const range = f[key];

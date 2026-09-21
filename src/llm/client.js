@@ -56,6 +56,13 @@ function recordSuccess() {
   failures = 0;
 }
 
+/** 配置变更（设置页保存）后调用：清空熔断与失败计数，立即以新端点放行 */
+function resetCircuit() {
+  failures = 0;
+  circuitOpen = false;
+  circuitUntil = 0;
+}
+
 /** LLM 是否启用（受理写入前检查：素材必须能提炼，未启用直接拒绝） */
 function enabled() {
   return config.llm.enabled;
@@ -127,4 +134,4 @@ async function complete(messages, { maxTokens = 512, temperature = 0, timeoutMs 
   return content;
 }
 
-module.exports = { complete, enabled };
+module.exports = { complete, enabled, resetCircuit };

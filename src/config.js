@@ -89,6 +89,10 @@ const l2 = {
   maxDeletes: parseInt(process.env.L2_MAX_DELETES || '5', 10),           // 单批删除上限（防批量误删）
   clip: parseInt(process.env.L2_CLIP || '200', 10),                      // 单条文本进 prompt 的裁剪长度
   maxTokens: parseInt(process.env.L2_MAX_TOKENS || '800', 10),           // 判定输出上限
+  // 长期价值门槛（仿 Generative Agents 的 importance 1-10 评分，写入时过滤）：
+  // 标注 LLM 给每条事实打分，低于阈值的不入库（宁缺毋滥，防记忆库被低价值信息污染）。
+  // 4 = 明显有跨会话价值；标注失败时不过滤（fail-open，行为与旧版一致）。
+  minImportance: parseInt(process.env.L2_MIN_IMPORTANCE || '4', 10),
   vec: process.env.L2_VEC !== '0',                                       // 向量索引（sqlite-vec），不可用时自动降级
 };
 
@@ -115,6 +119,9 @@ module.exports = {
   mcpSessionTtlMs: 30 * 60 * 1000, // MCP session 空闲 30 分钟清理
   // /healthz 积压告警阈值：pending 达到该值判定 degraded（提炼链停摆信号）；0 = 关闭
   eventsBacklogWarn: parseInt(process.env.EVENTS_BACKLOG_WARN || '50', 10),
+  // 素材原文归档保留天数（raw_materials 表；提炼是单向有损过程，原文短期可回溯）。
+  // 0 = 永久保留。归档与记忆库分离：不参与检索，仅供回溯/重提，到期自动清理。
+  rawArchiveDays: parseInt(process.env.RAW_ARCHIVE_DAYS || '90', 10),
   // 供测试直接验证口令生成逻辑（生产路径已在模块加载时调用过）
   _ensurePassword: ensurePassword,
 };

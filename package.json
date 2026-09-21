@@ -13,7 +13,8 @@
     "web:build": "npm --prefix web run build",
     "web:dev": "npm --prefix web run dev",
     "test": "node --test",
-    "vec:rebuild": "node scripts/vec-rebuild.js"
+    "vec:rebuild": "node scripts/vec-rebuild.js",
+    "classify:backfill": "node scripts/classify-backfill.js"
   },
   "engines": {
     "node": ">=20"

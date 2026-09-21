@@ -7,6 +7,8 @@ const db = require('../index');
 const llm = require('../../llm/client'); // 对象引用（便于测试 stub）
 const emb = require('../../embeddings/client');
 const vec = require('../../l2/vec'); // 向量索引；不可用时其函数返回 null/false，自动退回全扫
+const entityStore = require('../../l2/entities'); // 实体聚合表（entities/categories 标注同步）
+const store = require('../../l2/store');
 const { now, toObj, clamp } = require('./_common');
 
 function getMemoryRow(id, userId) {
@@ -64,7 +66,7 @@ async function searchMemories({ userId, query, limit = 10, threshold = 0, filter
     const match = ftsWords.map((w) => `"${w.replace(/"/g, '""')}"`).join(' AND ');
     ftsRows = db
       .prepare(
-        `SELECT m.id, m.text, m.metadata, m.facts, m.entities, m.agent_id, m.run_id, m.created_at, m.updated_at, bm25(memories_fts) AS score
+        `SELECT m.id, m.text, m.metadata, m.facts, m.entities, m.categories, m.agent_id, m.run_id, m.created_at, m.updated_at, bm25(memories_fts) AS score
          FROM memories_fts JOIN memories m ON m.rowid = memories_fts.rowid
          WHERE memories_fts MATCH ? AND m.user_id = ?${fsql} ORDER BY score LIMIT 500`
       )
@@ -74,7 +76,7 @@ async function searchMemories({ userId, query, limit = 10, threshold = 0, filter
   if (!ftsRows.length) {
     ftsRows = db
       .prepare(
-        `SELECT m.id, m.text, m.metadata, m.facts, m.entities, m.agent_id, m.run_id, m.created_at, m.updated_at, 0 AS score
+        `SELECT m.id, m.text, m.metadata, m.facts, m.entities, m.categories, m.agent_id, m.run_id, m.created_at, m.updated_at, 0 AS score
          FROM memories m WHERE m.user_id = ?${fsql} ORDER BY m.updated_at DESC LIMIT 500`
       )
       .all(userId, ...fparams);
@@ -145,7 +147,7 @@ function getVecCandidates(userId, query, topN, threshold, fsql, fparams) {
         const ph = hits.map(() => '?').join(',');
         const rows = db
           .prepare(
-            `SELECT m.id, m.text, m.metadata, m.facts, m.entities, m.agent_id, m.run_id, m.created_at, m.updated_at, m.embedding
+            `SELECT m.id, m.text, m.metadata, m.facts, m.entities, m.categories, m.agent_id, m.run_id, m.created_at, m.updated_at, m.embedding
                FROM memories m WHERE m.user_id = ? AND m.id IN (${ph})`
           )
           .all(userId, ...hits.map((h) => h.id));
@@ -160,7 +162,7 @@ function getVecCandidates(userId, query, topN, threshold, fsql, fparams) {
 
     const rows = db
       .prepare(
-        `SELECT m.id, m.text, m.metadata, m.facts, m.entities, m.agent_id, m.run_id, m.created_at, m.updated_at, m.embedding
+        `SELECT m.id, m.text, m.metadata, m.facts, m.entities, m.categories, m.agent_id, m.run_id, m.created_at, m.updated_at, m.embedding
          FROM memories m WHERE m.user_id = ? AND m.embedding IS NOT NULL${fsql}`
       )
       .all(userId, ...fparams);
@@ -193,10 +195,8 @@ function cosineSimilarity(a, b) {
 // ============ 记忆更新 / 删除（人工路径也留 history，mem0 语义） ============
 
 function recordHistory({ userId, memoryId, op, beforeText = null, afterText = null, source = 'manual' }) {
-  db.prepare(
-    `INSERT INTO memory_ops (user_id, memory_id, op, before_text, after_text, candidates, source, applied, created_at)
-     VALUES (?, ?, ?, ?, ?, '[]', ?, 1, ?)`
-  ).run(userId, memoryId, op, beforeText, afterText, source, now());
+  // 统一走 l2/store 的唯一写入口：webhooks 投递等钩子挂在那里，避免双路径漏发
+  store.recordOp({ userId, memoryId, op, beforeText, afterText, source });
 }
 
 function updateMemory({ id, userId, text, metadata }) {
@@ -228,6 +228,7 @@ function deleteMemory(id, userId) {
 
 // ============ 多维过滤 SQL ============
 // metadata：键值对象（如 {source:"claude-code"}）；agent_id/run_id：精确匹配；
+// entity：实体名（归一化关联表过滤）；category：分类词（JSON 列过滤）；
 // created_at/updated_at：{gte, lte} 时间范围；keywords：全文 LIKE
 function filtersClause(alias, filters = {}) {
   const a = alias ? `${alias}.` : '';
@@ -238,6 +239,15 @@ function filtersClause(alias, filters = {}) {
       parts.push(`${a}${field} = ?`);
       params.push(String(filters[field]));
     }
+  }
+  if (filters.entity !== undefined && String(filters.entity).trim()) {
+    // 实体：走归一化关联表（与 entities 列表的 norm 口径一致）
+    parts.push(`${a}id IN (SELECT me.memory_id FROM memory_entities me JOIN entities e ON e.id = me.entity_id WHERE e.norm = ?)`);
+    params.push(String(filters.entity).trim().replace(/\s+/g, ' ').toLowerCase());
+  }
+  if (filters.category !== undefined && String(filters.category).trim()) {
+    parts.push(`EXISTS (SELECT 1 FROM json_each(${a}categories) je WHERE je.value = ?)`);
+    params.push(String(filters.category).trim().toLowerCase());
   }
   if (filters.keywords !== undefined && String(filters.keywords).trim()) {
     parts.push(`${a}text LIKE ?`);
@@ -270,7 +280,7 @@ function filtersClause(alias, filters = {}) {
  */
 function syncFacts(id, text) {
   const prompt = `从下面的文本中提取 JSON（不要其他内容）：
-{"facts": ["独立可复用的简短事实，每条一个字符串"], "entities": ["专有名词实体：公司/组织/人名/地名/IP/端口/技术名等，每个一个字符串"]}
+{"facts": ["独立可复用的简短事实，每条一个字符串"], "entities": ["专有名词实体：公司/组织/人名/地名/IP/端口/技术名等，每个一个字符串"], "categories": ["1~2个小写英文类别词，如 tech/devops/network/project/preference"]}
 无法提取的字段给空数组。\n\n文本：${String(text).slice(0, 4000)}`;
   llm.complete([
     { role: 'system', content: '你是信息抽取助手，只输出合法 JSON。' },
@@ -278,11 +288,12 @@ function syncFacts(id, text) {
   ], { maxTokens: 1024, temperature: 0.1 })
     .then((content) => {
       if (!content) return;
-      let facts = [], entities = [];
+      let facts = [], entities = [], categories = [];
       try {
         const parsed = JSON.parse(content);
         facts = Array.isArray(parsed.facts) ? parsed.facts.filter((f) => typeof f === 'string' && f.trim().length >= 3) : [];
         entities = Array.isArray(parsed.entities) ? parsed.entities.filter((e) => typeof e === 'string' && e.trim().length >= 2) : [];
+        categories = Array.isArray(parsed.categories) ? parsed.categories.filter((c) => typeof c === 'string' && c.trim().length >= 2) : [];
       } catch {
         // 非 JSON 回退：按行当 facts
         facts = content
@@ -293,6 +304,13 @@ function syncFacts(id, text) {
       if (!facts.length && !entities.length) return;
       db.prepare('UPDATE memories SET facts = ?, entities = ? WHERE id = ?')
         .run(facts.length ? JSON.stringify(facts) : null, entities.length ? JSON.stringify(entities) : null, id);
+      // 实体聚合表同步（categories 一并写入快照；userId 从行上取，缺失时跳过聚合）
+      const row = db.prepare('SELECT user_id FROM memories WHERE id = ?').get(id);
+      if (row) {
+        try {
+          entityStore.applyClassification({ userId: row.user_id, memoryId: id, entities, categories });
+        } catch { /* 标注失败不影响 */ }
+      }
       // facts/entities 就绪后重算向量（原文 + 事实 + 实体，增强语义与实体命中）
       emb.embed(semanticText(text, facts, entities)).then((v) => {
         if (v) db.prepare('UPDATE memories SET embedding = ? WHERE id = ?').run(v, id);
@@ -307,10 +325,13 @@ function semanticText(text, facts = [], entities = []) {
   return parts.join('\n');
 }
 
-/** 异步为记忆补 embedding 向量（新增/更新后调用）；失败静默，搜索自动回退关键词 */
+/** 异步为记忆补 embedding 向量（新增/更新后调用）；失败静默，搜索自动回退关键词。
+ *  来源标记随之升级：llm → llm+embedding（direct 的原文直存不因补向量改标）。 */
 function syncEmbedding(id, text) {
   emb.embed(String(text).slice(0, 8000)).then((vec) => {
-    if (vec) db.prepare('UPDATE memories SET embedding = ? WHERE id = ?').run(vec, id);
+    if (!vec) return;
+    db.prepare('UPDATE memories SET embedding = ? WHERE id = ?').run(vec, id);
+    db.prepare("UPDATE memories SET origin = 'llm+embedding' WHERE id = ? AND origin = 'llm'").run(id);
   }).catch(() => {});
 }
 

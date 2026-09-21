@@ -25,6 +25,7 @@ const config = require('../config');
 const db = require('../db');
 const llm = require('../llm/client');
 const store = require('./store');
+const entities = require('./entities');
 
 const L2 = config.l2;
 
@@ -225,20 +226,35 @@ async function judge({ facts, candidates, mode }) {
 
 // ============ 应用 ============
 
+/** 入库后挂实体/分类标注（增强性质：失败只记日志，绝不影响事实本身） */
+function applyAt({ userId, id, index, classifications }) {
+  const c = Array.isArray(classifications) ? classifications[index] : null;
+  if (!c) return;
+  try {
+    if (c.importance != null) {
+      db.prepare('UPDATE memories SET importance = ? WHERE id = ?').run(c.importance, id);
+    }
+    entities.applyClassification({ userId, memoryId: id, entities: c.entities, categories: c.categories });
+  } catch (e) {
+    console.error(`[l2] 实体标注失败（不影响入库）：${e.message}`);
+  }
+}
+
 /** 降级路径：不做比对，全部 ADD（等价于改动前的行为，0 token） */
-function insertAll({ userId, facts, metadata = {}, source, candidates = [], agentId = null, runId = null }) {
+function insertAll({ userId, facts, metadata = {}, source, candidates = [], agentId = null, runId = null, classifications = [] }) {
   const stats = { added: 0, updated: 0, deleted: 0, noop: 0, skipped: 0, memoryIds: [] };
   const candIds = candidates.map((c) => c.id);
-  for (const text of facts) {
-    const id = store.insertFact({ userId, agentId, runId, text, metadata });
+  facts.forEach((text, i) => {
+    const id = store.insertFact({ userId, agentId, runId, text, metadata, origin: 'llm' });
+    applyAt({ userId, id, index: i, classifications });
     stats.added += 1;
     stats.memoryIds.push(id);
     store.recordOp({ userId, memoryId: id, op: 'ADD', afterText: text, candidates: candIds, source });
-  }
+  });
   return stats;
 }
 
-function applyOps({ userId, facts, ops, candidates, source, metadata = {}, agentId = null, runId = null }) {
+function applyOps({ userId, facts, ops, candidates, source, metadata = {}, agentId = null, runId = null, classifications = [] }) {
   const stats = { added: 0, updated: 0, deleted: 0, noop: 0, skipped: 0, memoryIds: [] };
   const candIds = candidates.map((c) => c.id);
   let deletes = 0;
@@ -269,7 +285,8 @@ function applyOps({ userId, facts, ops, candidates, source, metadata = {}, agent
             store.recordOp({ userId, memoryId: o.targetId, op: 'DELETE', beforeText: before, candidates: candIds, source });
           }
         }
-        const id = store.insertFact({ userId, agentId, runId, text, metadata });
+        const id = store.insertFact({ userId, agentId, runId, text, metadata, origin: 'llm' });
+        applyAt({ userId, id, index: i, classifications });
         stats.added += 1;
         stats.memoryIds.push(id);
         store.recordOp({ userId, memoryId: id, op: 'ADD', afterText: text, candidates: candIds, source });
@@ -279,7 +296,8 @@ function applyOps({ userId, facts, ops, candidates, source, metadata = {}, agent
         const r = store.updateFact({ userId, id: o.targetId, text: o.text });
         if (!r) {
           // 目标在判定后被删掉 → 降级 ADD，不丢事实
-          const id = store.insertFact({ userId, agentId, runId, text: o.text || text, metadata });
+          const id = store.insertFact({ userId, agentId, runId, text: o.text || text, metadata, origin: 'llm' });
+          applyAt({ userId, id, index: i, classifications });
           stats.added += 1;
           stats.memoryIds.push(id);
           store.recordOp({ userId, memoryId: id, op: 'ADD', afterText: o.text || text, candidates: candIds, source });
@@ -290,7 +308,8 @@ function applyOps({ userId, facts, ops, candidates, source, metadata = {}, agent
         store.recordOp({ userId, memoryId: o.targetId, op: 'UPDATE', beforeText: r.before, afterText: r.after, candidates: candIds, source });
         return;
       }
-      const id = store.insertFact({ userId, agentId, runId, text, metadata });
+      const id = store.insertFact({ userId, agentId, runId, text, metadata, origin: 'llm' });
+      applyAt({ userId, id, index: i, classifications });
       stats.added += 1;
       stats.memoryIds.push(id);
       store.recordOp({ userId, memoryId: id, op: 'ADD', afterText: text, candidates: candIds, source });
@@ -320,11 +339,17 @@ async function reconcileFacts(args) {
   return serialized(() => _reconcileFacts(args));
 }
 
-async function _reconcileFacts({ userId, facts, source = 'add_memory', metadata = {}, mode = 'material', degrade = 'insert', agentId = null, runId = null }) {
-  const list = (facts || [])
-    .map((s) => String(s == null ? '' : s).trim())
-    .filter(Boolean)
+async function _reconcileFacts({ userId, facts, source = 'add_memory', metadata = {}, mode = 'material', degrade = 'insert', agentId = null, runId = null, classifications = null }) {
+  // 标注数组必须与事实数组同索引对齐：先配对再过滤/裁剪，避免空串移位
+  const pairs = (facts || [])
+    .map((s, i) => ({
+      s: String(s == null ? '' : s).trim(),
+      c: Array.isArray(classifications) ? classifications[i] : null,
+    }))
+    .filter((p) => p.s)
     .slice(0, L2.maxFacts);
+  const list = pairs.map((p) => p.s);
+  const cls = pairs.map((p) => p.c);
 
   const empty = { added: 0, updated: 0, deleted: 0, noop: 0, skipped: 0, memoryIds: [] };
   if (!list.length) return { ...empty, degraded: false };
@@ -334,7 +359,7 @@ async function _reconcileFacts({ userId, facts, source = 'add_memory', metadata 
       console.warn(`[l2] ${why} → 本轮跳过（不写入，等下轮重试）`);
       return { ...empty, degraded: true };
     }
-    return { ...insertAll({ userId, facts: list, metadata, source, agentId, runId }), degraded: true };
+    return { ...insertAll({ userId, facts: list, metadata, source, agentId, runId, classifications: cls }), degraded: true };
   };
 
   // 关闭消解或 LLM 不可用（素材路径：0 token 纯追加；派生路径：跳过）
@@ -344,7 +369,7 @@ async function _reconcileFacts({ userId, facts, source = 'add_memory', metadata 
     const candidates = gatherCandidates(userId, list);
     const ops = await judge({ facts: list, candidates, mode });
     if (!ops) return fallback('判定输出无法解析');
-    return { ...applyOps({ userId, facts: list, ops, candidates, source, metadata, agentId, runId }), degraded: false };
+    return { ...applyOps({ userId, facts: list, ops, candidates, source, metadata, agentId, runId, classifications: cls }), degraded: false };
   } catch (e) {
     return fallback(`冲突消解异常：${e.message}`);
   }

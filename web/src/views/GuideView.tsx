@@ -1,4 +1,4 @@
-import { CheckIcon, CopyIcon } from 'lucide-react';
+import { CheckIcon, CopyIcon, Download, FileText } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -67,7 +67,32 @@ function CodeBlock({ code }: { code: string }) {
 
 export default function GuideView({ active }: { active: boolean }) {
   return (
-    <div className={active ? 'flex flex-col gap-4' : 'hidden'}>
+    <div className={active ? 'flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto' : 'hidden'}>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">配套 Skill（给 agent 装上“会用记忆库”的能力）</CardTitle>
+          <CardDescription>
+            下载 <code className="font-mono">aimemory-skills.zip</code>，解压后把 <code className="font-mono">aimemory/</code> 目录放入
+            agent 的 skills 目录（Claude Code / ZCode / Codex 等均支持），或在上传安装入口直接上传该 zip。
+            skill 内含 SKILL.md 与 <code className="font-mono">references/</code>（召回 / 沉淀 / 管理三篇按需读）。
+            安装后 agent 会自动在合适时机检索与沉淀长期记忆，无需手动配置。
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-2">
+          {/* 公开端点：无需登录，直接附件下载 */}
+          <Button asChild>
+            <a href="/skill/download" download>
+              <Download /> 下载 Skill 包（zip）
+            </a>
+          </Button>
+          <Button variant="outline" asChild>
+            <a href="/skill/SKILL.md" target="_blank" rel="noreferrer">
+              <FileText /> 预览 SKILL.md
+            </a>
+          </Button>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle className="text-base">鉴权方式</CardTitle>

@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { copyText } from '../lib/dom';
-import { fmtTime } from '../lib/format';
+import { fmtFullTime } from '../lib/format';
 import { buildMcpConfig } from '../lib/mcp-config';
 import { useEnterReload } from '../lib/hooks';
 
@@ -83,7 +83,7 @@ export default function KeysView({ active }: Props) {
   });
 
   return (
-    <div className={active ? 'flex flex-col gap-4' : 'hidden'}>
+    <div className={active ? 'flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto' : 'hidden'}>
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
@@ -152,7 +152,7 @@ export default function KeysView({ active }: Props) {
               >
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium">{k.name}</span>
-                  <Badge variant="secondary">{fmtTime(k.created_at)}</Badge>
+                  <Badge variant="secondary">{fmtFullTime(k.created_at)}</Badge>
                 </div>
                 <Button variant="ghost" size="sm" onClick={() => setRevoking(k)}>
                   <Trash2Icon className="text-destructive" /> 吊销
@@ -174,8 +174,14 @@ export default function KeysView({ active }: Props) {
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           <pre className="bg-muted overflow-x-auto rounded-md p-3 font-mono text-xs leading-relaxed">{mcp.json}</pre>
-          <div>
+          <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={() => copy(mcp.json)}>{copied ? <CheckIcon /> : <CopyIcon />} {mcp.copyLabel}</Button>
+            {/* 接线配套 skill：装上后 agent 会自动在合适时机检索/沉淀记忆 */}
+            <Button variant="outline" asChild>
+              <a href="/skill/download" download>
+                <DownloadIcon /> 下载 Skill 包（zip）
+              </a>
+            </Button>
           </div>
         </CardContent>
       </Card>

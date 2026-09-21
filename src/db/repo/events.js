@@ -1,17 +1,19 @@
 'use strict';
 
-// 素材管线域：一切提交都是"素材"（text/messages），异步受理返回 event_id，
-// 后台队列串行 LLM 提炼 → 冲突消解 → 入库（仅提炼产物，不存原文）。
+// 事件队列域：一切提交都是"素材"（text/messages），异步受理返回 event_id，
+// 后台队列串行执行 → 入库（仅提炼产物，不存原文）。
 // 事件表 events 即任务队列（status: pending/processing/done/failed）。
+// 提炼/标注/消解的实现在 src/l2/extract.js（2026-09-20 模块治理拆出）——本模块只管队列。
 
 const db = require('../index');
+const config = require('../../config');
 const llm = require('../../llm/client');
-const memories = require('./memories');
+const extract = require('../../l2/extract');
 const { now, uuid } = require('./_common');
 
 /**
  * 受理记忆素材（text 单条 / messages 多轮对话），一律异步：
- * 创建提炼任务返回 { event_id, status:'pending' }，后台队列（processPendingEvents）LLM 提炼入库。
+ * 创建提炼任务返回 { event_id, status:'pending' }，后台队列（processPendingEvents）提炼入库。
  * 库内只存提炼产物，不存原文。提炼失败 → 事件 failed（素材不落库）。
  * LLM 未启用（LLM_ENABLED=0）时直接拒绝，避免"收了素材却永远无法提炼"。
  */
@@ -33,50 +35,8 @@ function createMemory({ userId, text, messages, metadata = {}, agentId = null, r
     eventType: 'add_memory',
     payload: { kind, input, metadata: metadata || {}, agent_id: agentId, run_id: runId },
   });
+  archiveMaterial({ id: eventId, userId, kind, input, metadata: metadata || {}, agentId, runId });
   return { event_id: eventId, status: 'pending', user_id: userId };
-}
-
-/**
- * 后台执行素材提炼入库（processEvent 调用，不阻塞调用方）。
- * kind='messages'：input 为 [{role,content}] → 拼成对话文本；kind='text'：input 为原文。
- * 流程：LLM 提炼成事实 → **与已有记忆冲突消解**（ADD/UPDATE/DELETE/NOOP，见 src/l2/reconcile.js）→ 入库。
- * 提炼无产物/失败 → 抛错（调用方标记事件 failed，素材不落库）；
- * 消解失败则降级为纯追加，绝不让事实丢失。
- */
-async function processMemoryMaterial({ userId, kind, input, metadata = {}, agentId = null, runId = null }) {
-  const source = kind === 'messages' && Array.isArray(input)
-    ? input.map((m) => `${m.role}: ${m.content}`).join('\n')
-    : String(input || '');
-  if (!source.trim()) throw new Error('素材为空');
-  const extracted = await extractMemories(source);
-  if (!extracted.length) throw new Error('LLM 未能从素材提炼出有效记忆（无产物，素材未入库）');
-  // 延迟 require：l2 侧要用到本模块的记忆读取，写在顶部会形成循环依赖
-  const { reconcileFacts } = require('../../l2/reconcile');
-  const r = await reconcileFacts({ userId, facts: extracted, source: 'add_memory', metadata, mode: 'material', agentId, runId });
-  const created = r.memoryIds.map((id) => memories.getMemory(id, userId)).filter(Boolean);
-  return { created, ops: r };
-}
-
-/**
- * LLM 提炼：把一段素材（对话拼接文本或单条原文）提炼成多条独立、自包含、可复用的记忆陈述。
- * 返回字符串数组；LLM 不可用/无有效产出返回 []（调用方据此判失败，不回退存原文）。
- */
-async function extractMemories(source) {
-  const content = await llm.complete([
-    {
-      role: 'system',
-      content: '你是记忆提炼助手。把下面的内容提炼成多条独立的、可复用的完整事实陈述。要求：1) 每条必须是完整句子，自包含、带明确主语，不得省略主语（如"10.10.10.214 上运行 X 服务"而不是"上运行 X 服务"）；2) 每条用一行输出，不要编号、不要前缀、不要解释；3) 合并同主题，拆开不同主题，每条都是独立可检索的事实；4) 保留关键信息（IP、端口、地址、人名、数字、决策、偏好、技术细节）；5) 丢弃与事实无关的寒暄/过程性内容，不猜测、不添加原文没有的信息。只输出提炼出的事实本身；无法提炼出任何有价值事实时输出空。',
-    },
-    { role: 'user', content: `素材：\n${source.slice(0, 6000)}` },
-  ], { maxTokens: 2048, temperature: 0.1 });
-
-  if (!content) return [];
-  return content
-    .split('\n')
-    .map((l) => l.replace(/^[-*•\d.\s]+/, '').trim())
-    // 质量门槛：过短残句不视为可复用记忆（过滤超时截断的碎片）
-    .filter((l) => l.length >= 10)
-    .slice(0, 20);
 }
 
 // ============ 异步任务队列 ============
@@ -139,9 +99,13 @@ async function processEvent(event) {
         .run(JSON.stringify({ count: r.count, memories: [] }), now(), id);
       return getEvent(id, userId);
     }
-    const { created, ops } = await processMemoryMaterial({
+    const { created, ops } = await extract.processMemoryMaterial({
       userId, kind: p.kind, input: p.input, metadata: p.metadata, agentId: p.agent_id, runId: p.run_id,
     });
+    // 溯源打标：产物记住来源素材（重提时按此精准删除；直存/无溯源记忆不受重提影响）
+    for (const m of created) {
+      db.prepare('UPDATE memories SET raw_event_id = ? WHERE id = ?').run(id, m.id);
+    }
     // ops 记录消解明细：count=0 时也能看出"不是没干活，而是素材里的东西都已记住"，
     // 前端/agent 可据此区分「已存在（NOOP）」与「空产出」。
     const result = {
@@ -178,6 +142,82 @@ async function processPendingEvents() {
 function cleanupEvents() {
   const cutoff = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
   db.prepare("DELETE FROM events WHERE status IN ('done','failed') AND created_at <= ?").run(cutoff);
+}
+
+/** 素材原文落档（受理即写，提炼有损时的回溯依据）。归档失败绝不阻断受理。 */
+function archiveMaterial({ id, userId, kind, input, metadata = {}, agentId = null, runId = null }) {
+  try {
+    db.prepare('INSERT INTO raw_materials (id, user_id, kind, input, metadata, agent_id, run_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(id, userId, kind, JSON.stringify(input ?? null), JSON.stringify(metadata || {}), agentId, runId, now());
+  } catch (e) {
+    console.error(`[events] 素材归档失败（不影响受理）：${e.message}`);
+  }
+}
+
+/** 素材归档分页（含提炼状态与关联记忆数，供归档管理页） */
+function listRawMaterials(userId, page = 1, pageSize = 20) {
+  page = Math.max(1, Number(page) || 1);
+  pageSize = Math.max(1, Math.min(Number(pageSize) || 20, 100));
+  const total = db.prepare('SELECT COUNT(*) c FROM raw_materials WHERE user_id = ?').get(userId).c;
+  const results = db
+    .prepare(
+      `SELECT r.id, r.kind, r.input, r.metadata, r.agent_id, r.run_id, r.created_at,
+              COALESCE(e.status, 'none') AS status,
+              (SELECT COUNT(*) FROM memories m WHERE m.raw_event_id = r.id) AS memory_count
+         FROM raw_materials r
+         LEFT JOIN events e ON e.id = r.id
+        WHERE r.user_id = ?
+        ORDER BY r.created_at DESC LIMIT ? OFFSET ?`
+    )
+    .all(userId, pageSize, (page - 1) * pageSize);
+  return { results, total, page, pageSize };
+}
+
+/**
+ * 重提：删除该素材上次提炼的记忆（按溯源），再把原文重新入队走完整管线。
+ * 场景：觉得提炼得不好、换了模型想重新提炼。直存/无溯源的记忆永不触碰。
+ * @returns {{accepted: number, deleted: number}}
+ */
+function reextractRawMaterials({ userId, ids = null }) {
+  const targets = ids
+    ? ids
+    : db.prepare('SELECT id FROM raw_materials WHERE user_id = ?').all(userId).map((r) => r.id);
+  let accepted = 0;
+  let deleted = 0;
+  for (const id of targets) {
+    const raw = db.prepare('SELECT * FROM raw_materials WHERE id = ? AND user_id = ?').get(id, userId);
+    if (!raw) continue;
+    // 1) 删除上次提炼的产物（留变更历史 + 清向量）
+    const derived = db.prepare('SELECT id, text FROM memories WHERE raw_event_id = ? AND user_id = ?').all(id, userId);
+    for (const m of derived) {
+      const row = db.prepare('SELECT rowid AS rid FROM memories WHERE id = ?').get(m.id);
+      db.prepare('DELETE FROM memories WHERE id = ?').run(m.id);
+      if (row) require('../../l2/vec').remove(row.rid);
+      require('../../l2/store').recordOp({
+        userId, memoryId: m.id, op: 'DELETE', beforeText: m.text, candidates: [], source: 'reextract',
+      });
+      deleted += 1;
+    }
+    // 2) 事件重置为 pending（复用同 id → 溯源链稳定），payload 从归档还原
+    let input;
+    try { input = JSON.parse(raw.input); } catch { input = raw.input; }
+    let metadata = {};
+    try { metadata = JSON.parse(raw.metadata || '{}'); } catch { metadata = {}; }
+    db.prepare('DELETE FROM events WHERE id = ?').run(id);
+    db.prepare(
+      "INSERT INTO events (id, user_id, event_type, status, payload, created_at) VALUES (?, ?, 'add_memory', 'pending', ?, ?)"
+    ).run(id, userId, JSON.stringify({ kind: raw.kind, input, metadata, agent_id: raw.agent_id, run_id: raw.run_id }), raw.created_at);
+    accepted += 1;
+  }
+  return { accepted, deleted };
+}
+
+/** 按保留天数清理素材归档（RAW_ARCHIVE_DAYS，0 = 永久保留）。与 cleanupEvents 同节奏调用。 */
+function cleanupRawMaterials() {
+  const days = config.rawArchiveDays;
+  if (!Number.isFinite(days) || days <= 0) return;
+  const cutoff = new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
+  db.prepare('DELETE FROM raw_materials WHERE created_at <= ?').run(cutoff);
 }
 
 /**
@@ -230,10 +270,17 @@ function queueBacklog() {
 
 module.exports = {
   createMemory,
+  classifyFacts: extract.classifyFacts,
+  extractMemories: extract.extractMemories,
+  processMemoryMaterial: extract.processMemoryMaterial,
   createEvent,
   getEvent,
   processPendingEvents,
   cleanupEvents,
+  cleanupRawMaterials,
+  archiveMaterial,
+  listRawMaterials,
+  reextractRawMaterials,
   eventStats,
   queueBacklog,
 };

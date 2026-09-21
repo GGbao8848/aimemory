@@ -8,7 +8,15 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { VIEWS, type ViewName } from './views/config';
 import MemoriesView from './views/MemoriesView';
+import EntitiesView from './views/EntitiesView';
+import ArchivesView from './views/ArchivesView';
+import RequestsView from './views/RequestsView';
+import DashboardView from './views/DashboardView';
+import PlaygroundView from './views/PlaygroundView';
+import ExportsView from './views/ExportsView';
+import WebhooksView from './views/WebhooksView';
 import KeysView from './views/KeysView';
+import SettingsView from './views/SettingsView';
 import GuideView from './views/GuideView';
 
 function LoginView() {
@@ -40,6 +48,13 @@ export default function App() {
   const [me, setMe] = useState<Me | null>(null);
   const [checking, setChecking] = useState(true);
   const [view, setView] = useState<ViewName>('memories');
+  // 实体页 → 记忆页的联动过滤（消费后置空）
+  const [focusScope, setFocusScope] = useState<{ type: 'agent' | 'run'; name: string } | null>(null);
+
+  const openScope = (type: 'agent' | 'run', name: string) => {
+    setFocusScope({ type, name });
+    setView('memories');
+  };
 
   useEffect(() => {
     onUnauthorized(() => setMe(null));
@@ -56,16 +71,29 @@ export default function App() {
   const active = (name: ViewName) => ({ active: view === name });
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex h-screen overflow-hidden">
       <Sidebar active={view} onNavigate={setView} userName={me.username || '我'} />
-      <main className="flex min-w-0 flex-1 flex-col gap-4 p-6">
+      {/* 页面整体不滚动：每个视图自管滚动（记忆视图固定一屏 + 翻页，其余视图内部滚动） */}
+      <main className="flex min-w-0 flex-1 flex-col gap-4 overflow-hidden p-6">
         <header>
           <h1 className="text-lg font-semibold">{meta.title}</h1>
           <p className="text-muted-foreground text-sm">{meta.sub}</p>
         </header>
-        {/* 三个视图常驻挂载（只切显隐）：Token 一次性明文等跨视图状态不丢 */}
-        <MemoriesView {...active('memories')} />
+        {/* 各视图常驻挂载（只切显隐）：Token 一次性明文等跨视图状态不丢 */}
+        <DashboardView {...active('dashboard')} />
+        <MemoriesView
+          {...active('memories')}
+          focusScope={view === 'memories' ? focusScope : null}
+          onFocusScopeConsumed={() => setFocusScope(null)}
+        />
+        <EntitiesView {...active('entities')} onOpen={openScope} />
+        <ArchivesView {...active('archives')} />
+        <RequestsView {...active('requests')} />
+        <PlaygroundView {...active('playground')} />
+        <ExportsView {...active('exports')} />
+        <WebhooksView {...active('webhooks')} />
         <KeysView {...active('keys')} />
+        <SettingsView {...active('settings')} />
         <GuideView {...active('guide')} />
       </main>
       <Toaster position="top-center" />

@@ -18,7 +18,7 @@ const parseList = (s) => {
 const toObj = (row) => {
   if (!row) return null;
   const { embedding, ...rest } = row;
-  return { ...rest, metadata: JSON.parse(rest.metadata || '{}'), facts: parseList(rest.facts), entities: parseList(rest.entities) };
+  return { ...rest, metadata: JSON.parse(rest.metadata || '{}'), facts: parseList(rest.facts), entities: parseList(rest.entities), categories: parseList(rest.categories), importance: rest.importance == null ? null : Number(rest.importance) };
 };
 
 const clamp = (n, min, max, def) => {

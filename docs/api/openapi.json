@@ -106,6 +106,12 @@
           "memories"
         ],
         "summary": "删除单条记忆"
+      },
+      "patch": {
+        "tags": [
+          "memories"
+        ],
+        "summary": "更新记忆 text/metadata（改文本后异步重消解）"
       }
     },
     "/api/events/{id}": {
@@ -491,6 +497,136 @@
             }
           }
         }
+      }
+    },
+    "/api/settings": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "读取当前生效设置（密钥脱敏为 set/preview）"
+      },
+      "put": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "更新设置（密钥传空=保持现有值；保存即热生效并回写 .env）"
+      }
+    },
+    "/api/settings/test": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "模型服务连通性测试（target: llm | embedding）"
+      }
+    },
+    "/api/settings/vec-rebuild": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "重建向量索引（reset=true 清空重建，换 embedding 模型后必用）"
+      }
+    },
+    "/api/settings/reveal": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "明文查看已配置密钥（section: llm | embedding；小眼睛按需调用）"
+      }
+    },
+    "/api/entities": {
+      "get": {
+        "tags": [
+          "entities"
+        ],
+        "summary": "作用域实体清单（mem0 语义：user/agent/run + 记忆数 + 最近更新）"
+      }
+    },
+    "/api/categories": {
+      "get": {
+        "tags": [
+          "entities"
+        ],
+        "summary": "分类清单（带记忆计数，降序）"
+      }
+    },
+    "/api/dashboard": {
+      "get": {
+        "tags": [
+          "dashboard"
+        ],
+        "summary": "控制台概览聚合（计数 + 30 天操作统计 + 14 天趋势 + 最近活动 + 队列积压）"
+      }
+    },
+    "/api/ops": {
+      "get": {
+        "tags": [
+          "dashboard"
+        ],
+        "summary": "活动日志分页（memory_ops：ADD/UPDATE/DELETE 留痕）"
+      }
+    },
+    "/api/webhooks": {
+      "get": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "列出 webhooks（secret 明文返回，仅创建者可见）"
+      },
+      "post": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "创建 webhook（返回 secret，仅此一次明文展示语境）"
+      }
+    },
+    "/api/webhooks/{id}": {
+      "patch": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "更新 webhook（url/description/events/enabled）"
+      },
+      "delete": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "删除 webhook（级联删除投递日志）"
+      }
+    },
+    "/api/webhooks/{id}/deliveries": {
+      "get": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "最近投递记录（含状态码/重试次数/错误）"
+      }
+    },
+    "/api/keywords": {
+      "get": {
+        "tags": [
+          "entities"
+        ],
+        "summary": "抽取专名清单（关键词，带关联记忆数；供记忆页过滤）"
+      }
+    },
+    "/api/raw-materials": {
+      "get": {
+        "tags": [
+          "archive"
+        ],
+        "summary": "素材归档分页（含提炼状态与关联记忆数）"
+      }
+    },
+    "/api/raw-materials/reextract": {
+      "post": {
+        "tags": [
+          "archive"
+        ],
+        "summary": "重提（ids 批量/单条，或 all=true 全库；删同源旧记忆后按原文重新提炼）"
       }
     }
   },

@@ -19,6 +19,7 @@ const db = require('./index');
 const memories = require('./repo/memories');
 const events = require('./repo/events');
 const keys = require('./repo/keys');
+const l2store = require('../l2/store');
 
 // ============ 统计（跨域聚合） ============
 
@@ -27,6 +28,25 @@ function stats(userId) {
   return {
     memories: db.prepare('SELECT COUNT(*) c FROM memories WHERE user_id = ?').get(userId).c,
     keys: db.prepare('SELECT COUNT(*) c FROM api_keys WHERE user_id = ? AND revoked_at IS NULL').get(userId).c,
+  };
+}
+
+/** 控制台 Dashboard 聚合：计数 + 操作趋势 + 最近活动（跨 memories/entities/ops/events 域） */
+function dashboard(userId) {
+  const counts = stats(userId);
+  const entities = db.prepare('SELECT COUNT(*) c FROM entities WHERE user_id = ?').get(userId).c;
+  const ops30 = l2store.opStats(userId, 30);
+  const cutoff14 = new Date(Date.now() - 13 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+  const daily = db
+    .prepare(`SELECT substr(created_at, 1, 10) AS day, COUNT(*) AS n FROM memory_ops WHERE user_id = ? AND substr(created_at, 1, 10) >= ? GROUP BY day ORDER BY day`)
+    .all(userId, cutoff14);
+  return {
+    ...counts,
+    entities,
+    ops30,
+    daily,
+    recent: l2store.listOps(userId, 8),
+    backlog: events.queueBacklog(),
   };
 }
 
@@ -44,6 +64,9 @@ module.exports = {
   getEvent: events.getEvent,
   processPendingEvents: events.processPendingEvents,
   cleanupEvents: events.cleanupEvents,
+  cleanupRawMaterials: events.cleanupRawMaterials,
+  listRawMaterials: events.listRawMaterials,
+  reextractRawMaterials: events.reextractRawMaterials,
   eventStats: events.eventStats,
   queueBacklog: events.queueBacklog,
   // keys / sessions 域
@@ -57,4 +80,5 @@ module.exports = {
   cleanupSessions: keys.cleanupSessions,
   // 跨域聚合
   stats,
+  dashboard,
 };

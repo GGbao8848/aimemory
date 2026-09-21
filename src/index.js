@@ -233,11 +233,12 @@ app.get('/healthz', async (_req, res) => {
 // ===== 启动 =====
 repo.cleanupSessions();
 repo.cleanupEvents();
+repo.cleanupRawMaterials();
 setInterval(() => repo.cleanupSessions(), 3600_000).unref();
 // 异步任务后台处理：启动处理一次 + 每 2s 轮询 pending（add 提炼）
 repo.processPendingEvents();
 setInterval(() => repo.processPendingEvents(), 2000).unref();
-setInterval(() => repo.cleanupEvents(), 3600_000).unref();
+setInterval(() => { repo.cleanupEvents(); repo.cleanupRawMaterials(); }, 3600_000).unref();
 
 // 向量索引（sqlite-vec，可选）：仅在索引落后于已有向量时补齐，不阻塞启动。
 // 不可用（未装/维度不匹配/L2_VEC=0）时静默跳过，检索自动退回关键词+全扫。

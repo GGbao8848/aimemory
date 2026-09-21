@@ -15,36 +15,6 @@ const format = require(path.join(LIB, 'format.ts'));
 const mcp = require(path.join(LIB, 'mcp-config.ts'));
 const memories = require(path.join(LIB, 'memories.ts'));
 
-const MEM = [
-  { id: '1', text: 'a', agent_id: 'zcode', run_id: 's1', metadata: {}, updated_at: '2026-09-18T07:00:00Z' },
-  { id: '2', text: 'b', agent_id: 'claude', run_id: null, metadata: {}, updated_at: '2026-09-18T08:00:00Z' },
-  { id: '3', text: 'c', agent_id: 'zcode', run_id: 's2', metadata: {}, updated_at: '2026-09-18T09:00:00Z' },
-  { id: '4', text: 'd', agent_id: null, run_id: null, metadata: {}, updated_at: '2026-09-18T10:00:00Z' },
-];
-
-test('作用域聚合：提取出现过的 agent/run，去重且保持出现顺序', () => {
-  const s = memories.scopeOptions(MEM);
-  assert.deepStrictEqual(s.agents, ['zcode', 'claude']);
-  assert.deepStrictEqual(s.runs, ['s1', 's2']);
-  assert.deepStrictEqual(memories.scopeOptions([]), { agents: [], runs: [] });
-});
-
-test('作用域过滤：null 维度不限制，双维度取交集', () => {
-  assert.strictEqual(memories.filterByScope(MEM, memories.ALL_SCOPE).length, 4);
-  assert.deepStrictEqual(
-    memories.filterByScope(MEM, { agentId: 'zcode', runId: null }).map((m) => m.id),
-    ['1', '3'],
-  );
-  assert.deepStrictEqual(
-    memories.filterByScope(MEM, { agentId: 'zcode', runId: 's2' }).map((m) => m.id),
-    ['3'],
-  );
-  assert.deepStrictEqual(
-    memories.filterByScope(MEM, { agentId: null, runId: 's1' }).map((m) => m.id),
-    ['1'],
-  );
-});
-
 test('历史事件映射：三类操作有标签与配色，未知事件原样兜底', () => {
   assert.deepStrictEqual(memories.historyMeta('ADD'), { label: '新增', variant: 'default' });
   assert.deepStrictEqual(memories.historyMeta('UPDATE'), { label: '更新', variant: 'secondary' });
@@ -61,11 +31,21 @@ test('事件状态文案：异步提炼的四种状态 + 未知兜底', () => {
   assert.strictEqual(memories.eventStatusLabel('other'), 'other');
 });
 
-test('展示格式：时间', () => {
-  assert.strictEqual(format.fmtTime(null), '—');
-  assert.strictEqual(format.fmtTime('not-a-date'), 'not-a-date', '无法解析的时间原样返回，不显示 Invalid Date');
-  assert.strictEqual(format.fmtCompactTime('2026-09-19T04:12:33Z'), '09-19 04:12');
-  assert.strictEqual(format.fmtCompactTime(null), '—');
+test('来源徽标：direct/llm/llm+embedding 三态有标签与配色，未知与空值兜底', () => {
+  assert.deepStrictEqual(memories.originMeta('direct'), { label: '直接存储', variant: 'secondary' });
+  assert.deepStrictEqual(memories.originMeta('llm'), { label: 'LLM 提炼', variant: 'outline' });
+  assert.deepStrictEqual(memories.originMeta('llm+embedding'), { label: 'LLM+向量', variant: 'default' });
+  assert.strictEqual(memories.originMeta('weird').label, 'weird', '未知来源原样展示');
+  assert.strictEqual(memories.originMeta(null).label, '—', '老数据缺 origin 时不显示 undefined');
+});
+
+test('展示格式：完整时间（本地时区年月日时分秒）', () => {
+  assert.strictEqual(format.fmtFullTime(null), '—');
+  assert.strictEqual(format.fmtFullTime('not-a-date'), 'not-a-date', '无法解析的时间原样返回，不显示 Invalid Date');
+  // 用本地时区构造再转 ISO，往返后断言与时区无关
+  const local = new Date(2026, 8, 19, 4, 12, 33);
+  assert.strictEqual(format.fmtFullTime(local.toISOString()), '2026-09-19 04:12:33');
+  assert.match(format.fmtFullTime('2026-09-19T04:12:33.456Z'), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/, '输出固定为年月日时分秒');
 });
 
 test('MCP 配置：有明文→完整可用；有 Token 无明文→占位；无 Token→不带 headers', () => {

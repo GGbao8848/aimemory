@@ -43,6 +43,13 @@ function recordSuccess() {
   failures = 0;
 }
 
+/** 配置变更（设置页保存）后调用：清空熔断与失败计数，立即以新端点放行 */
+function resetCircuit() {
+  failures = 0;
+  circuitOpen = false;
+  circuitUntil = 0;
+}
+
 /** 单个文本 → float32 向量（Buffer）。失败返回 null，不会抛错。 */
 async function embed(text) {
   const cfg = config.embedding;
@@ -97,4 +104,4 @@ async function embedBatch(texts) {
   return out;
 }
 
-module.exports = { embed, embedBatch, float32Buffer };
+module.exports = { embed, embedBatch, float32Buffer, resetCircuit };

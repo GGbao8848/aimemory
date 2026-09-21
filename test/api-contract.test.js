@@ -33,7 +33,7 @@ function implementedRoutes() {
   ];
   for (const { file, prefix, marker } of sources) {
     const code = fs.readFileSync(path.join(ROOT, file), 'utf8');
-    const re = new RegExp(`${marker}\\.(get|post|put|delete)\\(\\s*'([^']+)'`, 'g');
+    const re = new RegExp(`${marker}\\.(get|post|put|patch|delete)\\(\\s*'([^']+)'`, 'g');
     let m;
     while ((m = re.exec(code))) {
       let p = prefix + m[2];

@@ -1,21 +1,35 @@
 // 本文件由 `npm run types`（scripts/gen-api-types.js）从 docs/api/openapi.json 生成——勿手改，
 // 与 openapi 不同步会被 test/api-types.test.js 打回。实体接口的语义说明见 docs/前端对接.md。
-// 来源：OpenAPI 3.1.0 · 0.2.0 · 17 条路径
+// 来源：OpenAPI 3.1.0 · 0.2.0 · 31 条路径
 
 // ============ 路由面（自动生成） ============
 
-export type ApiMethod = 'DELETE' | 'GET' | 'POST' | 'PUT';
+export type ApiMethod = 'DELETE' | 'GET' | 'PATCH' | 'POST' | 'PUT';
 
 export type ApiPath =
+  | '/api/categories'
+  | '/api/dashboard'
+  | '/api/entities'
   | '/api/events/{id}'
   | '/api/keys'
   | '/api/keys/{id}/revoke'
+  | '/api/keywords'
   | '/api/me'
   | '/api/memories'
   | '/api/memories/export'
   | '/api/memories/{id}'
   | '/api/openapi.json'
+  | '/api/ops'
+  | '/api/raw-materials'
+  | '/api/raw-materials/reextract'
+  | '/api/settings'
+  | '/api/settings/reveal'
+  | '/api/settings/test'
+  | '/api/settings/vec-rebuild'
   | '/api/stats'
+  | '/api/webhooks'
+  | '/api/webhooks/{id}'
+  | '/api/webhooks/{id}/deliveries'
   | '/healthz'
   | '/mcp'
   | '/v1/event/{event_id}'
@@ -27,15 +41,29 @@ export type ApiPath =
 
 /** 全部 REST 路由与其支持的方法（与 express 路由表一致，由契约守护测试保证） */
 export const API_ROUTES: Readonly<Record<ApiPath, readonly ApiMethod[]>> = {
+  '/api/categories': ['GET'],
+  '/api/dashboard': ['GET'],
+  '/api/entities': ['GET'],
   '/api/events/{id}': ['GET'],
   '/api/keys': ['GET', 'POST'],
   '/api/keys/{id}/revoke': ['POST'],
+  '/api/keywords': ['GET'],
   '/api/me': ['GET'],
   '/api/memories': ['GET', 'POST'],
   '/api/memories/export': ['GET'],
-  '/api/memories/{id}': ['GET', 'DELETE'],
+  '/api/memories/{id}': ['GET', 'DELETE', 'PATCH'],
   '/api/openapi.json': ['GET'],
+  '/api/ops': ['GET'],
+  '/api/raw-materials': ['GET'],
+  '/api/raw-materials/reextract': ['POST'],
+  '/api/settings': ['GET', 'PUT'],
+  '/api/settings/reveal': ['POST'],
+  '/api/settings/test': ['POST'],
+  '/api/settings/vec-rebuild': ['POST'],
   '/api/stats': ['GET'],
+  '/api/webhooks': ['GET', 'POST'],
+  '/api/webhooks/{id}': ['PATCH', 'DELETE'],
+  '/api/webhooks/{id}/deliveries': ['GET'],
   '/healthz': ['GET'],
   '/mcp': ['POST', 'GET'],
   '/v1/event/{event_id}': ['GET'],
@@ -58,6 +86,11 @@ export interface Memory {
   metadata: Record<string, unknown>;
   facts: string[] | null;
   entities: string[] | null;
+  categories: string[] | null;
+  /** 长期价值评分（1-10，写入时标注；null=未评分的存量/直存） */
+  importance: number | null;
+  /** 写入来源：direct=文本直接存储；llm=LLM 提炼；llm+embedding=LLM 提炼且向量已建 */
+  origin: 'direct' | 'llm' | 'llm+embedding';
   created_at: string;
   updated_at: string;
 }
@@ -70,6 +103,10 @@ export interface Mem0Memory {
   agent_id: string | null;
   run_id: string | null;
   metadata: Record<string, unknown>;
+  /** 写入来源：direct=文本直接存储；llm=LLM 提炼；llm+embedding=LLM 提炼且向量已建 */
+  origin: 'direct' | 'llm' | 'llm+embedding';
+  entities: string[] | null;
+  categories: string[] | null;
   created_at: string;
   updated_at: string;
   score?: number;

@@ -15,6 +15,7 @@ const crypto = require('crypto');
 const db = require('../db');
 const emb = require('../embeddings/client');
 const vec = require('./vec');
+const webhooks = require('./webhooks');
 
 const now = () => new Date().toISOString();
 const uuid = () => crypto.randomUUID();
@@ -22,23 +23,25 @@ const uuid = () => crypto.randomUUID();
 /** 与 memories.text 的存储上限保持一致（见 repo/memories.js 的 MAX_TEXT 语义） */
 const MAX_TEXT = 8000;
 
-/** 补向量：异步、失败静默（embedding 不可用时检索降级关键词，不影响写入） */
+/** 补向量：异步、失败静默（embedding 不可用时检索降级关键词，不影响写入）。
+ *  来源标记随之升级：llm → llm+embedding（direct 的原文直存不因补向量改标）。 */
 function syncEmbedding(id, text) {
   emb.embed(text).then((buf) => {
     if (!buf) return;
     db.prepare('UPDATE memories SET embedding = ? WHERE id = ?').run(buf, id);
+    db.prepare("UPDATE memories SET origin = 'llm+embedding' WHERE id = ? AND origin = 'llm'").run(id);
     vec.upsert(id, buf); // 向量层不可用时内部静默返回 false
   }).catch(() => {});
 }
 
-/** 新事实入库（返回记忆 id） */
-function insertFact({ userId, agentId = null, runId = null, text, metadata = {} }) {
+/** 新事实入库（返回记忆 id）。origin：direct=原文直存；llm=LLM 提炼产物（向量补齐后自动升级 llm+embedding） */
+function insertFact({ userId, agentId = null, runId = null, text, metadata = {}, origin = 'direct' }) {
   const id = uuid();
   const ts = now();
   const t = String(text || '').slice(0, MAX_TEXT);
   db.prepare(
-    'INSERT INTO memories (id, user_id, agent_id, run_id, text, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-  ).run(id, userId, agentId, runId, t, JSON.stringify(metadata || {}), ts, ts);
+    'INSERT INTO memories (id, user_id, agent_id, run_id, text, metadata, origin, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(id, userId, agentId, runId, t, JSON.stringify(metadata || {}), origin, ts, ts);
   syncEmbedding(id, t);
   return id;
 }
@@ -102,6 +105,10 @@ function recordOp({ userId, memoryId = null, op, beforeText = null, afterText = 
     applied ? 1 : 0,
     now()
   );
+  // Webhooks 投递：唯一挂钩点（所有写路径的历史都经这里）。未生效的判定（安全阀拦下）不通知
+  if (applied && memoryId && op !== 'NOOP') {
+    webhooks.dispatch({ userId, op, memoryId, beforeText, afterText });
+  }
 }
 
 /** 某条记忆的变更历史（新→旧） */
@@ -134,6 +141,21 @@ function listOps(userId, limit = 50) {
     }));
 }
 
+/** 活动日志分页（Requests 页用）：{results, total, page, pageSize} */
+function listOpsPaged(userId, page = 1, pageSize = 20) {
+  page = Math.max(1, Number(page) || 1);
+  pageSize = Math.max(1, Math.min(Number(pageSize) || 20, 100));
+  const total = db.prepare('SELECT COUNT(*) c FROM memory_ops WHERE user_id = ?').get(userId).c;
+  const results = db
+    .prepare(
+      `SELECT id, memory_id, op, before_text, after_text, source, applied, created_at
+         FROM memory_ops WHERE user_id = ? ORDER BY id DESC LIMIT ? OFFSET ?`
+    )
+    .all(userId, pageSize, (page - 1) * pageSize)
+    .map((r) => ({ ...r, applied: !!r.applied }));
+  return { results, total, page, pageSize };
+}
+
 /** 四种操作的计数（供统计接口/前端展示） */
 function opStats(userId, sinceDays = 30) {
   const cutoff = new Date(Date.now() - sinceDays * 24 * 3600 * 1000).toISOString();
@@ -150,6 +172,6 @@ function opStats(userId, sinceDays = 30) {
 
 module.exports = {
   insertFact, updateFact, deleteFact, getFact, recentFacts, factsByIds,
-  recordOp, listMemoryOps, listOps, opStats,
+  recordOp, listMemoryOps, listOps, listOpsPaged, opStats,
   MAX_TEXT,
 };

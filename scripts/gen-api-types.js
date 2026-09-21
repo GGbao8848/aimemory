@@ -33,6 +33,11 @@ export interface Memory {
   metadata: Record<string, unknown>;
   facts: string[] | null;
   entities: string[] | null;
+  categories: string[] | null;
+  /** 长期价值评分（1-10，写入时标注；null=未评分的存量/直存） */
+  importance: number | null;
+  /** 写入来源：direct=文本直接存储；llm=LLM 提炼；llm+embedding=LLM 提炼且向量已建 */
+  origin: 'direct' | 'llm' | 'llm+embedding';
   created_at: string;
   updated_at: string;
 }
@@ -45,6 +50,10 @@ export interface Mem0Memory {
   agent_id: string | null;
   run_id: string | null;
   metadata: Record<string, unknown>;
+  /** 写入来源：direct=文本直接存储；llm=LLM 提炼；llm+embedding=LLM 提炼且向量已建 */
+  origin: 'direct' | 'llm' | 'llm+embedding';
+  entities: string[] | null;
+  categories: string[] | null;
   created_at: string;
   updated_at: string;
   score?: number;

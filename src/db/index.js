@@ -138,6 +138,92 @@ for (const col of ['embedding', 'facts', 'entities', 'agent_id', 'run_id']) {
   }
 }
 
+// 记忆来源标记（2026-09-20）：direct=文本直接存储（不经 LLM）；llm=LLM 提炼（向量未建）；
+// llm+embedding=LLM 提炼且向量已建。向量补齐成功后由写入层把 llm 升级为 llm+embedding。
+if (!memCols.includes('origin')) {
+  db.exec('ALTER TABLE memories ADD COLUMN origin TEXT');
+}
+// 存量回填：本库的记忆全部来自旧素材提炼管线（LLM 产物），按有无向量定级；新写入都会显式带 origin
+db.exec("UPDATE memories SET origin = CASE WHEN embedding IS NOT NULL THEN 'llm+embedding' ELSE 'llm' END WHERE origin IS NULL");
+
+// ===== 实体与分类（对齐 mem0 平台，2026-09-20）=====
+// categories：memories 上的 JSON 数组列（1-2 个小写类别词，如 tech/devops）。
+// entities：归一化聚合表（供实体列表/过滤/计数），memories.entities 仍存每条记忆的实体快照。
+if (!memCols.includes('categories')) {
+  db.exec('ALTER TABLE memories ADD COLUMN categories TEXT');
+}
+// 长期价值评分（1-10，写入时由标注 LLM 打分；低于 L2_MIN_IMPORTANCE 的不入库）
+if (!memCols.includes('importance')) {
+  db.exec('ALTER TABLE memories ADD COLUMN importance INTEGER');
+}
+// 溯源：这条记忆提炼自哪份素材（raw_materials/events 的 id）。重提 = 删同源记忆 + 按原文重跑。
+// 直存（infer=false）与手工添加的记忆无溯源，重提永不触碰。
+if (!memCols.includes('raw_event_id')) {
+  db.exec('ALTER TABLE memories ADD COLUMN raw_event_id TEXT');
+}
+db.exec('CREATE INDEX IF NOT EXISTS idx_memories_raw_event ON memories(raw_event_id)');
+db.exec(`
+CREATE TABLE IF NOT EXISTS entities (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  name       TEXT NOT NULL,              -- 展示名（首见写法）
+  norm       TEXT NOT NULL,              -- 归一化键（小写去空白），查重/过滤用
+  created_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_entities_user_norm ON entities(user_id, norm);
+CREATE INDEX IF NOT EXISTS idx_entities_user ON entities(user_id);
+
+CREATE TABLE IF NOT EXISTS memory_entities (
+  memory_id TEXT NOT NULL REFERENCES memories(id) ON DELETE CASCADE,
+  entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+  PRIMARY KEY (memory_id, entity_id)
+);
+CREATE INDEX IF NOT EXISTS idx_memory_entities_entity ON memory_entities(entity_id);
+
+-- Webhooks（对齐 mem0 平台）：记忆变更（ADD/UPDATE/DELETE）实时通知外部系统。
+-- secret 用于 HMAC-SHA256 签名（X-Aimemory-Signature 头）；投递日志留在 webhook_deliveries。
+CREATE TABLE IF NOT EXISTS webhooks (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL,
+  url         TEXT NOT NULL,
+  description TEXT,
+  secret      TEXT NOT NULL,
+  events      TEXT NOT NULL DEFAULT '["ADD","UPDATE","DELETE"]', -- JSON 数组，订阅的操作类型
+  enabled     INTEGER NOT NULL DEFAULT 1,
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_webhooks_user ON webhooks(user_id);
+
+-- 素材原文归档（提炼是单向有损过程；原文短期落档供回溯/重提，按 RAW_ARCHIVE_DAYS 到期清理）。
+-- 与 memories 分离：不参与检索与消解，不会"弄脏"记忆库。
+CREATE TABLE IF NOT EXISTS raw_materials (
+  id         TEXT PRIMARY KEY,            -- 与 events.id 一致（受理即归档）
+  user_id    TEXT NOT NULL,
+  kind       TEXT NOT NULL,               -- text | messages
+  input      TEXT NOT NULL,               -- 原文（text 为字符串；messages 为 JSON 数组）
+  metadata   TEXT,                        -- 受理时的 metadata（重提时还原）
+  agent_id   TEXT,
+  run_id     TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_raw_materials_user ON raw_materials(user_id, created_at);
+
+
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  webhook_id TEXT NOT NULL REFERENCES webhooks(id) ON DELETE CASCADE,
+  op         TEXT NOT NULL,
+  memory_id  TEXT,
+  payload    TEXT NOT NULL,
+  status     TEXT NOT NULL,               -- ok | failed
+  status_code INTEGER,
+  attempts   INTEGER NOT NULL DEFAULT 1,
+  error      TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_hook ON webhook_deliveries(webhook_id, id DESC);
+`);
+
 // ===== 瘦身迁移（mem0 形态收敛，2026-09-19）=====
 // 裁掉 L0 采集 / L1 摘要 / L3 画像 / 设备流授权整条链（详见 docs/项目规划.md 转向定论）：
 // memories 主表 + 提炼队列 + 冲突消解历史 + 向量索引 即 mem0 核心，其余层全部退役。
@@ -155,3 +241,11 @@ db.exec(`
 `);
 
 module.exports = db;
+
+// 老库兼容：raw_materials 早期无 metadata/agent_id/run_id 列 → 补充（幂等）
+const rawCols = db.prepare("PRAGMA table_info(raw_materials)").all().map((c) => c.name);
+for (const col of ['metadata', 'agent_id', 'run_id']) {
+  if (!rawCols.includes(col)) {
+    db.exec(`ALTER TABLE raw_materials ADD COLUMN ${col} TEXT`);
+  }
+}
