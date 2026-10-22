@@ -10,7 +10,7 @@
  * 分域模块（实现见各文件，本文件只做转发；导出面与拆分前逐键一致，勿在此新增实现）：
  *   repo/memories.js  记忆 CRUD + 混合检索（向量 + FTS + OR 兜底）
  *   repo/events.js    素材受理 + 提炼队列 + 积压统计
- *   repo/keys.js      API Token / Web 会话
+ *   repo/keys.js      用户（Keycloak 建档）/ API Token / Web 会话
  * stats() 是跨域聚合（memories+keys 计数），留在本文件。
  */
 
@@ -70,6 +70,10 @@ module.exports = {
   eventStats: events.eventStats,
   queueBacklog: events.queueBacklog,
   // keys / sessions 域
+  upsertUser: keys.upsertUser,
+  getUser: keys.getUser,
+  findUserByIdentifier: keys.findUserByIdentifier,
+  listUsers: keys.listUsers,
   createApiKey: keys.createApiKey,
   listApiKeys: keys.listApiKeys,
   findUserIdByTokenHash: keys.findUserIdByTokenHash,

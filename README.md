@@ -35,12 +35,13 @@ HTTP Server :18543 (Express)
   /v1 /v2     mem0 形态 REST（Token 鉴权）
   /mcp        MCP Streamable HTTP（7 工具）
   /api/*      管理台自用面（Token 或 Web 会话 cookie）
-  /admin, /   Web 管理台（web/ 构建产物 + 本地口令登录）
+  /admin, /   Web 管理台（web/ 构建产物 + Keycloak 登录，多租户）
+  /auth/*     Keycloak OIDC 登录/登出（/slo-logout 单点登出）
   /healthz    健康检查（db / embedding / llm / 提炼队列积压）
         │
         ▼
 SQLite (data/aimemory.db): memories + memories_fts(FTS5) + memory_ops(变更历史)
-        + l2_meta(向量维度) + api_keys + sessions + events(异步提炼队列)
+        + l2_meta(向量维度) + users(Keycloak 建档) + api_keys + sessions + events(异步提炼队列)
         │
         ├─ embeddings/client.js → OpenAI 兼容 /v1/embeddings（语义向量）
         └─ llm/client.js       → OpenAI 兼容 /v1/chat/completions（素材提炼/消解判定）
@@ -52,7 +53,10 @@ SQLite (data/aimemory.db): memories + memories_fts(FTS5) + memory_ops(变更历�
 
 ## 快速开始
 
-前置：Node.js 20+ 以及一个 OpenAI 兼容的 LLM 服务（素材提炼用；embedding 可选）。**无需任何外部登录服务**。
+前置：Node.js 20+、一个 OpenAI 兼容的 LLM 服务（素材提炼用；embedding 可选）、
+以及一台可用的 Keycloak（Web 管理台登录用；多租户部署与 BR-Agent 共用同一 realm `br`）。
+client 注册：`.env` 配好 `KEYCLOAK_URL` / `KEYCLOAK_ADMIN_*` 后跑 `npm run setup:keycloak`（幂等），
+手工注册等价步骤见 [docs/部署-生产机.md](docs/部署-生产机.md)。
 
 ```bash
 npm install
@@ -66,7 +70,7 @@ pm2 start ecosystem.config.js && pm2 save   # 或 npm start
 
 ```bash
 curl http://localhost:18543/healthz    # {"status":"ok",...}
-curl http://localhost:18543/           # Web 管理台（首次启动会打印自动生成的口令）
+curl http://localhost:18543/healthz    # Web 管理台入口；浏览器打开后「使用 Keycloak 登录」
 ```
 
 ## 使用方式（照 mem0 的写法）
@@ -118,8 +122,8 @@ curl http://localhost:18543/v1/memories/<id>/history/ -H "Authorization: Token m
 | 变量 | 说明 |
 |---|---|
 | `PORT` | 服务端口（默认 18543） |
-| `AIMEMORY_PASSWORD` | Web 登录口令（首次启动自动生成写回 .env，并打印在日志） |
-| `AIMEMORY_USER_ID` / `AIMEMORY_USER_NAME` | 个人身份标识 / 界面显示名（默认 owner / 我） |
+| `KEYCLOAK_URL` / `KEYCLOAK_REALM` / `KEYCLOAK_CLIENT_ID` | Keycloak 登录（默认 realm `br`，client `aimemory-web`）；未配置时 Web 面不可登录，Token 面不受影响 |
+| `AIMEMORY_USER_ID` | 存量单用户数据归属（仅供 `npm run migrate:owner` 迁移旧数据，不参与鉴权） |
 | `LLM_ENABLED` / `LLM_BASE_URL` / `LLM_MODEL` / `LLM_API_KEY` / `LLM_TIMEOUT_MS` | 提炼用 chat/completions（未启用时 infer=true 写入直接拒绝） |
 | `EMBEDDING_ENABLED` / `EMBEDDING_BASE_URL` / `EMBEDDING_MODEL` / `EMBEDDING_API_KEY` | 语义检索（不可用自动退关键词；换模型后 `npm run vec:rebuild`） |
 | `AIMEMORY_DB` | 数据库路径覆盖（测试用独立库） |

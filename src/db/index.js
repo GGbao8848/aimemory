@@ -61,7 +61,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_user_name ON api_keys(user_id, na
 -- 迁移：旧版「一人最多一条生效密钥」的硬约束已随多 Token 策略移除（幂等 DROP 兼容存量库）
 DROP INDEX IF EXISTS idx_api_keys_user_active;
 
--- Web 登录会话（本地口令登录成功后建立，HttpOnly cookie 引用 sid）
+-- Web 登录会话（Keycloak OIDC 登录成功后建立，HttpOnly cookie 引用 sid）
 CREATE TABLE IF NOT EXISTS sessions (
   id         TEXT PRIMARY KEY,
   user_id    TEXT NOT NULL,
@@ -70,6 +70,17 @@ CREATE TABLE IF NOT EXISTS sessions (
   expires_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions(expires_at);
+
+-- 用户（多租户，2026-10-21）：Keycloak 登录时自动建档，sub 即 user_id。
+-- 无 Keycloak 侧的写操作（只读对接），本地仅存展示所需的最小字段。
+CREATE TABLE IF NOT EXISTS users (
+  id            TEXT PRIMARY KEY,          -- Keycloak sub（JWT）
+  username      TEXT NOT NULL,             -- preferred_username
+  name          TEXT,                      -- 显示名（name claim，可空）
+  email         TEXT,
+  created_at    TEXT NOT NULL,
+  last_login_at TEXT
+);
 
 -- 异步任务（add 收到 messages/素材后异步受理：立即返回 event_id，后台串行提炼入库）
 -- 本地 LLM 并发低，提炼不可阻塞调用方，故走任务队列（默认 2s 轮询处理）

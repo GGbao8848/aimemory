@@ -13,8 +13,15 @@ const { execFileSync } = require('node:child_process');
 const ROOT = path.join(__dirname, '..');
 const configSrc = fs.readFileSync(path.join(ROOT, 'src/config.js'), 'utf8');
 const exampleSrc = fs.readFileSync(path.join(ROOT, '.env.example'), 'utf8');
+// 部分键由运维脚本读取（不走 src/config.js），一并纳入「代码读取的键」集合
+const scriptSrc = ['scripts/setup-keycloak.mjs']
+  .map((f) => fs.readFileSync(path.join(ROOT, f), 'utf8'))
+  .join('\n');
 
-const configKeys = new Set([...configSrc.matchAll(/process\.env\.([A-Z0-9_]+)/g)].map((m) => m[1]));
+const configKeys = new Set(
+  [...configSrc.matchAll(/process\.env\.([A-Z0-9_]+)/g), ...scriptSrc.matchAll(/(?:process\.env|localEnv)\.([A-Z0-9_]+)/g)]
+    .map((m) => m[1])
+);
 const exampleKeys = new Set([...exampleSrc.matchAll(/^\s*#?\s*([A-Z0-9_]+)\s*=/gm)].map((m) => m[1]));
 
 test('src/config.js 读取的每个环境变量都在 .env.example 有文档', () => {
@@ -39,7 +46,7 @@ test('doctor 冒烟：临时库环境 exit 0 且给出结论与下一步', () =>
     });
     assert.ok(out.includes('首启自检'), '输出应含自检标题');
     assert.ok(out.includes('可以启动'), '临时库环境应结论「可以启动」');
-    assert.ok(out.includes('/admin'), '输出应含下一步指引');
+    assert.ok(out.includes('浏览器打开'), '输出应含下一步指引');
     assert.ok(!/[0-9a-f]{32}/.test(out), '输出不得包含密钥形态字符串');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });

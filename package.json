@@ -13,6 +13,8 @@
     "web:build": "npm --prefix web run build",
     "web:dev": "npm --prefix web run dev",
     "test": "node --test",
+    "setup:keycloak": "node scripts/setup-keycloak.mjs",
+    "migrate:owner": "node scripts/migrate-owner-data.js",
     "vec:rebuild": "node scripts/vec-rebuild.js",
     "classify:backfill": "node scripts/classify-backfill.js"
   },
@@ -24,7 +26,8 @@
     "adm-zip": "^0.6.0",
     "better-sqlite3": "^13.0.3",
     "cookie-parser": "^1.4.7",
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "jose": "^5.9.6"
   },
   "allowScripts": {
     "better-sqlite3@13.0.3": true

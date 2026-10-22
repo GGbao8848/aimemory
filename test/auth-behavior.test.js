@@ -1,9 +1,9 @@
 'use strict';
 
 /**
- * 鉴权行为回归（评估轮 Q1）：
- * 无凭证/假 Token/假 cookie → 401；MCP 端点同样鉴权；
- * 登录限速：连续错口令达上限后 429，且窗口内正确口令同样被拒（按 IP 而非按口令）。
+ * 鉴权行为回归（评估轮 Q1，Keycloak 多租户版）：
+ * 无凭证/假 Token/假 cookie → 401；MCP 端点同样鉴权。
+ * 本地口令与限速已随单用户登录移除——登录防爆破由 Keycloak 负责。
  * 子进程起隔离实例（临时库 + LLM/EMBEDDING 关），真实数据零接触。
  */
 const test = require('node:test');
@@ -22,9 +22,8 @@ function startServer(port) {
     env: {
       ...process.env,
       AIMEMORY_DB: path.join(tmp, 'a.db'),
-      AIMEMORY_L3_DIR: path.join(tmp, 'l3'),
-      AIMEMORY_L0_DIR: path.join(tmp, 'l0'),
-      AIMEMORY_PASSWORD: 'auth-test-pw-0919',
+      // 显式置空 KEYCLOAK_URL：Web 登录应 503 拒绝，401 族不受影响
+      KEYCLOAK_URL: '',
       LLM_ENABLED: '0',
       EMBEDDING_ENABLED: '0',
       PORT: String(port),
@@ -45,24 +44,13 @@ async function waitReady(port) {
   throw new Error('server not ready');
 }
 
-test('鉴权行为：401 族 + 登录限速 429（按 IP）+ 成功登录 302', async () => {
+test('鉴权行为：401 族（REST / MCP / 假凭证）+ 未配 Keycloak 时登录入口 503', async () => {
   const port = 19100 + (process.pid % 400);
   const b = `http://127.0.0.1:${port}`;
   const { child, tmp } = startServer(port);
   try {
     await waitReady(port);
-    const form = (password) => ({
-      method: 'POST',
-      redirect: 'manual',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `password=${encodeURIComponent(password)}`,
-    });
-
-    // 成功登录 → 302 建会话（先做，避免被限速窗口挡住）
-    let r = await fetch(`${b}/auth/local-login`, form('auth-test-pw-0919'));
-    assert.equal(r.status, 302, '正确口令应 302');
-    assert.ok((r.headers.get('set-cookie') || '').includes('aim_session='), '应下发会话 cookie');
-    await r.arrayBuffer().catch(() => {});
+    let r;
 
     // 401 族：REST 无凭证 / 假 Token / 假 cookie
     r = await fetch(`${b}/api/stats`);
@@ -80,17 +68,14 @@ test('鉴权行为：401 族 + 登录限速 429（按 IP）+ 成功登录 302', 
     });
     assert.equal(r.status, 401, 'MCP 无 Token 应 401');
 
-    // 连续错口令：前 10 次 401，第 11 次起 429（15 分钟窗口内同 IP 上限 10 次）
-    let last = 0;
-    for (let i = 0; i < 11; i++) {
-      r = await fetch(`${b}/auth/local-login`, form('wrong-password'));
-      last = r.status;
-      await r.arrayBuffer().catch(() => {});
-    }
-    assert.equal(last, 429, '连续失败应触发限速');
-    // 限速是按 IP 而非按口令：窗口内正确口令同样被拒
-    r = await fetch(`${b}/auth/local-login`, form('auth-test-pw-0919'));
-    assert.equal(r.status, 429, '限速窗口内正确口令同样 429');
+    // mem0 对外面同样 401
+    r = await fetch(`${b}/v1/memories`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    assert.equal(r.status, 401, '/v1 无 Token 应 401');
+
+    // Web 登录入口：未配置 Keycloak → 503 明确指引（不静默 404）
+    r = await fetch(`${b}/auth/login`, { redirect: 'manual' });
+    assert.equal(r.status, 503, '未配 KEYCLOAK_URL 应 503');
+    assert.ok((await r.text()).includes('KEYCLOAK_URL'));
   } finally {
     child.kill('SIGTERM');
     await new Promise((r) => setTimeout(r, 200));

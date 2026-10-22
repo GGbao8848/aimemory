@@ -127,9 +127,14 @@ async function pingModel(base, key) {
     report('ok', '向量索引', `未启用：${e.message}（自动降级，不影响功能）`, null);
   }
 
-  // ===== 8. Web 登录口令 =====
-  report(Boolean(config.password), 'Web 口令',
-    config.passwordGenerated ? '本次已自动生成强口令并写入 .env（启动日志会再打印一次）' : '已设置（.env 的 AIMEMORY_PASSWORD）', null);
+  // ===== 8. Web 登录（Keycloak 多租户）=====
+  // warn 而非 bad：缺配时 MCP / API Token 接入完全可用，只是 Web 管理台登录不可用
+  if (config.keycloak.enabled) {
+    report('ok', 'Web 登录', `Keycloak ${config.keycloak.url}（realm ${config.keycloak.realm}，client ${config.keycloak.clientId}）`, null);
+  } else {
+    report('warn', 'Web 登录', '未配置 KEYCLOAK_URL：Web 面无法登录；MCP / API Token 不受影响',
+      '.env 补 KEYCLOAK_URL，并运行 node scripts/setup-keycloak.mjs 注册 client');
+  }
 
   // ===== 9. 端口占用 =====
   const portFree = await checkPort(config.port);
@@ -160,7 +165,7 @@ async function pingModel(base, key) {
   console.log(`结果：${bad ? `${bad} 项必须修复` : '可以启动'}${warn ? `，${warn} 项建议关注` : ''}\n`);
   console.log('下一步：');
   console.log('  1. npm start                     # 启动（或 pm2 start ecosystem.config.js）');
-  console.log(`  2. 浏览器打开 http://127.0.0.1:${config.port}/admin  # 口令登录（.env 的 AIMEMORY_PASSWORD）`);
+  console.log(`  2. 浏览器打开 http://127.0.0.1:${config.port}/  # Keycloak 登录（realm ${config.keycloak.realm}）`);
   console.log('  3. /admin 接入指南页             # agent 接入（MCP / REST Token）');
   console.log('  4. npm run doctor -- --probe     # 需要探活模型服务时');
   process.exitCode = bad ? 1 : 0;

@@ -2,7 +2,6 @@
 
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
 
 const root = path.join(__dirname, '..');
 const envPath = path.join(root, '.env');
@@ -23,33 +22,23 @@ function loadEnv() {
 
 loadEnv();
 
-// 身份常量：单用户模式下所有数据归属这一个身份，由 MCP 的 instructions / Web 展示使用
-const USER_ID = process.env.AIMEMORY_USER_ID || 'owner';
+// 存量单用户数据的归属 ID（v0.2 单用户时代的常量身份）。
+// 多租户（Keycloak）模式下不再用于鉴权，仅供 scripts/migrate-owner-data.mjs 等运维脚本
+// 定位旧数据；迁移完成后库中不再出现该 user_id。
+const LEGACY_USER_ID = process.env.AIMEMORY_USER_ID || 'owner';
 
-/**
- * 本地登录口令：缺失或为空时自动生成强口令并写回 .env。
- * 与旧 SESSION_SECRET 的坑同理——不能只看「.env 里有没有 AIMEMORY_PASSWORD= 这行」，
- * 空值也会被 loadEnv 读进来，若不回填则每次重启都会换口令、且旧口令无从得知。
- *
- * @param {string} file 目标 .env 路径
- * @param {string|undefined} current 当前生效值（非空则直接返回 null，不生成）
- * @returns {string|null} 生成的口令，或 null（无需生成）
- */
-function ensurePassword(file, current) {
-  if (current) return null;
-  const generated = crypto.randomBytes(16).toString('base64url');
-  let content = fs.readFileSync(file, 'utf8');
-  if (/^\s*AIMEMORY_PASSWORD\s*=/m.test(content)) {
-    // 已有该行（可能是空值）→ 就地替换，避免重复追加
-    content = content.replace(/^\s*AIMEMORY_PASSWORD\s*=.*$/m, `AIMEMORY_PASSWORD=${generated}`);
-  } else {
-    content = `${content.replace(/\s*$/, '')}\nAIMEMORY_PASSWORD=${generated}\n`;
-  }
-  fs.writeFileSync(file, content);
-  return generated;
-}
-const generatedPassword = ensurePassword(envPath, process.env.AIMEMORY_PASSWORD);
-if (generatedPassword) process.env.AIMEMORY_PASSWORD = generatedPassword;
+// ===== Keycloak 登录（多租户）=====
+// Web 管理台经 Keycloak OIDC（授权码 + PKCE）登录，会话仍为本地 aim_session cookie；
+// 机器到机器（MCP / /v1 /v2 API）继续用 m0- Token（Web 登录后在 Token 页签发）。
+// KEYCLOAK_URL 缺失时 Web 登录不可用（/auth/login 明确报错），Token 鉴权不受影响。
+const keycloak = {
+  url: (process.env.KEYCLOAK_URL || '').replace(/\/$/, ''),
+  // 默认对接 br 域（与 BR-Agent 多租户部署共用同一 realm，SSO 会话按 host 域共享）
+  realm: process.env.KEYCLOAK_REALM || 'br',
+  clientId: process.env.KEYCLOAK_CLIENT_ID || 'aimemory-web',
+};
+keycloak.enabled = Boolean(keycloak.url);
+keycloak.issuer = keycloak.enabled ? `${keycloak.url}/realms/${keycloak.realm}` : null;
 
 // ===== Embedding 语义检索 =====
 // 用于 search_memories 的语义召回。指向任意 OpenAI 兼容的 /v1/embeddings 服务。
@@ -107,14 +96,10 @@ module.exports = {
   embedding,
   llm,
   l2,
-  // ===== 单用户身份（个人部署） =====
-  // 所有数据归属这一个身份；不存在多用户/租户概念。
-  // 默认 'owner'：全新的个人部署直接用默认值即可，无需配置。
-  userId: USER_ID,
-  userName: process.env.AIMEMORY_USER_NAME || '我',
-  // 本地登录口令（Web 管理页）；首次启动自动生成并写回 .env
-  password: process.env.AIMEMORY_PASSWORD,
-  passwordGenerated: generatedPassword, // 非空表示本次是自动生成，启动时提示用户
+  // ===== Keycloak 登录（多租户，Web 面必配）=====
+  keycloak,
+  // 对外可达地址（可选）：反向代理/容器部署时 Host 头不可信，用它拼 OIDC 回调地址
+  publicBaseUrl: (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, ''),
   sessionTtlMs: 7 * 24 * 3600 * 1000, // Web 会话 7 天
   mcpSessionTtlMs: 30 * 60 * 1000, // MCP session 空闲 30 分钟清理
   // /healthz 积压告警阈值：pending 达到该值判定 degraded（提炼链停摆信号）；0 = 关闭
@@ -122,6 +107,7 @@ module.exports = {
   // 素材原文归档保留天数（raw_materials 表；提炼是单向有损过程，原文短期可回溯）。
   // 0 = 永久保留。归档与记忆库分离：不参与检索，仅供回溯/重提，到期自动清理。
   rawArchiveDays: parseInt(process.env.RAW_ARCHIVE_DAYS || '90', 10),
-  // 供测试直接验证口令生成逻辑（生产路径已在模块加载时调用过）
-  _ensurePassword: ensurePassword,
+  // 存量单用户数据归属（迁移脚本定位旧数据用，见 LEGACY_USER_ID 注释）
+  legacyUserId: LEGACY_USER_ID,
+  legacyUserName: process.env.AIMEMORY_USER_NAME || '我',
 };

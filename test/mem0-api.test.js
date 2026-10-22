@@ -24,7 +24,6 @@ function startServer(port) {
     env: {
       ...process.env,
       AIMEMORY_DB: path.join(tmp, 'a.db'),
-      AIMEMORY_PASSWORD: 'mem0-api-test-pw',
       LLM_ENABLED: '0',
       EMBEDDING_ENABLED: '0',
       PORT: String(port),
@@ -45,24 +44,17 @@ async function waitReady(port) {
   throw new Error('server not ready');
 }
 
-/** 登录拿会话 cookie → 签发 Token（明文） */
-async function issueToken(port) {
-  const base = `http://127.0.0.1:${port}`;
-  const login = await fetch(`${base}/auth/local-login`, {
-    method: 'POST',
-    redirect: 'manual',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `password=${encodeURIComponent('mem0-api-test-pw')}`,
-  });
-  const setCookie = login.headers.get('set-cookie') || '';
-  const cookie = setCookie.split(';')[0];
-  const r = await fetch(`${base}/api/keys`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Cookie: cookie },
-    body: JSON.stringify({ name: 'mem0-test' }),
-  });
-  assert.equal(r.status, 201, '签发 Token 应成功');
-  return (await r.json()).token;
+/** 直接在临时库签发 Token（口令登录已移除；/v1 /v2 面 Token 与 Keycloak 会话面互相独立） */
+function issueToken(dbPath, userId = 'keycloak-sub-A') {
+  const crypto = require('node:crypto');
+  const Database = require('better-sqlite3');
+  const db = new Database(dbPath);
+  const token = 'm0-' + crypto.randomBytes(32).toString('base64url');
+  db.prepare('INSERT INTO api_keys (id, user_id, name, token_hash, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(crypto.randomUUID(), userId, 'mem0-test',
+      crypto.createHash('sha256').update(token).digest('hex'), new Date().toISOString());
+  db.close();
+  return { token, userId };
 }
 
 function client(base, token) {
@@ -92,7 +84,7 @@ test('mem0 API：infer=false 直存 → get/history/search/list → update/delet
   const { child, tmp } = startServer(port);
   try {
     await waitReady(port);
-    const token = await issueToken(port);
+    const token = issueToken(path.join(tmp, 'a.db')).token;
     const api = client(`http://127.0.0.1:${port}`, token);
 
     // ===== add（infer=false）：原文直存，同步返回 =====
@@ -195,7 +187,7 @@ test('mem0 API：infer=true 且 LLM 关闭 → 503 明确拒绝（不静默吞�
   const { child, tmp } = startServer(port);
   try {
     await waitReady(port);
-    const token = await issueToken(port);
+    const token = issueToken(path.join(tmp, 'a.db')).token;
     const api = client(`http://127.0.0.1:${port}`, token);
     const r = await api.add({ text: '需要 LLM 提炼的素材' });
     assert.equal(r.status, 503);

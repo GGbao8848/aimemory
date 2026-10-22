@@ -2,7 +2,7 @@
 
 /**
  * MCP 端点（Streamable HTTP）：挂载在 Express 的 /mcp 路径。
- * - 鉴权：Authorization: Token m0-xxx → 身份（单用户部署下恒为 config.userId）
+ * - 鉴权：Authorization: Token m0-xxx → 身份（多租户下 Token 归属其签发用户）
  * - 每个连接（mcp-session-id）缓存独立的 Server+Transport 实例并复用，
  *   保证 SDK 内部初始化状态连续
  */
@@ -12,7 +12,7 @@ const { buildServer } = require('./tools');
 const tokens = require('../auth/tokens');
 const config = require('../config');
 
-// mcpSessionId -> { userId, server, transport, lastSeen }（userId 单用户下为常量）
+// mcpSessionId -> { userId, server, transport, lastSeen }（userId = 该连接 Token 的归属用户）
 const sessions = new Map();
 setInterval(() => {
   const cutoff = Date.now() - config.mcpSessionTtlMs;

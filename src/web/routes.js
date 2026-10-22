@@ -24,6 +24,12 @@ const wrap = (fn) => (req, res) => fn(req, res).catch((e) => {
   else res.end();
 });
 
+/** 构造 OIDC 回调地址：PUBLIC_BASE_URL 优先（反代/容器里 Host 不可信），否则用请求 Host */
+function buildRedirectUri(req, pathname = '/auth/callback') {
+  const base = config.publicBaseUrl || `http://${req.get('host')}`;
+  return `${base}${pathname}`;
+}
+
 apiRouter.get('/me', wrap(async (req, res) => {
   const id = resolveIdentity(req);
   if (!id) return res.status(401).json({ error: '未授权' });
@@ -141,8 +147,10 @@ apiRouter.get('/memories', requireAuth, wrap(async (req, res) => {
 // ===== 实体与分类（对齐 mem0 平台语义） =====
 
 // 作用域实体（mem0 Entities 页语义）：user/agent/run 三类记忆归属维度 + 记忆数 + 最近更新
+// user 维度显示名：会话用户名 → users 表 → 兜底「我」（存量的 owner 数据无 users 行）
 apiRouter.get('/entities', requireAuth, wrap(async (req, res) => {
-  res.json({ results: entityStore.listScopes(req.identity.userId, config.userName) });
+  const displayName = req.identity.username || repo.getUser(req.identity.userId)?.name || '我';
+  res.json({ results: entityStore.listScopes(req.identity.userId, displayName) });
 }));
 
 // 抽取专名清单（从记忆文本抽取的名词，供记忆页"关键词"过滤）
@@ -292,4 +300,4 @@ apiRouter.post('/keys/:id/revoke', requireAuth, wrap(async (req, res) => {
   res.json({ success: true });
 }));
 
-module.exports = { apiRouter, resolveIdentity };
+module.exports = { apiRouter, resolveIdentity, buildRedirectUri };

@@ -4,7 +4,8 @@
  * 存量记忆实体/分类回填（对齐 mem0 平台的 entities/categories）：
  * 对缺失 categories 标注的记忆分批调用 classifyFacts（复用写入链路同一 prompt），
  * 结果经 applyClassification 写入 memories 快照与 entities 聚合表。
- * 用法：node scripts/classify-backfill.js [--all]   # --all 连已有标注的一起重跑
+ * 用法：node scripts/classify-backfill.js [--all] [--user <user_id>]
+ *   --all 连已有标注的一起重跑；--user 指定目标用户（默认存量单用户 owner）
  * 幂等可重复跑；LLM 不可用时直接失败退出（标注是本脚本的全部目的）。
  */
 
@@ -14,7 +15,10 @@ const events = require('../src/db/repo/events');
 const entityStore = require('../src/l2/entities');
 const llm = require('../src/llm/client');
 
-const all = process.argv.includes('--all');
+const argv = process.argv.slice(2);
+const all = argv.includes('--all');
+const userArg = argv.includes('--user') ? argv[argv.indexOf('--user') + 1] : null;
+const userId = userArg || config.legacyUserId;
 const BATCH = 8;
 
 async function main() {
@@ -23,8 +27,8 @@ async function main() {
     process.exit(1);
   }
   const where = all ? 'user_id = ?' : "user_id = ? AND (categories IS NULL OR categories = '[]')";
-  const rows = db.prepare(`SELECT id, text FROM memories WHERE ${where} ORDER BY created_at ASC`).all(config.userId);
-  console.log(`待标注记忆：${rows.length} 条（批大小 ${BATCH}）`);
+  const rows = db.prepare(`SELECT id, text FROM memories WHERE ${where} ORDER BY created_at ASC`).all(userId);
+  console.log(`待标注记忆：${rows.length} 条（批大小 ${BATCH}，user_id=${userId}）`);
   if (!rows.length) {
     console.log('✓ 全部已有标注，无需回填');
     return;
@@ -51,7 +55,7 @@ async function main() {
     for (let j = 0; j < batch.length; j++) {
       const c = cls[j] || { entities: [], categories: [] };
       entityStore.applyClassification({
-        userId: config.userId,
+        userId,
         memoryId: batch[j].id,
         entities: c.entities || [],
         categories: c.categories || [],
@@ -65,8 +69,8 @@ async function main() {
     await classifySafe(rows.slice(i, i + BATCH));
   }
 
-  const ents = entityStore.listEntities(config.userId);
-  const cats = entityStore.listCategories(config.userId);
+  const ents = entityStore.listEntities(userId);
+  const cats = entityStore.listCategories(userId);
   console.log(`✓ 回填完成：成功 ${done} 条，失败 ${failed} 条（重跑本脚本只补失败项）；实体 ${ents.length} 个，分类 ${cats.length} 个`);
   if (failed) process.exit(2);
 }

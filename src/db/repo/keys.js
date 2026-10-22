@@ -1,9 +1,42 @@
 'use strict';
 
-// 接入与身份域：API Token（多 Token 并存、单独吊销）与 Web 会话。
+// 接入与身份域：用户（Keycloak 建档）、API Token（多 Token 并存、单独吊销）与 Web 会话。
 
 const db = require('../index');
 const { now, uuid } = require('./_common');
+
+// ============ 用户（多租户：Keycloak 登录时自动建档） ============
+
+/** 登录即建档/刷新：sub 为唯一身份，其余字段以 Keycloak claims 为准覆盖 */
+function upsertUser({ id, username, name = null, email = null }) {
+  db.prepare(`
+    INSERT INTO users (id, username, name, email, created_at, last_login_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      username = excluded.username,
+      name = excluded.name,
+      email = excluded.email,
+      last_login_at = excluded.last_login_at
+  `).run(id, username, name, email, now(), now());
+}
+
+function getUser(id) {
+  return db.prepare('SELECT * FROM users WHERE id = ?').get(id) || null;
+}
+
+/** 按 id / username / email 定位用户（迁移脚本按名字找目标用户用） */
+function findUserByIdentifier(identifier) {
+  return (
+    db.prepare('SELECT * FROM users WHERE id = ?').get(identifier) ||
+    db.prepare('SELECT * FROM users WHERE username = ?').get(identifier) ||
+    db.prepare('SELECT * FROM users WHERE email = ?').get(identifier) ||
+    null
+  );
+}
+
+function listUsers() {
+  return db.prepare('SELECT * FROM users ORDER BY created_at ASC').all();
+}
 
 // ============ API Token（多 Token 并存：按客户端签发，单独吊销） ============
 
@@ -66,6 +99,10 @@ function cleanupSessions() {
 }
 
 module.exports = {
+  upsertUser,
+  getUser,
+  findUserByIdentifier,
+  listUsers,
   createApiKey,
   listApiKeys,
   findUserIdByTokenHash,

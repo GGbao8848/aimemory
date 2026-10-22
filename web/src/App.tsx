@@ -5,7 +5,6 @@ import { endpoints, type Me } from './api/contract';
 import Sidebar from './components/Sidebar';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import { VIEWS, type ViewName } from './views/config';
 import MemoriesView from './views/MemoriesView';
 import EntitiesView from './views/EntitiesView';
@@ -26,19 +25,11 @@ function LoginView() {
         <div className="flex flex-col items-center gap-2 text-center">
           <img className="size-14 rounded-xl" src="/icon-128.png" alt="aimemory" />
           <h1 className="text-lg font-semibold">登录记忆库</h1>
-          <p className="text-muted-foreground text-sm">输入访问口令以管理你的记忆。</p>
+          <p className="text-muted-foreground text-sm">通过 Keycloak 统一登录（与 BR-Agent 同一账号）。</p>
         </div>
-        <form className="flex flex-col gap-3" method="POST" action="/auth/local-login">
-          <Input
-            name="password"
-            type="password"
-            placeholder="访问口令"
-            autoComplete="current-password"
-            required
-            autoFocus
-          />
-          <Button type="submit" className="w-full">登录</Button>
-        </form>
+        <Button className="w-full" onClick={() => { window.location.href = '/auth/login'; }}>
+          使用 Keycloak 登录
+        </Button>
       </Card>
     </div>
   );
