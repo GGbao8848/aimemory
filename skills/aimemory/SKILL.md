@@ -30,7 +30,7 @@ user-invocable: true
 
 | 工具 | 一句话 |
 |---|---|
-| `add_memory` | 提交素材（`text` 或 `messages`），**异步**受理返回 `event_id`，后台 LLM 提炼入库（不存原文） |
+| `add_memory` | 提交素材（`text` 或 `messages`，可带 `agent_id` 项目/来源标签），**异步**受理返回 `event_id`，后台 LLM 提炼入库（不存原文） |
 | `get_event_status` | 用 `event_id` 查提炼进度：pending / processing / done / failed |
 | `search_memories` | 语义 + 关键词混合检索（`query` 必填；`limit` / `threshold` / `filters` 可选） |
 | `get_memories` | 分页列出记忆（可用 `filters` 过滤 metadata / 时间范围） |
@@ -38,18 +38,20 @@ user-invocable: true
 | `update_memory` | 按 id 更新 `text` / `metadata`（改文本后台自动去重合并） |
 | `delete_memory` | 按 id 删除 |
 
-## 四条硬规则
+## 五条硬规则
 
-1. **写入必须轮询到底**：`add_memory` 返回 `event_id` ≠ 已入库。用 `get_event_status` 等到 `done`
+1. **写入有门槛**：本库只收**跨机器、跨项目、长久**的记忆；短期项目的实现细节写进该项目自己的
+   `AGENTS.md`，确需入库必须带 `agent_id: "<项目名>"`，同主题细节合并成一条，不要一事一条刷库。
+2. **写入必须轮询到底**：`add_memory` 返回 `event_id` ≠ 已入库。用 `get_event_status` 等到 `done`
    （拿提炼产物）或 `failed`（素材未入库，如实告知用户，不谎报成功）。
-2. **删除必须确认**：`delete_memory` 前先展示目标内容让用户确认，禁止擅自删除。
-3. **更新先读**：`update_memory` 前先 `get_memory` 拿原文，向用户展示修改点。
-4. **结果要紧凑**：检索/列表结果用短列表呈现（内容 + 时间），不吐原始 JSON；把记忆融入回答；
+3. **删除必须确认**：`delete_memory` 前先展示目标内容让用户确认，禁止擅自删除。
+4. **更新先读**：`update_memory` 前先 `get_memory` 拿原文，向用户展示修改点。
+5. **结果要紧凑**：检索/列表结果用短列表呈现（内容 + 时间），不吐原始 JSON；把记忆融入回答；
    无相关记忆时保持沉默、不打扰。
 
 ## 边界
 
 - 记忆是当前部署账号的个人账本：检索到的内容可能已过时（端口/地址/配置），使用前判断时效性，必要时提醒核实。
-- 不存敏感明文：密码等凭据默认不存原文，可存"存在哪/用户名"，除非用户明确要求。
+- 敏感凭据按部署策略：内网自托管默认可存原文；服务端 `SENSITIVE_MODE=redact` 时提炼层自动脱敏。
 - 清空全部记忆、签发/吊销 Token 这类整库与凭据操作**不通过 MCP 做**——引导用户到 Web 管理台
   （`http://<内网IP>:18543/admin`）。

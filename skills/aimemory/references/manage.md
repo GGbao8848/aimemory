@@ -12,6 +12,7 @@
 | "删某条记忆" | 先展示目标内容确认 → `delete_memory { memory_id }` |
 | "刚存的那个存上了吗" | `get_event_status { event_id }`（异步写入的进度查询） |
 | "清空我的记忆" | 引导到 Web 管理台操作，或 REST `DELETE /v1/memories/?user_id=…`（MCP 不提供整库删除，防误操作） |
+| "XX 项目的记忆不要了" | REST 按项目批量删：`curl -X DELETE -H "Authorization: Token m0-xxx" "http://<内网IP>:18543/v1/memories/?agent_id=<项目名>"`（异步，返回 event_id 可轮询）；删除前先 `get_memories` 报数确认 |
 | Token 签发 / 吊销 | 引导到 Web 管理台「接入 Token」页（`http://<内网IP>:18543/admin`），MCP 不暴露 |
 | 导出全部记忆 | Web 管理台「接入 Token」页的导出按钮，或 REST `GET /api/memories/export` |
 
@@ -21,7 +22,8 @@
   （可在变更历史里追溯），无需手动清理。
 - **删除留痕**：删除会写入变更历史（保留被删文本），误删可从 Web 管理台的「变更历史」查看；
   真要恢复需人工按历史文本重建。
-- **作用域维度**：REST 面（`/v1` `/v2`）支持 `agent_id` / `run_id` 标签过滤；MCP 面单用户下不需要这些参数。
+- **作用域维度**：`agent_id` / `run_id` 是记忆的归属标签（写入时 `add_memory` 带上）；REST 面
+  （`/v1` `/v2`）检索与批量删除都支持按标签过滤，MCP 检索的 `filters` 亦支持 `agent_id`。
 
 ## 错误处理
 

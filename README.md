@@ -11,6 +11,10 @@
   `GET /v1/event/{event_id}/`（事件轮询）——SDK/脚本照 mem0 的用法写即可
 - **素材提炼型写入（infer 双路径）**：`infer=true`（默认）输入视为素材（`text` / `messages`），后台 LLM 提炼成
   多条自包含记忆后异步入库（返回 `event_id`）；`infer=false` 原文直存同步返回——与 mem0 语义一致
+- **写入门槛 + 项目归属**：库定位跨机器/跨项目/长久记忆（skill 引导分流，短期项目细节走项目内 AGENTS.md）；
+  项目相关记忆带 `agent_id` 标签，可按项目检索与批量清理
+- **敏感内容策略开关**：内网自托管默认凭据可按原文入库（`SENSITIVE_MODE=allow`）；
+  公网/共享部署设 `redact` 由提炼层自动脱敏
 - **冲突消解（mem0 的 ADD/UPDATE/DELETE/NOOP）**：新事实入库前与已有记忆比对，同一事实不再反复入库、
   新旧取值不再并存；每次变更写入历史，可查可复原
 - **语义 + 关键词混合检索**：embedding 向量召回 + SQLite FTS5 关键词召回（中文子串）；embedding 不可用时自动回退

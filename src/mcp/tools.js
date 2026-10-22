@@ -40,6 +40,7 @@ const tools = [
     title: '添加记忆素材',
     description:
       '提交记忆素材。text：单条素材文本；messages：多轮对话 [{role, content}]。' +
+      'agent_id：归属标签（如项目名 "EdgeVision" 或 agent 名），项目/来源相关的记忆务必带上，便于按项目检索与批量清理。' +
       '素材一律**异步受理**：立即返回 {event_id, status:"pending"}，后台由 aimemory 内部 LLM 提炼成多条' +
       '自包含的结构化记忆后入库（库内只存提炼产物，不存原文），再用 get_event_status 查询提炼进度。' +
       '提炼失败（LLM 不可用/无有效产出）→ 事件 failed，素材不落库。',
@@ -60,9 +61,11 @@ const tools = [
           },
         },
         metadata: { type: 'object', description: '附加元数据（如 {source: "zcode"}），会透传给提炼出的每条记忆' },
+        agent_id: { type: 'string', description: '归属标签：项目名或 agent 名（如 "EdgeVision"），检索时可用 filters.agent_id 过滤' },
+        run_id: { type: 'string', description: '会话/批次标签（可选，一般不用）' },
       },
     },
-    handler: async ({ text, messages, metadata }, userId) => {
+    handler: async ({ text, messages, metadata, agent_id, run_id }, userId) => {
       const uid = userId;
       // LLM 关闭时写入无法受理：必须是 isError 执行错误（给部署建议与替代动作），而非协议错误
       if (!llm.enabled()) {
@@ -77,6 +80,8 @@ const tools = [
         text: text ? String(text).slice(0, 8000) : undefined,
         messages: Array.isArray(messages) ? messages : undefined,
         metadata,
+        agentId: agent_id ? String(agent_id).slice(0, 100) : null,
+        runId: run_id ? String(run_id).slice(0, 100) : null,
       });
       return { content: [{ type: 'text', text: jsonText(res) }] };
     },

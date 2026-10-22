@@ -66,6 +66,13 @@ const llm = {
   timeoutMs: parseInt(process.env.LLM_TIMEOUT_MS || '30000', 10),
 };
 
+// ===== 敏感内容策略（提炼层执行，2026-10-22）=====
+// 本项目定位内网自托管（LLM/Embedding 本地部署），凭据类事实默认允许按原文入库：
+//   allow （默认）：密码/密钥/token 可作为事实陈述入库——部署方显式选择；
+//   redact        ：提炼时把凭据脱敏为「<类型>已脱敏（存放位置: …）」，公网/多人共享部署建议启用。
+// 只影响 LLM 提炼产物（infer=true）；infer=false 直存不经此策略（写入方自担）。
+const SENSITIVE_MODE = (process.env.SENSITIVE_MODE || 'allow') === 'redact' ? 'redact' : 'allow';
+
 // ===== 记忆写入：冲突消解（mem0 的 ADD/UPDATE/DELETE/NOOP 语义）=====
 // 写入时与已有记忆比对（ADD/UPDATE/DELETE/NOOP），避免同一事实反复入库、新旧取值并存。
 // 关闭（=0）→ 行为等价于纯追加，便于回滚。
@@ -110,4 +117,6 @@ module.exports = {
   // 存量单用户数据归属（迁移脚本定位旧数据用，见 LEGACY_USER_ID 注释）
   legacyUserId: LEGACY_USER_ID,
   legacyUserName: process.env.AIMEMORY_USER_NAME || '我',
+  // 敏感内容策略：allow=凭据可按原文入库（内网自托管默认）；redact=提炼时脱敏（公网/共享部署用）
+  sensitiveMode: SENSITIVE_MODE,
 };
