@@ -91,8 +91,8 @@ const tools = [
     name: 'get_event_status',
     title: '查询素材任务状态',
     description:
-      '查询异步写入任务的状态（add_memory(messages) 返回的 event_id）。status: pending | processing | done | failed；' +
-      'done 含提炼结果（count + 记忆列表），failed 含 error。',
+      '查询异步写入任务的状态（add_memory 返回的 event_id）。返回 {event_id, status, result, error, created_at, updated_at}：' +
+      'status 为 pending | processing | done | failed；done 时 result 含 count 与提炼出的 memories 列表，failed 时 error 说明原因。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -106,7 +106,20 @@ const tools = [
       if (!ev) {
         throw toolError(`event_id ${event_id} 不存在或不属于当前用户——请核对 add_memory 返回的 event_id 后重试。`)
       }
-      return { content: [{ type: 'text', text: jsonText({ event: ev }) }] };
+      // 平铺返回，与 REST GET /v1/event/{id} 同一形状（result 为已解析对象，不是字符串）
+      return {
+        content: [{
+          type: 'text',
+          text: jsonText({
+            event_id: ev.id,
+            status: ev.status,
+            result: ev.result,
+            error: ev.error,
+            created_at: ev.created_at,
+            updated_at: ev.updated_at,
+          }),
+        }],
+      };
     },
   },
 

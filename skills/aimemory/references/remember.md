@@ -34,9 +34,9 @@
    或 `{"messages": [...]}`；可带 `metadata`（如 `{"source": "zcode"}`）透传到每条产物。
 
 3. **轮询到终态（务必，勿谎报）**：`add_memory` 一律异步，返回 `{event_id, status:"pending"}`。
-   用 `get_event_status` 轮询（最多等 ~30s）：
-   - `done`：拿到提炼出的记忆列表，向用户展示/确认已保存；
-   - `failed`：提炼失败（LLM 不可用或无有效产出），**素材未入库**——如实告知，可稍后重试。
+   用 `get_event_status` 轮询（最多等 ~30s），返回 `{event_id, status, result, error}`：
+   - `done`：`result.memories` 即提炼出的记忆列表（含 id/text/agent_id），向用户展示/确认已保存；
+   - `failed`：提炼失败（LLM 不可用或素材无长期价值），**素材未入库**——如实告知，可稍后重试。
 
 ## 约束
 
