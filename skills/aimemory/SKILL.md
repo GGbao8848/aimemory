@@ -4,6 +4,7 @@ description: aimemory 个人记忆库的统一入口——检索/注入历史记
 metadata:
   cli_version: ">=0.2.14"
   category: memory
+  skill_version: "2026-10-23"   # 仓库 skills/aimemory/ 为唯一事实源，旧版副本应以服务端为准更新
 user-invocable: true
 ---
 
@@ -55,3 +56,13 @@ user-invocable: true
 - 敏感凭据按部署策略：内网自托管默认可存原文；服务端 `SENSITIVE_MODE=redact` 时提炼层自动脱敏。
 - 清空全部记忆、签发/吊销 Token 这类整库与凭据操作**不通过 MCP 做**——引导用户到 Web 管理台
   （`http://<内网IP>:18543/admin`）。
+
+## 保持最新（skill_version: 2026-10-23）
+
+本 skill 由 aimemory 服务**同源分发**，仓库 `skills/aimemory/` 是唯一事实源。发现本机副本与上述规则不符
+（如缺「写入有门槛」硬规则、`add_memory` 没有 `agent_id` 参数、还在说"单用户部署"），即为旧版：
+
+- 在线比对：`GET http://<服务IP>:18543/skill/SKILL.md`
+- 重新安装：`GET http://<服务IP>:18543/skill/download`（zip，解压覆盖本机 skills/aimemory/）
+
+MCP 握手下发的 server instructions 也会提示这一获取方式；skill 更新后无需重启服务即可生效（每次 GET 都是最新内容）。

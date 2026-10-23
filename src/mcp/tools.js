@@ -256,9 +256,13 @@ function buildServer() {
     {
       capabilities: { tools: {} },
       instructions:
-        '单用户部署：所有记忆归属同一身份，无需传 user_id。'
-        + 'add_memory 提交素材（异步提炼入库），search_memories 检索长期事实，'
-        + 'get_memories/get_memory/update_memory/delete_memory 管理记忆本体。',
+        'aimemory 个人记忆库（多租户）：记忆归属 Token 持有者，user_id 无需传。本库只收'
+        + '「跨机器、跨项目、长久」的记忆——短期项目细节写该项目自己的 AGENTS.md，入库的项目记忆务必带 agent_id。'
+        + 'add_memory 提交素材（异步受理返回 event_id，须用 get_event_status 轮询到终态，done 后 result.memories 即产物）；'
+        + 'search_memories 检索长期事实（filters 支持 agent_id），get_memories/get_memory/update_memory/delete_memory 管理本体。\n'
+        + '配套 skill（召回/沉淀/管理的详细指引）与本项目服务同源分发：GET /skill/SKILL.md 在线预览、'
+        + 'GET /skill/download 打包下载（把 MCP 地址的 /mcp 换成对应路径即可）。'
+        + '若本机安装副本缺「写入有门槛」或 add_memory 无 agent_id 参数，即为旧版，请以服务端 SKILL.md 为准更新。',
     }
   );
 
