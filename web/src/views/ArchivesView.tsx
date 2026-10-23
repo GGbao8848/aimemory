@@ -1,4 +1,4 @@
-import { ArchiveRestore, RefreshCwIcon, RotateCcw } from 'lucide-react';
+import { ArchiveRestore, RefreshCwIcon, RotateCcw, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { get, post } from '../api/client';
@@ -29,7 +29,10 @@ export default function ArchivesView({ active }: { active: boolean }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [reextracting, setReextracting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [confirmAll, setConfirmAll] = useState(false);
+  // 待确认的删除目标：单条（行内按钮）或批量（勾选），确认后一次性提交
+  const [pendingDelete, setPendingDelete] = useState<{ ids: string[]; memories: number; label: string } | null>(null);
 
   const reload = useCallback((p = page) => {
     get<RawMaterialPage>(`${endpoints.rawMaterials()}?page=${p}&page_size=${PAGE_SIZE}`)
@@ -67,11 +70,25 @@ export default function ArchivesView({ active }: { active: boolean }) {
     }
   };
 
+  const removeMaterials = async (payload: { ids: string[] }, done: () => void) => {
+    setDeleting(true);
+    try {
+      const r = await post<{ accepted: number; deleted: number }>(endpoints.rawMaterialsDelete(), payload);
+      toast.success(`已删除 ${r.accepted} 份素材（连带删除提炼记忆 ${r.deleted} 条，变更历史可追溯）`);
+      done();
+      reload();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <div className={active ? 'flex min-h-0 flex-1 flex-col gap-3 overflow-hidden' : 'hidden'}>
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
         <p className="text-muted-foreground text-sm">
-          共 {data?.total ?? 0} 份素材原文 · 重提 = 删除该素材提炼的旧记忆后按原文重新提炼（直存/手工记忆不受影响）
+          共 {data?.total ?? 0} 份素材原文 · 重提 = 删旧记忆后按原文重新提炼 · 删除 = 素材与其提炼的记忆一并移除（直存/手工记忆不受影响）
         </p>
         <div className="flex items-center gap-2">
           <Button
@@ -81,6 +98,19 @@ export default function ArchivesView({ active }: { active: boolean }) {
             onClick={() => reextract({ ids: [...selected] }, () => setSelected(new Set()))}
           >
             <RotateCcw /> 批量重提{selected.size > 0 ? `（${selected.size}）` : ''}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-destructive"
+            disabled={deleting || selected.size === 0}
+            onClick={() => {
+              const ids = [...selected];
+              const memories = rows.filter((r) => selected.has(r.id)).reduce((n, r) => n + r.memory_count, 0);
+              setPendingDelete({ ids, memories, label: `选中的 ${ids.length} 份素材` });
+            }}
+          >
+            <Trash2 /> 批量删除{selected.size > 0 ? `（${selected.size}）` : ''}
           </Button>
           <Button variant="outline" size="sm" className="text-destructive" disabled={reextracting} onClick={() => setConfirmAll(true)}>
             <ArchiveRestore /> 全库重提
@@ -134,7 +164,7 @@ export default function ArchivesView({ active }: { active: boolean }) {
                   <p className="min-w-0 truncate text-sm" title={text}>{text}</p>
                   {statusBadge(r.status)}
                   <span className="text-muted-foreground text-xs">{r.memory_count} 条</span>
-                  <div className="flex justify-end">
+                  <div className="flex justify-end gap-0.5">
                     <Button
                       variant="ghost"
                       size="icon"
@@ -145,6 +175,17 @@ export default function ArchivesView({ active }: { active: boolean }) {
                       onClick={() => reextract({ ids: [r.id] }, () => {})}
                     >
                       <RotateCcw className="size-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-destructive size-7"
+                      aria-label="删除"
+                      title="删除该素材及其提炼的全部记忆"
+                      disabled={deleting}
+                      onClick={() => setPendingDelete({ ids: [r.id], memories: r.memory_count, label: text.slice(0, 60) })}
+                    >
+                      <Trash2 className="size-3.5" />
                     </Button>
                   </div>
                 </div>
@@ -161,6 +202,34 @@ export default function ArchivesView({ active }: { active: boolean }) {
           <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>下一页</Button>
         </div>
       )}
+
+      <AlertDialog open={pendingDelete !== null} onOpenChange={(o) => !o && setPendingDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除素材及提炼出的记忆？</AlertDialogTitle>
+            <AlertDialogDescription>
+              将删除{pendingDelete?.label ? `「${pendingDelete.label}」` : '所选素材'}
+              {pendingDelete && pendingDelete.ids.length > 1 ? ` 等 ${pendingDelete.ids.length} 份素材` : ''}
+              ，并连带删除由它提炼出的 {pendingDelete?.memories ?? 0} 条记忆；素材原文归档一并移除。
+              删除会留变更历史（可追溯被删文本），但本操作不做重新提炼。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleting}
+              onClick={() => {
+                const ids = pendingDelete?.ids ?? [];
+                setPendingDelete(null);
+                removeMaterials({ ids }, () => setSelected(new Set()));
+              }}
+            >
+              删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={confirmAll} onOpenChange={setConfirmAll}>
         <AlertDialogContent>

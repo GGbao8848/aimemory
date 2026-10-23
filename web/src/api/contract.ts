@@ -24,6 +24,7 @@ export const endpoints = {
   entities: () => path('/api/entities'),
   rawMaterials: () => path('/api/raw-materials'),
   rawReextract: () => path('/api/raw-materials/reextract'),
+  rawMaterialsDelete: () => path('/api/raw-materials/delete'),
   keywords: () => path('/api/keywords'),
   categories: () => path('/api/categories'),
   dashboard: () => path('/api/dashboard'),

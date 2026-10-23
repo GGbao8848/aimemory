@@ -67,6 +67,7 @@ module.exports = {
   cleanupRawMaterials: events.cleanupRawMaterials,
   listRawMaterials: events.listRawMaterials,
   reextractRawMaterials: events.reextractRawMaterials,
+  deleteRawMaterials: events.deleteRawMaterials,
   eventStats: events.eventStats,
   queueBacklog: events.queueBacklog,
   // keys / sessions 域

@@ -79,6 +79,15 @@ apiRouter.post('/raw-materials/reextract', requireAuth, wrap(async (req, res) =>
   res.json(r);
 }));
 
+// 删除素材归档：连同该素材提炼出的记忆一并删除（重提之外的彻底清理；变更历史仍可追溯被删原文）
+apiRouter.post('/raw-materials/delete', requireAuth, wrap(async (req, res) => {
+  const { ids } = req.body || {};
+  if (!Array.isArray(ids) || !ids.length) {
+    return res.status(400).json({ error: '请提供 ids 数组（单条/批量）' });
+  }
+  res.json(repo.deleteRawMaterials({ userId: req.identity.userId, ids: ids.map(String) }));
+}));
+
 // ===== Webhooks（对齐 mem0 平台：记忆变更实时通知外部系统）=====
 
 apiRouter.get('/webhooks', requireAuth, wrap(async (req, res) => {

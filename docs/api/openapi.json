@@ -628,6 +628,14 @@
         ],
         "summary": "重提（ids 批量/单条，或 all=true 全库；删同源旧记忆后按原文重新提炼）"
       }
+    },
+    "/api/raw-materials/delete": {
+      "post": {
+        "tags": [
+          "archive"
+        ],
+        "summary": "删除素材归档（ids 批量/单条；连同该素材提炼出的记忆一并删除，变更历史仍可追溯）"
+      }
     }
   },
   "x-exempt-notes": "HTML 页面（/、/admin、/auth/login、/connect）与 /skill/* 静态资源不属于 REST 契约。"

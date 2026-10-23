@@ -178,6 +178,21 @@ function listRawMaterials(userId, page = 1, pageSize = 20) {
  * 场景：觉得提炼得不好、换了模型想重新提炼。直存/无溯源的记忆永不触碰。
  * @returns {{accepted: number, deleted: number}}
  */
+/** 删除某素材提炼出的全部记忆（留变更历史 + 清向量）；直存/手工记忆无溯源，永不触碰 */
+function deleteDerivedMemories(userId, rawEventId, source) {
+  let deleted = 0;
+  for (const m of db.prepare('SELECT id, text FROM memories WHERE raw_event_id = ? AND user_id = ?').all(rawEventId, userId)) {
+    const row = db.prepare('SELECT rowid AS rid FROM memories WHERE id = ?').get(m.id);
+    db.prepare('DELETE FROM memories WHERE id = ?').run(m.id);
+    if (row) require('../../l2/vec').remove(row.rid);
+    require('../../l2/store').recordOp({
+      userId, memoryId: m.id, op: 'DELETE', beforeText: m.text, candidates: [], source,
+    });
+    deleted += 1;
+  }
+  return deleted;
+}
+
 function reextractRawMaterials({ userId, ids = null }) {
   const targets = ids
     ? ids
@@ -188,16 +203,7 @@ function reextractRawMaterials({ userId, ids = null }) {
     const raw = db.prepare('SELECT * FROM raw_materials WHERE id = ? AND user_id = ?').get(id, userId);
     if (!raw) continue;
     // 1) 删除上次提炼的产物（留变更历史 + 清向量）
-    const derived = db.prepare('SELECT id, text FROM memories WHERE raw_event_id = ? AND user_id = ?').all(id, userId);
-    for (const m of derived) {
-      const row = db.prepare('SELECT rowid AS rid FROM memories WHERE id = ?').get(m.id);
-      db.prepare('DELETE FROM memories WHERE id = ?').run(m.id);
-      if (row) require('../../l2/vec').remove(row.rid);
-      require('../../l2/store').recordOp({
-        userId, memoryId: m.id, op: 'DELETE', beforeText: m.text, candidates: [], source: 'reextract',
-      });
-      deleted += 1;
-    }
+    deleted += deleteDerivedMemories(userId, id, 'reextract');
     // 2) 事件重置为 pending（复用同 id → 溯源链稳定），payload 从归档还原
     let input;
     try { input = JSON.parse(raw.input); } catch { input = raw.input; }
@@ -207,6 +213,26 @@ function reextractRawMaterials({ userId, ids = null }) {
     db.prepare(
       "INSERT INTO events (id, user_id, event_type, status, payload, created_at) VALUES (?, ?, 'add_memory', 'pending', ?, ?)"
     ).run(id, userId, JSON.stringify({ kind: raw.kind, input, metadata, agent_id: raw.agent_id, run_id: raw.run_id }), raw.created_at);
+    accepted += 1;
+  }
+  return { accepted, deleted };
+}
+
+/**
+ * 删除素材归档（连同该素材提炼出的记忆一并删除）——重提之外的彻底清理：
+ * 项目结束/素材写错时用，删完归档与产物都不再存在（变更历史仍可追溯被删原文）。
+ * 只收 ids，不提供 all=true（整库清理走 RAW_ARCHIVE_DAYS 到期清理，避免一键误删全库）。
+ */
+function deleteRawMaterials({ userId, ids }) {
+  if (!Array.isArray(ids) || !ids.length) return { accepted: 0, deleted: 0 };
+  let accepted = 0;
+  let deleted = 0;
+  for (const id of ids) {
+    const raw = db.prepare('SELECT * FROM raw_materials WHERE id = ? AND user_id = ?').get(id, userId);
+    if (!raw) continue;
+    deleted += deleteDerivedMemories(userId, id, 'material_delete');
+    db.prepare('DELETE FROM raw_materials WHERE id = ?').run(id);
+    db.prepare('DELETE FROM events WHERE id = ?').run(id);
     accepted += 1;
   }
   return { accepted, deleted };
@@ -281,6 +307,7 @@ module.exports = {
   archiveMaterial,
   listRawMaterials,
   reextractRawMaterials,
+  deleteRawMaterials,
   eventStats,
   queueBacklog,
 };

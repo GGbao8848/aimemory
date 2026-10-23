@@ -1,6 +1,6 @@
 // 本文件由 `npm run types`（scripts/gen-api-types.js）从 docs/api/openapi.json 生成——勿手改，
 // 与 openapi 不同步会被 test/api-types.test.js 打回。实体接口的语义说明见 docs/前端对接.md。
-// 来源：OpenAPI 3.1.0 · 0.2.0 · 31 条路径
+// 来源：OpenAPI 3.1.0 · 0.2.0 · 32 条路径
 
 // ============ 路由面（自动生成） ============
 
@@ -21,6 +21,7 @@ export type ApiPath =
   | '/api/openapi.json'
   | '/api/ops'
   | '/api/raw-materials'
+  | '/api/raw-materials/delete'
   | '/api/raw-materials/reextract'
   | '/api/settings'
   | '/api/settings/reveal'
@@ -55,6 +56,7 @@ export const API_ROUTES: Readonly<Record<ApiPath, readonly ApiMethod[]>> = {
   '/api/openapi.json': ['GET'],
   '/api/ops': ['GET'],
   '/api/raw-materials': ['GET'],
+  '/api/raw-materials/delete': ['POST'],
   '/api/raw-materials/reextract': ['POST'],
   '/api/settings': ['GET', 'PUT'],
   '/api/settings/reveal': ['POST'],
